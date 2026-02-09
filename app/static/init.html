@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OTbot &mdash; Campaign Initialization</title>
+    <link rel="stylesheet" href="/static/init.css">
+</head>
+<body>
+
+<div class="app-container">
+    <!-- ================================================================ -->
+    <!-- LEFT: Chat Panel (60%)                                           -->
+    <!-- ================================================================ -->
+    <div class="chat-panel">
+        <div class="panel-header">
+            <h2>Campaign Setup</h2>
+            <div class="subtitle" id="round-subtitle">Starting new session&hellip;</div>
+        </div>
+
+        <div class="chat-messages" id="chat-messages">
+            <!-- Messages and slot widgets are dynamically inserted here -->
+        </div>
+
+        <div class="chat-footer">
+            <div class="chat-actions">
+                <div class="progress-section">
+                    <div class="progress-dots" id="progress-dots">
+                        <div class="progress-dot" data-round="1"></div>
+                        <div class="progress-dot" data-round="2"></div>
+                        <div class="progress-dot" data-round="3"></div>
+                        <div class="progress-dot" data-round="4"></div>
+                        <div class="progress-dot" data-round="5"></div>
+                    </div>
+                    <span class="progress-label" id="progress-label">Round 1/5</span>
+                </div>
+                <div class="action-buttons">
+                    <button class="btn btn-secondary" id="btn-back" disabled>
+                        &larr; Back
+                    </button>
+                    <button class="btn btn-primary" id="btn-continue">
+                        Continue &rarr;
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================================================================ -->
+    <!-- RIGHT: Pack Panel (40%)                                          -->
+    <!-- ================================================================ -->
+    <div class="pack-panel">
+        <div class="panel-header">
+            <h2>Injection Pack</h2>
+            <div class="subtitle">Campaign configuration summary</div>
+        </div>
+
+        <div class="pack-cards" id="pack-cards">
+            <!-- GoalSpec -->
+            <div class="pack-card" id="card-goal" data-round="1">
+                <div class="pack-card-header">
+                    <span class="pack-card-title">
+                        <span class="pack-card-status" id="status-goal"></span>
+                        GoalSpec
+                    </span>
+                    <span class="status-badge" id="badge-goal">pending</span>
+                </div>
+                <div class="pack-card-body" id="body-goal">
+                    <div class="kv-row"><span class="kv-key">Objective</span><span class="kv-val">&mdash;</span></div>
+                    <div class="kv-row"><span class="kv-key">KPI</span><span class="kv-val">&mdash;</span></div>
+                    <div class="kv-row"><span class="kv-key">Direction</span><span class="kv-val">&mdash;</span></div>
+                </div>
+            </div>
+
+            <!-- SafetyRulesSpec -->
+            <div class="pack-card" id="card-safety" data-round="2">
+                <div class="pack-card-header">
+                    <span class="pack-card-title">
+                        <span class="pack-card-status" id="status-safety"></span>
+                        SafetyRules
+                    </span>
+                    <span class="status-badge" id="badge-safety">pending</span>
+                </div>
+                <div class="pack-card-body" id="body-safety">
+                    <div class="kv-row"><span class="kv-key">Instruments</span><span class="kv-val">&mdash;</span></div>
+                    <div class="kv-row"><span class="kv-key">Max Temp</span><span class="kv-val">&mdash;</span></div>
+                    <div class="kv-row"><span class="kv-key">Max Volume</span><span class="kv-val">&mdash;</span></div>
+                </div>
+            </div>
+
+            <!-- ProtocolPatternSpec -->
+            <div class="pack-card" id="card-protocol" data-round="3">
+                <div class="pack-card-header">
+                    <span class="pack-card-title">
+                        <span class="pack-card-status" id="status-protocol"></span>
+                        Protocol
+                    </span>
+                    <span class="status-badge" id="badge-protocol">pending</span>
+                </div>
+                <div class="pack-card-body" id="body-protocol">
+                    <div class="kv-row"><span class="kv-key">Pattern</span><span class="kv-val">&mdash;</span></div>
+                </div>
+            </div>
+
+            <!-- ParamSpaceSpec -->
+            <div class="pack-card" id="card-params" data-round="4">
+                <div class="pack-card-header">
+                    <span class="pack-card-title">
+                        <span class="pack-card-status" id="status-params"></span>
+                        ParamSpace
+                    </span>
+                    <span class="status-badge" id="badge-params">pending</span>
+                </div>
+                <div class="pack-card-body" id="body-params">
+                    <div class="kv-row"><span class="kv-key">Strategy</span><span class="kv-val">&mdash;</span></div>
+                    <div class="kv-row"><span class="kv-key">Batch Size</span><span class="kv-val">&mdash;</span></div>
+                    <div class="kv-row"><span class="kv-key">Dimensions</span><span class="kv-val">&mdash;</span></div>
+                </div>
+            </div>
+
+            <!-- HumanGatePolicySpec -->
+            <div class="pack-card" id="card-gate" data-round="5">
+                <div class="pack-card-header">
+                    <span class="pack-card-title">
+                        <span class="pack-card-status" id="status-gate"></span>
+                        HumanGate
+                    </span>
+                    <span class="status-badge" id="badge-gate">pending</span>
+                </div>
+                <div class="pack-card-body" id="body-gate">
+                    <div class="kv-row"><span class="kv-key">Max Rounds</span><span class="kv-val">&mdash;</span></div>
+                    <div class="kv-row"><span class="kv-key">Plateau</span><span class="kv-val">&mdash;</span></div>
+                    <div class="kv-row"><span class="kv-key">Triggers</span><span class="kv-val">&mdash;</span></div>
+                </div>
+            </div>
+
+            <!-- KPIConfigSpec (derived from rounds 1+2) -->
+            <div class="pack-card" id="card-kpi" data-round="1">
+                <div class="pack-card-header">
+                    <span class="pack-card-title">
+                        <span class="pack-card-status" id="status-kpi"></span>
+                        KPIConfig
+                    </span>
+                    <span class="status-badge" id="badge-kpi">pending</span>
+                </div>
+                <div class="pack-card-body" id="body-kpi">
+                    <div class="kv-row"><span class="kv-key">Primary KPI</span><span class="kv-val">&mdash;</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pack Footer -->
+        <div class="pack-footer" id="pack-footer">
+            <div class="launch-section">
+                <div class="diff-summary" id="diff-summary" style="display: none;">
+                    <h4>Configuration Diff</h4>
+                    <div id="diff-rows"></div>
+                </div>
+                <button class="btn btn-success launch-btn" id="btn-launch" disabled>
+                    Start Campaign
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Confirmation Dialog (hidden by default) -->
+<div class="confirmation-overlay" id="confirm-overlay" style="display: none;">
+    <div class="confirmation-dialog">
+        <h3>Launch Campaign?</h3>
+        <ul class="checklist" id="confirm-checklist">
+            <li>All 5 rounds completed</li>
+            <li>Injection pack assembled</li>
+            <li>Cross-object validation passed</li>
+            <li>Campaign will start autonomous execution</li>
+        </ul>
+        <div class="dialog-actions">
+            <button class="btn btn-secondary" id="btn-cancel-launch">Cancel</button>
+            <button class="btn btn-success" id="btn-confirm-launch">Confirm &amp; Launch</button>
+        </div>
+    </div>
+</div>
+
+<script src="/static/init.js"></script>
+
+</body>
+</html>

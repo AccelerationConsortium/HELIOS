@@ -1,0 +1,28 @@
+[project]
+name = "lab-orchestrator-mvp"
+version = "0.1.0"
+description = "MVP laboratory orchestrator with persistent state, trigger routing, isolation, safety gates, locks, and audit trails"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115.0",
+  "uvicorn>=0.30.0",
+  "pydantic>=2.8.0",
+  "pyyaml>=6.0",
+  "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.0",
+  "httpx>=0.27.0",
+  "anyio>=4.0.0",
+  "pytest-anyio>=0.0.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

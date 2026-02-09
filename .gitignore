@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+data/orchestrator.db
+data/orchestrator.db-shm
+data/orchestrator.db-wal
+data/object_store/
+.env
