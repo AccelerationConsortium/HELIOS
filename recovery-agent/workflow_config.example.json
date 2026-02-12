@@ -1,0 +1,144 @@
+{
+  "workflow_name": "advanced_sample_analysis",
+  "description": "Advanced sample preparation and analysis workflow with error recovery",
+  "steps": [
+    {
+      "name": "system_initialization",
+      "phase": "setup",
+      "devices": ["heater_1", "pump_1", "sensor_1"],
+      "dependency": "critical",
+      "can_skip": false,
+      "max_retries": 1,
+      "timeout": 60.0,
+      "preconditions": ["power_available"],
+      "postconditions": ["system_ready", "calibration_valid"]
+    },
+    {
+      "name": "reagent_preparation",
+      "phase": "sample_prep",
+      "devices": ["pump_1"],
+      "dependency": "hard",
+      "can_skip": false,
+      "max_retries": 2,
+      "timeout": 180.0,
+      "preconditions": ["system_ready"],
+      "postconditions": ["reagents_prepared"]
+    },
+    {
+      "name": "sample_heating",
+      "phase": "sample_prep",
+      "devices": ["heater_1"],
+      "dependency": "soft",
+      "can_skip": true,
+      "max_retries": 3,
+      "timeout": 600.0,
+      "preconditions": ["reagents_prepared"],
+      "postconditions": ["sample_heated"]
+    },
+    {
+      "name": "sample_mixing",
+      "phase": "sample_prep",
+      "devices": ["pump_1", "heater_1"],
+      "dependency": "soft",
+      "can_skip": true,
+      "max_retries": 2,
+      "timeout": 120.0,
+      "preconditions": ["sample_heated"],
+      "postconditions": ["sample_mixed"]
+    },
+    {
+      "name": "primary_measurement",
+      "phase": "measurement",
+      "devices": ["sensor_1"],
+      "dependency": "hard",
+      "can_skip": false,
+      "max_retries": 3,
+      "timeout": 300.0,
+      "preconditions": ["sample_mixed"],
+      "postconditions": ["primary_data_collected"]
+    },
+    {
+      "name": "secondary_measurement",
+      "phase": "measurement",
+      "devices": ["sensor_1"],
+      "dependency": "soft",
+      "can_skip": true,
+      "max_retries": 2,
+      "timeout": 180.0,
+      "preconditions": ["primary_data_collected"],
+      "postconditions": ["secondary_data_collected"]
+    },
+    {
+      "name": "data_analysis",
+      "phase": "analysis",
+      "devices": [],
+      "dependency": "soft",
+      "can_skip": true,
+      "max_retries": 1,
+      "timeout": 120.0,
+      "preconditions": ["primary_data_collected"],
+      "postconditions": ["analysis_complete"]
+    },
+    {
+      "name": "result_validation",
+      "phase": "analysis",
+      "devices": [],
+      "dependency": "none",
+      "can_skip": true,
+      "max_retries": 1,
+      "timeout": 60.0,
+      "preconditions": ["analysis_complete"],
+      "postconditions": ["results_validated"]
+    },
+    {
+      "name": "sample_disposal",
+      "phase": "cleanup",
+      "devices": ["pump_1"],
+      "dependency": "none",
+      "can_skip": false,
+      "max_retries": 1,
+      "timeout": 120.0,
+      "preconditions": [],
+      "postconditions": ["sample_disposed"]
+    },
+    {
+      "name": "equipment_cleanup",
+      "phase": "cleanup",
+      "devices": ["heater_1", "pump_1"],
+      "dependency": "none",
+      "can_skip": false,
+      "max_retries": 2,
+      "timeout": 300.0,
+      "preconditions": [],
+      "postconditions": ["equipment_clean", "ready_for_next_run"]
+    }
+  ],
+  "recovery_rules": {
+    "sample_prep_phase": {
+      "on_failure": "skip_to_next_loop",
+      "max_consecutive_failures": 2,
+      "degradation_options": ["reduce_temperature", "skip_mixing"]
+    },
+    "measurement_phase": {
+      "on_failure": "retry_with_degradation",
+      "max_consecutive_failures": 3,
+      "degradation_options": ["reduce_accuracy", "extend_timeout"]
+    },
+    "analysis_phase": {
+      "on_failure": "skip_step",
+      "max_consecutive_failures": 1,
+      "degradation_options": ["simplified_analysis"]
+    }
+  },
+  "loop_control": {
+    "max_loops": 5,
+    "success_criteria": {
+      "min_completed_steps": 7,
+      "required_phases": ["setup", "sample_prep", "measurement"]
+    },
+    "failure_handling": {
+      "consecutive_failures_before_abort": 3,
+      "min_success_rate": 0.6
+    }
+  }
+}

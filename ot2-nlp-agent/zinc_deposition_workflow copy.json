@@ -1,0 +1,1339 @@
+{
+  "workflow_name": "Zinc Electrodeposition Workflow",
+  "version": "1.0",
+  "description": "Complete workflow for zinc electrodeposition with additives - matches 20251110 long script",
+  "phases": [
+    {
+      "phase_name": "setup",
+      "description": "Initialize hardware and load labware (lines 1054-1310 in long script)",
+      "steps": [
+        {
+          "step_id": "setup_001",
+          "action": "robot.load_pipettes",
+          "params": {
+            "small_mount": "left",
+            "large_mount": "right"
+          },
+          "description": "Load pipettes: p300_single on left, p1000_single_gen2 on right (lines 930-931)"
+        },
+        {
+          "step_id": "setup_002",
+          "action": "robot.load_labware",
+          "params": {
+            "slot": 1,
+            "labware": "opentrons_96_tiprack_1000ul"
+          },
+          "description": "Load 1000\u00c2\u00b5L tip rack in slot 1 (line 1129)"
+        },
+        {
+          "step_id": "setup_003",
+          "action": "robot.load_labware",
+          "params": {
+            "slot": 4,
+            "labware": "opentrons_96_tiprack_300ul"
+          },
+          "description": "Load 300\u00c2\u00b5L tip rack in slot 4 (line 1132)"
+        },
+        {
+          "step_id": "setup_004",
+          "action": "robot.load_custom_labware",
+          "params": {
+            "slot": 5,
+            "labware_file": "labware/nis_8_reservoir_25000ul.json",
+            "name": "vial_rack_slot5"
+          },
+          "description": "Load 25mL vial rack in slot 5 (line 1147)"
+        },
+        {
+          "step_id": "setup_005",
+          "action": "robot.load_custom_labware",
+          "params": {
+            "slot": 6,
+            "labware_file": "labware/nis_8_reservoir_25000ul.json",
+            "name": "vial_rack_slot6"
+          },
+          "description": "Load 25mL vial rack in slot 6 (line 1149)"
+        },
+        {
+          "step_id": "setup_006",
+          "action": "robot.load_custom_labware",
+          "params": {
+            "slot": 8,
+            "labware_file": "labware/nis_8_reservoir_25000ul.json",
+            "name": "vial_rack_slot8"
+          },
+          "description": "Load 25mL vial rack in slot 8 (line 1151)"
+        },
+        {
+          "step_id": "setup_007",
+          "action": "robot.load_custom_labware",
+          "params": {
+            "slot": 9,
+            "labware_file": "labware/nis_15_wellplate_3895ul.json",
+            "name": "reactor"
+          },
+          "description": "Load NIS reactor in slot 9 (line 1168)"
+        },
+        {
+          "step_id": "setup_008",
+          "action": "robot.load_custom_labware",
+          "params": {
+            "slot": 10,
+            "labware_file": "labware/nistall_4_tiprack_1ul.json",
+            "name": "electrode_tip_rack"
+          },
+          "description": "Load electrode tip rack in slot 10 (line 1176)"
+        },
+        {
+          "step_id": "setup_009",
+          "action": "robot.load_custom_labware",
+          "params": {
+            "slot": 7,
+            "labware_file": "labware/nistall_4_tiprack_1ul.json",
+            "name": "wash_station"
+          },
+          "description": "Load wash station in slot 7 (line 1178)"
+        },
+        {
+          "step_id": "setup_010",
+          "action": "robot.set_lights",
+          "params": {
+            "on": true
+          },
+          "description": "Turn on robot lights (line 1182)"
+        },
+        {
+          "step_id": "setup_011",
+          "action": "robot.home",
+          "description": "Home the robot (line 1184)"
+        },
+        {
+          "step_id": "setup_012",
+          "action": "ssh.start_stream",
+          "params": {
+            "filename_prefix": "experiment_video"
+          },
+          "description": "Start SSH video stream"
+        }
+      ]
+    },
+    {
+      "phase_name": "flush_tool_transfer_1",
+      "description": "Transfer flush tool to wash station (lines 1312-1381 in long script)",
+      "steps": [
+        {
+          "step_id": "flush_001",
+          "action": "robot.move_to_well",
+          "params": {
+            "labware": "electrode_tip_rack",
+            "well": "B1",
+            "pipette": "p1000_single_gen2",
+            "offset_start": "top",
+            "offset_x": -5.0,
+            "offset_y": 1.0,
+            "offset_z": 99.0,
+            "speed": 200
+          },
+          "description": "Move above flush tool (line 1314)"
+        },
+        {
+          "step_id": "flush_002",
+          "action": "robot.move_to_well",
+          "params": {
+            "labware": "electrode_tip_rack",
+            "well": "B1",
+            "pipette": "p1000_single_gen2",
+            "offset_start": "top",
+            "offset_x": -5.0,
+            "offset_y": 1.0,
+            "offset_z": 16.0,
+            "speed": 200
+          },
+          "description": "Move closer to flush tool (line 1323)"
+        },
+        {
+          "step_id": "flush_003",
+          "action": "robot.move_to_well",
+          "params": {
+            "labware": "electrode_tip_rack",
+            "well": "B1",
+            "pipette": "p1000_single_gen2",
+            "offset_start": "top",
+            "offset_x": -5.0,
+            "offset_y": 1.0,
+            "offset_z": -4.0,
+            "speed": 25
+          },
+          "description": "Move to flush tool pickup position (line 1333)"
+        },
+        {
+          "step_id": "flush_004",
+          "action": "robot.pick_up_tip",
+          "params": {
+            "labware": "electrode_tip_rack",
+            "well": "B1",
+            "pipette": "p1000_single_gen2",
+            "offset_x": -5.0,
+            "offset_y": 1.0,
+            "offset_z": -4.0
+          },
+          "description": "Pick up flush tool (line 1342)"
+        },
+        {
+          "step_id": "flush_005",
+          "action": "robot.move_to_well",
+          "params": {
+            "labware": "wash_station",
+            "well": "B2",
+            "pipette": "p1000_single_gen2",
+            "offset_start": "top",
+            "offset_x": -36.0,
+            "offset_y": 6.0,
+            "offset_z": -75.5,
+            "speed": 200
+          },
+          "description": "Move to wash station B2 (line 1351)"
+        },
+        {
+          "step_id": "flush_006",
+          "action": "robot.move_to_well",
+          "params": {
+            "labware": "wash_station",
+            "well": "B2",
+            "pipette": "p1000_single_gen2",
+            "offset_start": "top",
+            "offset_x": -36.0,
+            "offset_y": 6.0,
+            "offset_z": -95.5,
+            "speed": 25
+          },
+          "description": "Move to flush tool drop position (line 1360)"
+        },
+        {
+          "step_id": "flush_007",
+          "action": "robot.drop_tip",
+          "params": {
+            "pipette": "p1000_single_gen2",
+            "labware": "wash_station",
+            "well": "B2",
+            "offset_start": "top",
+            "offset_x": -36.0,
+            "offset_y": 6.0,
+            "offset_z": -95.5
+          },
+          "description": "Drop flush tool in wash station (line 1369)"
+        }
+      ]
+    },
+    {
+      "phase_name": "preparation",
+      "description": "Prepare sample and wash electrode in parallel (lines 1752-1759 in long script)",
+      "parallel_threads": [
+        {
+          "thread_name": "fill_wash_station_and_electrode_washing",
+          "description": "Fill wash station and run stirrer for electrode washing",
+          "steps": [
+            {
+              "step_id": "prep_wash_002",
+              "action": "wait",
+              "params": {
+                "duration_seconds": 65
+              },
+              "description": "Wait for wash station to fill (line 1386)"
+            },
+            {
+              "step_id": "prep_wash_003",
+              "action": "plc.set_pump_on_timer",
+              "params": {
+                "pump": 4,
+                "duration_ms": 27000
+              },
+              "description": "Run stirrer for electrode washing (line 1463)"
+            },
+            {
+              "step_id": "prep_wash_004",
+              "action": "wait",
+              "params": {
+                "duration_seconds": 30
+              },
+              "description": "Wait for electrode washing (line 1464)"
+            }
+          ]
+        },
+        {
+          "thread_name": "electrode_transfer_and_sample_preparation",
+          "description": "Transfer electrode and prepare sample with additives",
+          "steps": [
+            {
+              "step_id": "prep_electrode_001",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "electrode_tip_rack",
+                "well": "A2",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": -6.3,
+                "offset_y": 1.5,
+                "offset_z": 42.0,
+                "speed": 200
+              },
+              "description": "Move above electrode (line 1390)"
+            },
+            {
+              "step_id": "prep_electrode_002",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "electrode_tip_rack",
+                "well": "A2",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": -6.3,
+                "offset_y": 1.5,
+                "offset_z": 17.0,
+                "speed": 200
+              },
+              "description": "Move closer to electrode (line 1399)"
+            },
+            {
+              "step_id": "prep_electrode_003",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "electrode_tip_rack",
+                "well": "A2",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": -6.3,
+                "offset_y": 1.5,
+                "offset_z": -3.0,
+                "speed": 25
+              },
+              "description": "Move to electrode pickup position"
+            },
+            {
+              "step_id": "prep_electrode_004",
+              "action": "robot.pick_up_tip",
+              "params": {
+                "labware": "electrode_tip_rack",
+                "well": "A2",
+                "pipette": "p1000_single_gen2",
+                "offset_x": -6.3,
+                "offset_y": 1.5,
+                "offset_z": -3.0
+              },
+              "description": "Pick up electrode"
+            },
+            {
+              "step_id": "prep_electrode_005",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "A1",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": 27.0,
+                "offset_y": -0.5,
+                "offset_z": -47.5,
+                "speed": 200
+              },
+              "description": "Move to wash station A1"
+            },
+              {
+              "step_id": "prep_electrode_006",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "A1",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": 27.0,
+                "offset_y": -0.5,
+                "offset_z": -67.5,
+                "speed": 25
+              },
+              "description": "Move to wash station A1"
+            },
+            {
+              "step_id": "prep_electrode_007",
+              "action": "robot.drop_tip",
+              "params": {
+                "pipette": "p1000_single_gen2",
+                "labware": "wash_station",
+                "well": "A1",
+                "offset_start": "top",
+                "offset_x": 27.0,
+                "offset_y": -0.5,
+                "offset_z": -67.5
+              },
+              "description": "Drop electrode in wash station (line 1442)"
+            },
+            {
+              "step_id": "prep_electrode_008",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "A1",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": 27.0,
+                "offset_y": -0.5,
+                "offset_z": 80.0,
+                "speed": 200
+              },
+              "description": "Move up from wash station (line 1451)"
+            },
+            {
+              "step_id": "prep_nimo_001",
+              "action": "sample.prepare_from_csv",
+              "params": {
+                "proposal_file": "data/nimo/additive_proposal.csv"
+              },
+              "description": "Inject NIMO additives from CSV proposal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "phase_name": "electrodeposition",
+      "description": "Move electrode to reactor and run squidstat experiment (lines 1761-2050 in long script)",
+      "steps": [
+        {
+          "step_id": "electro_001",
+          "action": "robot.move_to_well",
+          "params": {
+            "labware": "wash_station",
+            "well": "A1",
+            "pipette": "p1000_single_gen2",
+            "offset_start": "top",
+            "offset_x": 27.0,
+            "offset_y": -0.5,
+            "offset_z": 65.0,
+            "speed": 200
+          },
+          "description": "Move above electrode in wash station (line 1763)"
+        },
+        {
+          "step_id": "electro_002",
+          "action": "robot.move_to_well",
+          "params": {
+            "labware": "wash_station",
+            "well": "A1",
+            "pipette": "p1000_single_gen2",
+            "offset_start": "top",
+            "offset_x": 27.0,
+            "offset_y": -0.5,
+            "offset_z": 42.5,
+            "speed": 200
+          },
+          "description": "Move closer to electrode (line 1772)"
+        },
+        {
+          "step_id": "electro_003",
+          "action": "robot.move_to_well",
+          "params": {
+            "labware": "wash_station",
+            "well": "A1",
+            "pipette": "p1000_single_gen2",
+            "offset_start": "top",
+            "offset_x": 27.0,
+            "offset_y": -0.5,
+            "offset_z": 22.5,
+            "speed": 25
+          },
+          "description": "Move to electrode pickup position (line 1781)"
+        },
+        {
+          "step_id": "electro_004",
+          "action": "robot.pick_up_tip",
+          "params": {
+            "labware": "wash_station",
+            "well": "A1",
+            "pipette": "p1000_single_gen2",
+            "offset_x": 27.0,
+            "offset_y": -0.5,
+            "offset_z": 22.5
+          },
+          "description": "Pick up electrode from wash station (line 1790)"
+        },
+        {
+          "step_id": "electro_005",
+          "action": "robot.move_to_well",
+          "params": {
+            "labware": "wash_station",
+            "well": "A1",
+            "pipette": "p1000_single_gen2",
+            "offset_start": "top",
+            "offset_x": 27.0,
+            "offset_y": 60.0,
+            "offset_z": 15.0,
+            "speed": 200
+          },
+          "description": "Move up from wash station (line 1797)"
+        },
+        {
+          "step_id": "electro_006",
+          "action": "robot.move_to_well",
+          "params": {
+            "labware": "reactor",
+            "well": "C5",
+            "pipette": "p1000_single_gen2",
+            "offset_start": "top",
+            "offset_x": -4.5,
+            "offset_y": 1.0,
+            "offset_z": 25.0,
+            "speed": 200
+          },
+          "description": "Move above reactor cell (line 1806) - TODO: parameterize cell number"
+        },
+        {
+          "step_id": "electro_007",
+          "action": "robot.move_to_well",
+          "params": {
+            "labware": "reactor",
+            "well": "C5",
+            "pipette": "p1000_single_gen2",
+            "offset_start": "top",
+            "offset_x": -4.5,
+            "offset_y": 1.0,
+            "offset_z": -27.0,
+            "speed": 25
+          },
+          "description": "Lower electrode into reactor cell (line 1815)"
+        },
+        {
+          "step_id": "electro_007_reset_plot",
+          "action": "squidstat.reset_plot",
+          "params": {
+            "title": "Zinc Deposition"
+          },
+          "description": "Reset live plot for new experiment"
+        },
+        {
+          "step_id": "electro_008",
+          "action": "squidstat.run_experiment",
+          "params": {
+            "experiment_name": "Zinc Deposition",
+            "channel": 0,
+            "num_cycles": 5,
+            "enable_live_plot": true,
+            "show_dc_plots": true,
+            "show_eis_plots": true,
+            "csv_filename": "",
+            "snapshot_folder": "data/snapshots",
+            "current_phase": "dep",
+            "elements": [
+              {
+                "type": "OCV",
+                "duration_s": 30,
+                "sampling_interval_s": 0.5,
+                "description": "Pre-PEIS stabilization"
+              },
+              {
+                "type": "EIS",
+                "freq_start_hz": 10000,
+                "freq_stop_hz": 0.1,
+                "points_per_decade": 5.0,
+                "bias_voltage": 0.0,
+                "amplitude_v": 0.01,
+                "bias_vs_ocp": true,
+                "min_cycles": 1,
+                "description": "Pre-PEIS"
+              },
+              {
+                "type": "OCV",
+                "duration_s": 30,
+                "sampling_interval_s": 0.5,
+                "description": "Post-PEIS stabilization"
+              },
+              {
+                "type": "LOOP",
+                "repeats": 10,
+                "description": "First 10 Deposition/Dissolution Cycles",
+                "elements": [
+                  {
+                    "type": "CP",
+                    "current_a": -0.008,
+                    "duration_s": 90,
+                    "sampling_interval_s": 0.5,
+                    "description": "Deposition"
+                  },
+                  {
+                    "type": "OCV",
+                    "duration_s": 30,
+                    "sampling_interval_s": 0.5,
+                    "description": "Post-Deposition stabilization"
+                  },
+                  {
+                    "type": "CP",
+                    "current_a": 0.008,
+                    "duration_s": 90,
+                    "sampling_interval_s": 0.5,
+                    "max_voltage": 0.0,
+                    "description": "Dissolution"
+                  },
+                  {
+                    "type": "OCV",
+                    "duration_s": 30,
+                    "sampling_interval_s": 0.5,
+                    "description": "Post-Dissolution stabilization"
+                  }
+                ]
+              },
+              {
+                "type": "EIS",
+                "freq_start_hz": 10000,
+                "freq_stop_hz": 0.1,
+                "points_per_decade": 5.0,
+                "bias_voltage": 0.0,
+                "amplitude_v": 0.01,
+                "bias_vs_ocp": true,
+                "min_cycles": 1,
+                "description": "Midpoint PEIS (after 10 cycles)"
+              },
+              {
+                "type": "OCV",
+                "duration_s": 30,
+                "sampling_interval_s": 0.5,
+                "description": "Post-Midpoint EIS stabilization"
+              },
+              {
+                "type": "LOOP",
+                "repeats": 10,
+                "description": "Last 10 Deposition/Dissolution Cycles",
+                "elements": [
+                  {
+                    "type": "CP",
+                    "current_a": -0.008,
+                    "duration_s": 90,
+                    "sampling_interval_s": 0.5,
+                    "description": "Deposition"
+                  },
+                  {
+                    "type": "OCV",
+                    "duration_s": 30,
+                    "sampling_interval_s": 0.5,
+                    "description": "Post-Deposition stabilization"
+                  },
+                  {
+                    "type": "CP",
+                    "current_a": 0.008,
+                    "duration_s": 90,
+                    "sampling_interval_s": 0.5,
+                    "max_voltage": 0.0,
+                    "description": "Dissolution"
+                  },
+                  {
+                    "type": "OCV",
+                    "duration_s": 30,
+                    "sampling_interval_s": 0.5,
+                    "description": "Post-Dissolution stabilization"
+                  }
+                ]
+              },
+              {
+                "type": "EIS",
+                "freq_start_hz": 10000,
+                "freq_stop_hz": 0.1,
+                "points_per_decade": 5.0,
+                "bias_voltage": 0.0,
+                "amplitude_v": 0.01,
+                "bias_vs_ocp": true,
+                "min_cycles": 1,
+                "description": "Post-Cycling PEIS"
+              },
+              {
+                "type": "OCV",
+                "duration_s": 30,
+                "sampling_interval_s": 0.5,
+                "description": "Pre-Final-Deposition stabilization"
+              },
+              {
+                "type": "CP",
+                "current_a": -0.008,
+                "duration_s": 90,
+                "sampling_interval_s": 0.5,
+                "description": "Final Deposition"
+              },
+              {
+                "type": "OCV",
+                "duration_s": 30,
+                "sampling_interval_s": 0.5,
+                "description": "OCV before Final EIS (Dep)"
+              },
+              {
+                "type": "EIS",
+                "freq_start_hz": 10000,
+                "freq_stop_hz": 0.1,
+                "points_per_decade": 5.0,
+                "bias_voltage": 0.0,
+                "amplitude_v": 0.01,
+                "bias_vs_ocp": true,
+                "min_cycles": 1,
+                "description": "Final EIS (Deposition)"
+              },
+              {
+                "type": "OCV",
+                "duration_s": 30,
+                "sampling_interval_s": 0.5,
+                "description": "Pre-Final-Dissolution stabilization"
+              },
+              {
+                "type": "CP",
+                "current_a": 0.008,
+                "duration_s": 90,
+                "sampling_interval_s": 0.5,
+                "max_voltage": 0.0,
+                "description": "Final Dissolution"
+              },
+              {
+                "type": "OCV",
+                "duration_s": 30,
+                "sampling_interval_s": 0.5,
+                "description": "OCV after Final Dissolution"
+              },
+              {
+                "type": "EIS",
+                "freq_start_hz": 10000,
+                "freq_stop_hz": 0.1,
+                "points_per_decade": 5.0,
+                "bias_voltage": 0.0,
+                "amplitude_v": 0.01,
+                "bias_vs_ocp": true,
+                "min_cycles": 1,
+                "description": "Final EIS (Dissolution)"
+              },
+              {
+                "type": "OCV",
+                "duration_s": 30,
+                "sampling_interval_s": 0.5,
+                "description": "Final OCV"
+              }
+            ]
+          },
+          "description": "Run squidstat electrodeposition experiment with live visualization and data logging (lines 1826-1898)"
+        },
+        {
+          "step_id": "electro_009",
+          "action": "squidstat.save_snapshot",
+          "params": {
+            "phase": "dep",
+            "cycle": 1
+          },
+          "description": "Save Nyquist plot snapshot after deposition"
+        },
+        {
+          "step_id": "electro_010",
+          "action": "wait",
+          "params": {
+            "duration_seconds": 5
+          },
+          "description": "Wait for experiment to complete"
+        }
+      ]
+    },
+    {
+      "phase_name": "cleanup",
+      "description": "Clean electrode and reactor after experiment (lines 2772-2916 in long script)",
+      "parallel_threads":[
+        {
+          "thread_name": "electrode_washing2",
+          "description": "Run stirrer and wash electrode (line 2772-2775)",
+          "steps" :[
+            {
+              "step_id": "cleanup_wash_001",
+              "action": "plc.set_pump_on_timer",
+              "params": {
+                "pump": 4,
+                "duration_ms": 27000
+              },
+              "description": "Run stirrer for electrode washing (line 2774)"
+            },
+            {
+              "step_id": "cleanup_wash_002",
+              "action": "wait",
+              "params": {
+                "duration_seconds": 30
+              },
+              "description": "Wait for electrode washing (line 2775)"
+            }
+          ]
+        },
+        {
+          "thread_name": "electrode_and_flush_tool_transfer1",
+          "description": "Transfer electrode and flush tool(line 2777-2867)",
+          "steps":[
+            {
+              "step_id": "cleanup_001",
+              "action": "robot.move_to_well",
+              "params": {
+              "labware": "wash_station",
+              "well": "A1",
+              "pipette": "p1000_single_gen2",
+              "offset_start": "top",
+              "offset_x": 27.0,
+              "offset_y": 60.0,
+              "offset_z": 10.0,
+              "speed": 200
+            },
+            "description": "Move above wash station (line 2779)"
+            },
+            {
+              "step_id": "cleanup_002",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "A1",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": 27.0,
+                "offset_y": -0.5,
+                "offset_z": 10.0,
+                "speed": 200
+              },
+              "description": "Move to wash station A1 (line 2788)"
+            },
+            {
+              "step_id": "cleanup_003",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "A1",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": 27.0,
+                "offset_y": -0.5,
+                "offset_z": -47.5,
+                "speed": 200
+              },
+              "description": "Move closer to electrode (line 2797)"
+            },
+            {
+              "step_id": "cleanup_004",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "A1",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": 27.0,
+                "offset_y": -0.5,
+                "offset_z": -67.5,
+                "speed": 25
+              },
+              "description": "Move to electrode drop position (line 2806)"
+            },
+            {
+              "step_id": "cleanup_005",
+              "action": "robot.drop_tip",
+              "params": {
+                "pipette": "p1000_single_gen2",
+                "labware": "wash_station",
+                "well": "A1",
+                "offset_start": "top",
+                "offset_x": 27.0,
+                "offset_y": -0.5,
+                "offset_z": -67.5
+              },
+              "description": "Drop electrode in wash station (line 2815)"
+            },
+            {
+              "step_id": "cleanup_006",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "B2",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": -36.0,
+                "offset_y": 6.0,
+                "offset_z": 55.0,
+                "speed": 25
+              },
+              "description": "Move UP to flush tool position (line 2825) - HIGH Z to clear electrode"
+            },
+            {
+              "step_id": "cleanup_007",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "B2",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": -36.0,
+                "offset_y": 6.0,
+                "offset_z": -6.0,
+                "speed": 25
+              },
+              "description": "Move down to flush tool level (line 2834)"
+            },
+            {
+              "step_id": "cleanup_008",
+              "action": "robot.pick_up_tip",
+              "params": {
+                "pipette": "p1000_single_gen2",
+                "labware": "wash_station",
+                "well": "B2",
+                "offset_start": "top",
+                "offset_x": -36.0,
+                "offset_y": 6.0,
+                "offset_z": -6.0
+              },
+              "description": "Pick up flush tool (line 2843)"
+            },
+            {
+              "step_id": "cleanup_009",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "reactor",
+                "well": "C5",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": -3.25,
+                "offset_y": 0.5,
+                "offset_z": 30.0,
+                "speed": 200
+              },
+              "description": "Move flush tool above reactor (line 2850)"
+            },
+            {
+              "step_id": "cleanup_010",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "reactor",
+                "well": "C5",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": -3.25,
+                "offset_y": 0.5,
+                "offset_z": -49.5,
+                "speed": 25
+              },
+              "description": "Lower flush tool into reactor (line 2859) - KEEP ATTACHED, don't drop!"
+            }
+          ]
+        }
+      ]
+    }, 
+    {
+      "phase_name": "cleanup_reactor",
+      "description": "Add water and remove waste(line 2869-2881)",
+      "steps": [
+        {
+          "step_id": "cleanup_reactor_001",
+          "action": "plc.dispense_ml",
+          "params": {
+            "pump": 3,
+            "volume_ml": 10.0
+          },
+          "description": "Remove waste from reactor (line 2871)"
+        },
+        {
+          "step_id": "cleanup_reactor_002",
+          "action": "wait",
+          "params": {
+            "duration_seconds": 9
+          },
+          "description": "Wait for waste removal (line 2872)"
+        },
+        {
+          "step_id": "cleanup_reactor_003",
+          "action": "plc.dispense_ml",
+          "params": {
+            "pump": 1,
+            "volume_ml": 6.0
+          },
+          "description": "Add water to reactor (line 2873)"
+        },
+        {
+          "step_id": "cleanup_reactor_004",
+          "action": "wait",
+          "params": {
+            "duration_seconds": 7
+          },
+          "description": "Wait for water addition (line 2875)"
+        },
+        {
+          "step_id": "cleanup_reactor_005",
+          "action": "plc.dispense_ml",
+          "params": {
+            "pump": 3,
+            "volume_ml": 10.0
+          },
+          "description": "Remove water from reactor (line 2876)"
+        },
+        {
+          "step_id": "cleanup_reactor_006",
+          "action": "wait",
+          "params": {
+            "duration_seconds": 9
+          },
+          "description": "Wait for water removal (line 2877)"
+        },
+        {
+          "step_id": "cleanup_reactor_007",
+          "action": "plc.dispense_ml",
+          "params": {
+            "pump": 1,
+            "volume_ml": 6.0
+          },
+          "description": "Add water to reactor again (line 2878)"
+        },
+        {
+          "step_id": "cleanup_reactor_008",
+          "action": "wait",
+          "params": {
+            "duration_seconds": 7
+          },
+          "description": "Wait for water addition (line 2879)"
+        },
+        {
+          "step_id": "cleanup_reactor_009",
+          "action": "plc.dispense_ml",
+          "params": {
+            "pump": 3,
+            "volume_ml": 10.0
+          },
+          "description": "Remove water from reactor final (line 2880)"
+        },
+        {
+          "step_id": "cleanup_reactor_010",
+          "action": "wait",
+          "params": {
+            "duration_seconds": 9
+          },
+          "description": "Wait for final water removal (line 2881)"
+        }
+      ]
+    },
+    {
+      "phase_name": "electrode washing and transfer flush tool",
+      "description": "Run stirrer and transfer flush tool (line 2883-2934)",
+      "parallel_threads":[
+        {        
+          "thread_name": "Run stirrer",
+          "description": "Run stirrer (line 2883-2886)",
+          "steps": [
+            {
+              "step_id": "cleanup_014",
+              "action": "plc.set_pump_on_timer",
+              "params": {
+                "pump": 4,
+                "duration_ms": 13500
+              },
+              "description": "Run stirrer for final wash station cleaning (line 2938)"
+            },
+            {
+              "step_id": "cleanup_015",
+              "action": "wait",
+              "params": {
+                "duration_seconds": 15
+              },
+              "description": "Wait for wash station cleaning (line 2939)"
+            }
+          ]
+        },
+        { 
+          "thread_name": "Transfer flush tool",
+          "description": "Transfer flush tool (line 2888-2934)",
+          "steps":[
+            {
+              "step_id": "cleanup_011",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "B2",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": -36.0,
+                "offset_y": 6.0,
+                "offset_z": -75.5,
+                "speed": 200
+              },
+              "description": "Move flush tool (still attached) to wash station B2 approach (line 2889)"
+            },
+            {
+              "step_id": "cleanup_012",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "B2",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": -36.0,
+                "offset_y": 6.0,
+                "offset_z": -95.5,
+                "speed": 25
+              },
+              "description": "Lower flush tool to drop position in wash station B2 (line 2898)"
+            },
+            {
+              "step_id": "cleanup_013",
+              "action": "robot.drop_tip",
+              "params": {
+                "pipette": "p1000_single_gen2",
+                "labware": "wash_station",
+                "well": "B2",
+                "offset_start": "top",
+                "offset_x": -36.0,
+                "offset_y": 6.0,
+                "offset_z": -95.5
+              },
+              "description": "Drop flush tool back in wash station B2 (line 2907)"
+            },
+            {
+              "step_id": "cleanup_016",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "A1",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": 27.0,
+                "offset_y": -0.5,
+                "offset_z": 55.0,
+                "speed": 25
+              },
+              "description": "Move above electrode in wash station A1 (line 2917)"
+            },
+            {
+              "step_id": "cleanup_017",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "A1",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": 27.0,
+                "offset_y": -0.5,
+                "offset_z": 22.5,
+                "speed": 25
+              },
+              "description": "Move closer to electrode (line 2926)"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "phase_name":"clean_wash_station and transfer tools ",
+      "description":"clean wash station and transfer tools 2 (line 2936-3005)",
+      "parallel_threads": [
+        {
+          "thread_name": "cleanup_wash_station", 
+          "description": "run stirrer and clean wash station (line 2936-2941)",
+          "steps":[
+            {
+              "step_id": "",
+              "action": "plc.set_pump_on_timer",
+              "params": {
+                "pump": 4,
+                "duration_ms": 9000
+              },
+              "description": "Run stirrer for electrode washing (line 2938)"
+            },
+            {
+              "step_id": "",
+              "action": "wait",
+              "params": {
+                "duration_seconds": 10
+              },
+              "description": "Wait for electrode washing (line 2939)"
+            },
+            {
+              "step_id": "",
+              "action": "plc.dispense_ml",
+              "params": {
+                "pump": 3,
+                "volume_ml": 120.0
+              },
+              "description": "Add water to reactor (line 2940)"
+            },
+            {
+              "step_id": "",
+              "action": "wait",
+              "params": {
+                "duration_seconds": 80
+              },
+              "description": "Wait for wash station to fill (line 2941)"
+            }
+          ]
+        },
+        {
+          "thread_name": "cleanup_tools",
+          "description": "transfer electrode (line 2943-3005)",
+          "steps": [
+            {
+              "step_id": "cleanup_018",
+              "action": "robot.pick_up_tip",
+              "params": {
+                "pipette": "p1000_single_gen2",
+                "labware": "wash_station",
+                "well": "A1",
+                "offset_x": 27.0,
+                "offset_y": -0.5,
+                "offset_z": 22.5
+              },
+              "description": "Pick up electrode from wash station A1 (line 2944)"
+            },
+            {
+              "step_id": "cleanup_019",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "electrode_tip_rack",
+                "well": "A2",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": -6.3,
+                "offset_y": 1.5,
+                "offset_z": -72.0,
+                "speed": 200
+              },
+              "description": "Move electrode to slot 10 position A2 approach (line 2951)"
+            },
+            {
+              "step_id": "cleanup_020",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "electrode_tip_rack",
+                "well": "A2",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": -6.3,
+                "offset_y": 1.5,
+                "offset_z": -92.0,
+                "speed": 25
+              },
+              "description": "Lower electrode to drop position in slot 10 A2 (line 2960)"
+            },
+            {
+              "step_id": "cleanup_021",
+              "action": "robot.drop_tip",
+              "params": {
+                "pipette": "p1000_single_gen2",
+                "labware": "electrode_tip_rack",
+                "well": "A2",
+                "offset_start": "top",
+                "offset_x": -6.3,
+                "offset_y": 1.5,
+                "offset_z": -92.0
+              },
+              "description": "Drop electrode back in slot 10 position A2 (line 2969)"
+            },
+            {
+              "step_id": "cleanup_022",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "B2",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": -36.0,
+                "offset_y": 6.0,
+                "offset_z": 40.0,
+                "speed": 200
+              },
+              "description": "Move above flush tool in wash station B2 (line 2979)"
+            },
+            {
+              "step_id": "cleanup_023",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "B2",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": -36.0,
+                "offset_y": 6.0,
+                "offset_z": 14.0,
+                "speed": 200
+              },
+              "description": "Move closer to flush tool (line 2988)"
+            },
+            {
+              "step_id": "cleanup_024",
+              "action": "robot.move_to_well",
+              "params": {
+                "labware": "wash_station",
+                "well": "B2",
+                "pipette": "p1000_single_gen2",
+                "offset_start": "top",
+                "offset_x": -36.0,
+                "offset_y": 6.0,
+                "offset_z": -6.0,
+                "speed": 25
+              },
+              "description": "Move to flush tool pickup position (line 2997)"
+            }
+          ]
+        }
+      ]
+    },
+    { "phase_name": "",
+      "description": "",
+      "steps": [
+        {
+          "step_id": "cleanup_025",
+          "action": "robot.pick_up_tip",
+          "params": {
+            "pipette": "p1000_single_gen2",
+            "labware": "wash_station",
+            "well": "B2",
+            "offset_x": -36.0,
+            "offset_y": 6.0,
+            "offset_z": -6.0
+          },
+          "description": "Pick up flush tool from wash station B2 (line 3008)"
+        },
+        {
+          "step_id": "cleanup_026",
+          "action": "robot.move_to_well",
+          "params": {
+            "labware": "electrode_tip_rack",
+            "well": "B1",
+            "pipette": "p1000_single_gen2",
+            "offset_start": "top",
+            "offset_x": -5.0,
+            "offset_y": 1.0,
+            "offset_z": -72.0,
+            "speed": 200
+          },
+          "description": "Move flush tool to slot 10 position B1 approach (line 3015)"
+        },
+        {
+          "step_id": "cleanup_027",
+          "action": "robot.move_to_well",
+          "params": {
+            "labware": "electrode_tip_rack",
+            "well": "B1",
+            "pipette": "p1000_single_gen2",
+            "offset_start": "top",
+            "offset_x": -5.0,
+            "offset_y": 1.0,
+            "offset_z": -92.0,
+            "speed": 25
+          },
+          "description": "Lower flush tool to drop position in slot 10 B1 (line 3024)"
+        },
+        {
+          "step_id": "cleanup_028",
+          "action": "robot.drop_tip",
+          "params": {
+            "pipette": "p1000_single_gen2",
+            "labware": "electrode_tip_rack",
+            "well": "B1",
+            "offset_start": "top",
+            "offset_x": -5.0,
+            "offset_y": 1.0,
+            "offset_z": -92.0
+          },
+          "description": "Drop flush tool back in slot 10 position B1 (line 3033)"
+        },
+        {
+          "step_id": "cleanup_029",
+          "action": "robot.home",
+          "description": "Home robot to safe position (line 3069)"
+        }
+      ]
+    }
+  ]
+}

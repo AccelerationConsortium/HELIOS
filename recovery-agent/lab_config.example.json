@@ -1,0 +1,57 @@
+{
+  "devices": [
+    {
+      "name": "heater_1",
+      "type": "heater",
+      "brand": "IKA",
+      "model": "RCT Basic",
+      "connection_type": "serial",
+      "connection_params": {
+        "port": "/dev/ttyUSB0",
+        "baudrate": 9600
+      },
+      "safety_limits": {
+        "max_temperature": 250.0,
+        "min_temperature": -20.0
+      },
+      "calibration": {
+        "offset": 0.5,
+        "last_calibrated": "2024-01-15"
+      },
+      "enabled": true,
+      "monitoring_interval": 1.0,
+      "timeout": 5.0
+    },
+    {
+      "name": "heater_2",
+      "type": "heater",
+      "brand": "ThermoFisher",
+      "connection_type": "network",
+      "connection_params": {
+        "host": "192.168.1.101",
+        "port": 5025
+      },
+      "safety_limits": {
+        "max_temperature": 150.0,
+        "min_temperature": 0.0
+      },
+      "enabled": true,
+      "monitoring_interval": 2.0,
+      "timeout": 10.0
+    }
+  ],
+  "global_settings": {
+    "timezone": "UTC",
+    "units": "celsius",
+    "emergency_contact": "lab_manager@company.com"
+  },
+  "recovery_enabled": true,
+  "max_retry_attempts": 3,
+  "emergency_stop_on_critical": true,
+  "health_check_interval": 30,
+  "log_level": "INFO",
+  "global_safety_limits": {
+    "max_temperature_all_devices": 200.0,
+    "power_outage_protection": true
+  }
+}

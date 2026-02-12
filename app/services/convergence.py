@@ -43,13 +43,17 @@ class ConvergenceStatus:
 
 @dataclass(frozen=True)
 class ConvergenceConfig:
-    """Configuration for convergence detection."""
+    """Configuration for convergence detection.
 
-    window_size: int = 5  # rolling window size
-    plateau_threshold: float = 0.01  # improvement rate below this = plateau
+    Updated defaults (2026-02-11): More conservative to avoid premature stopping
+    when optimization targets are not yet met.
+    """
+
+    window_size: int = 8  # rolling window size (increased from 5)
+    plateau_threshold: float = 0.005  # improvement rate below this = plateau (stricter: 0.5% from 1%)
     divergence_threshold: float = -0.05  # negative improvement below this = diverging
-    min_observations: int = 5  # minimum data points needed
-    variance_collapse_ratio: float = 0.3  # var(recent) / var(all) below this = converged
+    min_observations: int = 10  # minimum data points needed (increased from 5)
+    variance_collapse_ratio: float = 0.15  # var(recent) / var(all) below this = converged (stricter: 15% from 30%)
 
 
 # ---------------------------------------------------------------------------

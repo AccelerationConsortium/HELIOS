@@ -1,0 +1,14 @@
+# Core dependencies
+pydantic>=2.0.0
+
+# Hardware communication (required for real devices)
+pyserial>=3.5
+
+# Optional dependencies for development
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+
+# Optional dependencies for specific hardware
+# For USB devices: pyusb>=1.2.1
+# For Modbus devices: pymodbus>=3.0.0
+# For specific lab equipment protocols

@@ -1,0 +1,317 @@
+# Safety Configuration for Disaster Recovery Agent
+# This file defines chemical safety profiles, constraints, and emergency procedures
+# for integration with external safety agents.
+
+# =============================================================================
+# Safety Gate Configuration
+# =============================================================================
+safety_gate:
+  # Default behavior when no safety agent is configured
+  default_decision: "allow"
+
+  # Whether to fail-open (allow) or fail-closed (deny) on assessment errors
+  fail_mode: "open"  # "open" or "closed"
+
+  # Timeout for safety assessment (milliseconds)
+  assessment_timeout_ms: 30000
+
+  # Whether to cache safety assessments
+  enable_cache: true
+  cache_ttl_seconds: 3600
+
+# =============================================================================
+# Chemical Safety Event Definitions
+# =============================================================================
+# These events trigger SafetyAgent veto power - RecoveryAgent can only
+# choose SAFE_SHUTDOWN, EVACUATE, or ASK_HUMAN.
+chemical_safety_events:
+  # Spill/leak events
+  - event_type: "spill_detected"
+    severity: "high"
+    required_action: "safe_shutdown"
+    description: "Chemical spill detected by sensors"
+
+  - event_type: "leak_detected"
+    severity: "high"
+    required_action: "safe_shutdown"
+    description: "Leak detected in system"
+
+  # Exposure events
+  - event_type: "exposure_detected"
+    severity: "critical"
+    required_action: "evacuate"
+    description: "Personnel exposure to hazardous material"
+
+  # Fire/thermal events
+  - event_type: "fire_detected"
+    severity: "critical"
+    required_action: "evacuate"
+    description: "Fire detected"
+
+  - event_type: "smoke_detected"
+    severity: "critical"
+    required_action: "evacuate"
+    description: "Smoke detected"
+
+  - event_type: "thermal_runaway"
+    severity: "critical"
+    required_action: "safe_shutdown"
+    description: "Uncontrolled temperature increase >10°C/min"
+
+  # Chemical compatibility events
+  - event_type: "incompatible_mix"
+    severity: "critical"
+    required_action: "safe_shutdown"
+    description: "Incompatible chemicals may have mixed"
+
+  # Pressure events
+  - event_type: "pressure_buildup"
+    severity: "high"
+    required_action: "safe_shutdown"
+    description: "Unexpected pressure increase detected"
+
+  - event_type: "off_gas_detected"
+    severity: "critical"
+    required_action: "evacuate"
+    description: "Unexpected gas release detected"
+
+# =============================================================================
+# Default Safety Thresholds
+# =============================================================================
+# These are used when no SafetyPacket is available from SafetyAgent
+default_thresholds:
+  temperature:
+    warning_offset: 10  # °C above target
+    critical_offset: 20  # °C above target
+    absolute_max: 200  # °C - never exceed
+    rate_limit: 5  # °C/min max heating rate
+
+  pressure:
+    warning_threshold: 2.0  # bar
+    critical_threshold: 3.0  # bar
+    absolute_max: 5.0  # bar
+
+  flow_rate:
+    warning_deviation: 0.2  # 20% deviation from target
+    critical_deviation: 0.5  # 50% deviation from target
+
+# =============================================================================
+# GHS Hazard Code Mappings
+# =============================================================================
+# Maps GHS codes to constraint implications
+ghs_constraint_mappings:
+  # Flammable liquids
+  H225:  # Highly flammable liquid and vapor
+    constraints:
+      - type: "no_ignition_source"
+        mandatory: true
+      - type: "ventilation_required"
+        mandatory: true
+      - type: "temperature_limit"
+        value: 80
+        unit: "°C"
+        rationale: "Stay below typical flash points"
+
+  H226:  # Flammable liquid and vapor
+    constraints:
+      - type: "no_ignition_source"
+        mandatory: true
+      - type: "ventilation_required"
+        mandatory: true
+
+  # Oxidizers
+  H271:  # May cause fire or explosion; strong oxidizer
+    constraints:
+      - type: "no_heating"
+        mandatory: true
+        rationale: "Strong oxidizer - avoid heat sources"
+      - type: "incompatibility"
+        description: "Keep away from combustibles and reducing agents"
+
+  H272:  # May intensify fire; oxidizer
+    constraints:
+      - type: "incompatibility"
+        description: "Keep away from combustibles"
+
+  # Corrosives
+  H314:  # Causes severe skin burns and eye damage
+    constraints:
+      - type: "ppe_required"
+        description: "Chemical-resistant gloves and face shield required"
+
+  # Toxic
+  H330:  # Fatal if inhaled
+    constraints:
+      - type: "ventilation_required"
+        mandatory: true
+      - type: "supervision_required"
+        mandatory: true
+        rationale: "Highly toxic - requires constant supervision"
+
+  H331:  # Toxic if inhaled
+    constraints:
+      - type: "ventilation_required"
+        mandatory: true
+
+  # Reactive
+  H260:  # In contact with water releases flammable gases
+    constraints:
+      - type: "no_water"
+        mandatory: true
+        rationale: "Water-reactive material"
+
+  H261:  # In contact with water releases flammable gases
+    constraints:
+      - type: "no_water"
+        mandatory: true
+
+# =============================================================================
+# Emergency Playbook Templates
+# =============================================================================
+emergency_playbook_templates:
+  skin_contact:
+    severity: "high"
+    immediate_actions:
+      - "Remove contaminated clothing immediately"
+      - "Flush affected skin with water for at least 15 minutes"
+      - "Do not use solvents or other chemicals to clean skin"
+    follow_up_actions:
+      - "Seek medical attention if irritation persists"
+      - "Report incident to safety officer"
+    requires_evacuation: false
+    requires_human: true
+    recovery_possible: true
+
+  eye_contact:
+    severity: "critical"
+    immediate_actions:
+      - "Immediately flush eyes with water for at least 15 minutes"
+      - "Hold eyelids open during flushing"
+      - "Remove contact lenses if present and easy to do"
+    follow_up_actions:
+      - "Seek immediate medical attention"
+      - "Report incident to safety officer"
+    requires_evacuation: false
+    requires_human: true
+    recovery_possible: false
+
+  small_spill:
+    severity: "medium"
+    immediate_actions:
+      - "Alert personnel in immediate area"
+      - "Don appropriate PPE before cleanup"
+      - "Contain spill with absorbent material"
+      - "Avoid direct contact with spilled material"
+    follow_up_actions:
+      - "Dispose of contaminated materials as hazardous waste"
+      - "Decontaminate affected area"
+      - "Document incident"
+    requires_evacuation: false
+    requires_human: true
+    recovery_possible: true
+
+  large_spill:
+    severity: "high"
+    immediate_actions:
+      - "Evacuate non-essential personnel from area"
+      - "Activate emergency ventilation if available"
+      - "Contact safety officer or emergency response"
+      - "Do not attempt cleanup without proper training"
+    follow_up_actions:
+      - "Follow facility emergency procedures"
+      - "Document incident thoroughly"
+    requires_evacuation: true
+    requires_human: true
+    recovery_possible: false
+
+  fire:
+    severity: "critical"
+    immediate_actions:
+      - "Activate fire alarm"
+      - "Evacuate the area immediately"
+      - "Close doors but do not lock"
+      - "Use appropriate fire extinguisher only if trained and safe"
+      - "Call emergency services"
+    follow_up_actions:
+      - "Do not re-enter until cleared by emergency responders"
+      - "Account for all personnel"
+    requires_evacuation: true
+    requires_human: true
+    recovery_possible: false
+
+  overheat:
+    severity: "high"
+    immediate_actions:
+      - "Turn off all heating immediately"
+      - "Do not add any materials to the system"
+      - "Activate cooling if available and safe"
+      - "Monitor for thermal runaway"
+    follow_up_actions:
+      - "Wait for temperature to stabilize"
+      - "Investigate cause before resuming"
+    requires_evacuation: false
+    requires_human: true
+    recovery_possible: true
+
+# =============================================================================
+# PPE Standards Reference
+# =============================================================================
+ppe_standards:
+  eye_face:
+    - standard: "ANSI Z87.1"
+      description: "American standard for eye and face protection"
+      codes:
+        D3: "Splash/droplet protection"
+        D4: "Dust protection"
+        D5: "Fine dust protection"
+        Z87+: "High impact protection"
+    - standard: "EN 166"
+      description: "European standard for eye protection"
+
+  hand:
+    - standard: "EN 374-1"
+      description: "European standard for chemical protective gloves"
+      types:
+        A: "≥6 chemicals, ≥30 min breakthrough"
+        B: "≥3 chemicals, ≥30 min breakthrough"
+        C: "≥1 chemical, ≥10 min breakthrough"
+    - standard: "ASTM F739"
+      description: "Standard test method for permeation"
+
+  respiratory:
+    - standard: "NIOSH 42 CFR Part 84"
+      description: "US respirator certification"
+      filters:
+        N95: "Non-oil particulates, 95% efficiency"
+        N99: "Non-oil particulates, 99% efficiency"
+        N100: "Non-oil particulates, 99.97% efficiency"
+        P100: "Oil-proof, 99.97% efficiency"
+        OV: "Organic vapor cartridge"
+        AG: "Acid gas cartridge"
+
+  body:
+    - standard: "ISO 16602"
+      description: "Chemical protective clothing"
+      types:
+        3: "Liquid tight"
+        4: "Spray tight"
+        5: "Particle tight"
+        6: "Limited splash"
+
+# =============================================================================
+# Integration Settings
+# =============================================================================
+integration:
+  # Safety SDL Agent adapter settings (for Phase 2)
+  safety_sdl_agent:
+    enabled: false
+    # endpoint: "http://localhost:8000/safety"
+    # timeout_ms: 60000
+    # retry_count: 3
+
+  # Logging settings
+  logging:
+    log_safety_decisions: true
+    log_constraint_violations: true
+    log_emergency_triggers: true
+    audit_trail_enabled: true

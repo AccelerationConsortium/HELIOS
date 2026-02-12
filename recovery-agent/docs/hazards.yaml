@@ -1,0 +1,42 @@
+version: 1
+
+# Agent-first taxonomy: map observations -> hazards -> constraints.
+# Intended to be loaded by policy code.
+
+signals:
+  current_temp: {unit: C}
+  target_temp: {unit: C}
+  max_temp: {unit: C}
+  heater_power: {unit: "0..1"}
+  sensor_health: {enum: [ok, degraded, bad, unknown]}
+  device_heartbeat: {enum: [ok, missing, unknown]}
+
+hazards:
+  thermal_runaway:
+    description: temperature rising beyond safe limits
+    required_signals: [current_temp, max_temp]
+    default_risk: high
+
+  thermal_overshoot:
+    description: current_temp above target_temp by delta
+    required_signals: [current_temp, target_temp]
+    default_risk: medium
+
+  sensor_untrusted:
+    description: sensor health degraded/bad/unknown or readings invalid
+    required_signals: [sensor_health]
+    default_risk: high
+
+  comms_unreliable:
+    description: device heartbeat missing or timeouts observed
+    required_signals: [device_heartbeat]
+    default_risk: medium
+
+constraints:
+  # Canonical constraints the executor/policy should be able to evaluate.
+  temp_below_max:
+    requires: [current_temp, max_temp]
+  sensor_trust_required:
+    requires: [sensor_health]
+  heartbeat_required:
+    requires: [device_heartbeat]

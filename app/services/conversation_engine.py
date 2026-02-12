@@ -81,11 +81,13 @@ _KPI_BY_OBJECTIVE: dict[str, list[str]] = {
     ],
 }
 
-# Instruments known to the system
-_AVAILABLE_INSTRUMENTS = ["ot2", "plc", "relay", "squidstat", "furnace", "spin_coater"]
+# Instruments known to the system — dynamic from PrimitivesRegistry.
+# The fallback list is used when the registry is empty (e.g. in tests without
+# skill files on disk).
+_FALLBACK_INSTRUMENTS = ["ot2", "plc", "relay", "squidstat", "furnace", "spin_coater"]
 
-# KPI → required instrument mapping
-_KPI_INSTRUMENT_MAP: dict[str, str] = {
+# KPI → required instrument mapping (fallback, see _get_kpi_instrument_map)
+_FALLBACK_KPI_INSTRUMENT_MAP: dict[str, str] = {
     "overpotential_mv": "squidstat",
     "current_density_ma_cm2": "squidstat",
     "coulombic_efficiency": "squidstat",
@@ -95,6 +97,34 @@ _KPI_INSTRUMENT_MAP: dict[str, str] = {
     "volume_accuracy_pct": "ot2",
     "temp_accuracy_c": "furnace",
 }
+
+
+def _get_available_instruments() -> list[str]:
+    """Return instrument short names from the PrimitivesRegistry.
+
+    Falls back to ``_FALLBACK_INSTRUMENTS`` when the registry is empty
+    (e.g. no skill files are present during unit tests).
+    """
+    try:
+        from app.services.primitives_registry import get_registry
+        names = get_registry().list_instrument_short_names()
+        if names:
+            # Merge with fallback so that instruments without skill files
+            # (e.g. furnace, spin_coater) still appear.
+            merged = list(dict.fromkeys(names + _FALLBACK_INSTRUMENTS))
+            return merged
+    except Exception:
+        pass
+    return list(_FALLBACK_INSTRUMENTS)
+
+
+def _get_kpi_instrument_map() -> dict[str, str]:
+    """Return KPI → instrument short-name mapping.
+
+    Falls back to ``_FALLBACK_KPI_INSTRUMENT_MAP`` when the registry is
+    unavailable.
+    """
+    return dict(_FALLBACK_KPI_INSTRUMENT_MAP)
 
 # Hazardous reagent options
 _HAZARDOUS_REAGENTS = ["KOH", "H2SO4", "HNO3", "organic_solvents", "none"]
@@ -293,7 +323,7 @@ def _build_round_2(session: ConversationSession) -> list[SlotPresentation]:
             widget="multiselect",
             label="Available Instruments",
             hint="Select all instruments connected in your lab",
-            options=_AVAILABLE_INSTRUMENTS,
+            options=_get_available_instruments(),
             default=["ot2", "squidstat"],
             required=True,
             current_value=session.slots.get("available_instruments"),
@@ -630,17 +660,19 @@ def _validate_round_2(
     errors: dict[str, list[str]],
 ) -> None:
     instruments = responses.get("available_instruments")
+    known_instruments = _get_available_instruments()
     if not instruments or not isinstance(instruments, list) or len(instruments) == 0:
         errors.setdefault("available_instruments", []).append("Select at least one instrument")
-    elif any(i not in _AVAILABLE_INSTRUMENTS for i in instruments):
+    elif any(i not in known_instruments for i in instruments):
         errors.setdefault("available_instruments", []).append(
-            f"Unknown instruments. Valid: {', '.join(_AVAILABLE_INSTRUMENTS)}"
+            f"Unknown instruments. Valid: {', '.join(known_instruments)}"
         )
 
     # Cross-round: check KPI requires instrument
     kpi = session.slots.get("objective_kpi")
+    kpi_map = _get_kpi_instrument_map()
     if kpi and instruments and isinstance(instruments, list):
-        required_instr = _KPI_INSTRUMENT_MAP.get(kpi)
+        required_instr = kpi_map.get(kpi)
         if required_instr and required_instr not in instruments:
             errors.setdefault("available_instruments", []).append(
                 f"KPI '{kpi}' requires instrument '{required_instr}'"
@@ -841,11 +873,12 @@ def confirm_and_build(session_id: str) -> InjectionPack:
 
 def get_all_kpis() -> list[dict[str, str]]:
     """Return all known KPI definitions for the init UI."""
+    kpi_map = _get_kpi_instrument_map()
     result = []
     for kpis in _KPI_BY_OBJECTIVE.values():
         for kpi in kpis:
             if not any(r["name"] == kpi for r in result):
-                result.append({"name": kpi, "instrument": _KPI_INSTRUMENT_MAP.get(kpi, "any")})
+                result.append({"name": kpi, "instrument": kpi_map.get(kpi, "any")})
     return result
 
 
@@ -968,8 +1001,9 @@ def _assemble_injection_pack(session: ConversationSession) -> InjectionPack:
                 safety_locked=False,
             ))
 
-    # Derive allowed primitives from instruments
-    instrument_primitives: dict[str, list[str]] = {
+    # Derive allowed primitives from instruments — use registry when available,
+    # falling back to a hardcoded map for instruments without skill files.
+    _FALLBACK_INSTRUMENT_PRIMITIVES: dict[str, list[str]] = {
         "ot2": ["robot.home", "robot.load_pipettes", "robot.set_lights",
                 "robot.load_labware", "robot.load_custom_labware",
                 "robot.move_to_well", "robot.pick_up_tip", "robot.drop_tip",
@@ -981,6 +1015,20 @@ def _assemble_injection_pack(session: ConversationSession) -> InjectionPack:
         "furnace": ["heat"],
         "spin_coater": [],
     }
+
+    # Build instrument→primitives from registry, merge with fallback
+    instrument_primitives: dict[str, list[str]] = dict(_FALLBACK_INSTRUMENT_PRIMITIVES)
+    try:
+        from app.services.primitives_registry import get_registry
+        registry = get_registry()
+        short_to_full = registry.instrument_short_to_full()
+        for short_name, full_id in short_to_full.items():
+            prims = [p.name for p in registry.primitives_by_instrument(full_id)]
+            if prims:
+                instrument_primitives[short_name] = prims
+    except Exception:
+        pass
+
     allowed = ["wait", "log"]  # always available
     for instr in (s.get("available_instruments") or []):
         allowed.extend(instrument_primitives.get(instr, []))

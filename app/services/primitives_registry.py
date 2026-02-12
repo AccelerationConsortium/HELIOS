@@ -251,6 +251,51 @@ class PrimitivesRegistry:
         """Return all primitives for a given instrument."""
         return [p for p in self._primitives.values() if p.instrument == instrument]
 
+    def list_instruments(self) -> list[str]:
+        """Return unique instrument IDs from loaded skills (e.g. 'ot2-robot', 'squidstat').
+
+        Excludes skills with ``instrument=None`` (utilities).
+        """
+        seen: set[str] = set()
+        result: list[str] = []
+        for skill in self._skills.values():
+            if skill.instrument and skill.instrument not in seen:
+                seen.add(skill.instrument)
+                result.append(skill.instrument)
+        return sorted(result)
+
+    def list_instrument_short_names(self) -> list[str]:
+        """Return short names suitable for the conversation UI.
+
+        Convention: take the first segment before ``-`` so that
+        ``ot2-robot`` → ``ot2``, ``plc-controller`` → ``plc``.
+        If there is no dash the full ID is used (``squidstat`` → ``squidstat``).
+        """
+        return sorted({
+            _instrument_short_name(inst)
+            for inst in self.list_instruments()
+        })
+
+    def instrument_short_to_full(self) -> dict[str, str]:
+        """Return mapping of short_name → full instrument ID.
+
+        E.g. ``{"ot2": "ot2-robot", "plc": "plc-controller", ...}``.
+        """
+        return {
+            _instrument_short_name(inst): inst
+            for inst in self.list_instruments()
+        }
+
+    def resolve_instrument(self, name: str) -> str | None:
+        """Resolve a short or full instrument name to the full ID.
+
+        Returns ``None`` if the name is not recognised.
+        """
+        if name in {s.instrument for s in self._skills.values() if s.instrument}:
+            return name  # already a full ID
+        mapping = self.instrument_short_to_full()
+        return mapping.get(name)
+
     def primitives_by_error_class(self, error_class: str) -> list[PrimitiveSpec]:
         """Return all primitives with a given error class."""
         return [p for p in self._primitives.values() if p.error_class == error_class]
@@ -345,6 +390,21 @@ class PrimitivesRegistry:
 
 
 # ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+
+def _instrument_short_name(full_id: str) -> str:
+    """Derive a short instrument name from a full skill instrument ID.
+
+    Convention: first segment before ``-``.
+    ``ot2-robot`` → ``ot2``, ``plc-controller`` → ``plc``,
+    ``squidstat`` → ``squidstat``.
+    """
+    return full_id.split("-")[0]
+
+
+# ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------
 
@@ -357,3 +417,14 @@ def get_registry() -> PrimitivesRegistry:
     registry = PrimitivesRegistry()
     registry.load_skills_dir(_DEFAULT_SKILLS_DIR)
     return registry
+
+
+def refresh_registry() -> PrimitivesRegistry:
+    """Clear the cached registry and reload all skills from disk.
+
+    Call this after onboarding writes new skill files so that newly
+    added instruments become visible to the conversation engine and
+    NL parser without a server restart.
+    """
+    get_registry.cache_clear()
+    return get_registry()

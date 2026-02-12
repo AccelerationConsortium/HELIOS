@@ -1,0 +1,24 @@
+# Signature Detection Configuration
+# Thresholds for fault signature analysis
+
+signature:
+  # Minimum samples required for signature analysis
+  min_history_samples: 3
+
+  # Drift detection: consistent directional change
+  drift:
+    slope_threshold: 0.5  # °C per step - triggers drift if avg slope exceeds this
+
+  # Stall detection: device stuck, no change
+  stall:
+    epsilon: 0.1      # °C - changes below this are considered "no change"
+    min_samples: 3    # consecutive samples with no change
+
+  # Oscillation detection: temperature bouncing up and down
+  oscillation:
+    amplitude_threshold: 2.0  # °C - min peak-to-trough difference
+    min_peaks: 2              # minimum direction changes to count as oscillation
+
+  # Noise detection: high variance without clear pattern
+  noise:
+    variance_threshold: 1.5  # °C² - variance above this indicates noisy signal

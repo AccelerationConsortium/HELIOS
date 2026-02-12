@@ -1,0 +1,22 @@
+[project]
+name = "exp_agent"
+version = "0.1.0"
+description = "A recovery-aware execution agent for lab hardware"
+authors = [
+    {name = "User", email = "user@example.com"},
+]
+dependencies = [
+    "fastapi>=0.128.0",
+    "pydantic>=2.0.0",
+    "pyserial>=3.5",  # For serial communication
+    "uvicorn>=0.40.0",
+    "websockets>=16.0",
+]
+requires-python = ">=3.11"
+
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project.scripts]
+exp-agent = "exp_agent.cli.run_sim:main"

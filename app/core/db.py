@@ -380,6 +380,314 @@ def init_db() -> None:
 
     CREATE INDEX IF NOT EXISTS idx_conv_sessions_status
         ON conversation_sessions(status);
+
+    -- Campaign runner: resumable state machine (checkpoint tables)
+
+    CREATE TABLE IF NOT EXISTS campaign_state (
+        campaign_id    TEXT PRIMARY KEY,
+        status         TEXT NOT NULL DEFAULT 'planning',
+        input_json     TEXT NOT NULL,
+        plan_json      TEXT,
+        current_round  INTEGER NOT NULL DEFAULT 0,
+        total_rounds   INTEGER NOT NULL DEFAULT 0,
+        best_kpi       REAL,
+        direction      TEXT NOT NULL,
+        total_runs     INTEGER NOT NULL DEFAULT 0,
+        kpi_history_json    TEXT NOT NULL DEFAULT '[]',
+        all_kpis_json       TEXT NOT NULL DEFAULT '[]',
+        all_params_json     TEXT NOT NULL DEFAULT '[]',
+        all_rounds_json     TEXT NOT NULL DEFAULT '[]',
+        stop_reason    TEXT,
+        error          TEXT,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS campaign_rounds (
+        campaign_id    TEXT NOT NULL,
+        round_number   INTEGER NOT NULL,
+        status         TEXT NOT NULL DEFAULT 'pending',
+        strategy       TEXT NOT NULL,
+        strategy_decision_json TEXT,
+        batch_kpis_json     TEXT NOT NULL DEFAULT '[]',
+        batch_params_json   TEXT NOT NULL DEFAULT '[]',
+        n_candidates_total  INTEGER NOT NULL DEFAULT 0,
+        n_candidates_done   INTEGER NOT NULL DEFAULT 0,
+        started_at     TEXT,
+        completed_at   TEXT,
+        PRIMARY KEY (campaign_id, round_number),
+        FOREIGN KEY (campaign_id) REFERENCES campaign_state(campaign_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS campaign_candidates (
+        campaign_id    TEXT NOT NULL,
+        round_number   INTEGER NOT NULL,
+        candidate_index INTEGER NOT NULL,
+        status         TEXT NOT NULL DEFAULT 'pending',
+        params_json    TEXT NOT NULL,
+        run_id         TEXT,
+        kpi_value      REAL,
+        qc_quality     TEXT,
+        graph_hash     TEXT,
+        error          TEXT,
+        started_at     TEXT,
+        completed_at   TEXT,
+        PRIMARY KEY (campaign_id, round_number, candidate_index),
+        FOREIGN KEY (campaign_id, round_number)
+            REFERENCES campaign_rounds(campaign_id, round_number),
+        FOREIGN KEY (run_id) REFERENCES runs(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_candidates_hash
+        ON campaign_candidates(graph_hash);
+
+    -- SSE event log (append-only, supports Last-Event-ID replay)
+
+    CREATE TABLE IF NOT EXISTS campaign_events (
+        seq            INTEGER PRIMARY KEY AUTOINCREMENT,
+        campaign_id    TEXT NOT NULL,
+        event_type     TEXT NOT NULL,
+        payload_json   TEXT NOT NULL,
+        created_at     TEXT NOT NULL,
+        FOREIGN KEY (campaign_id) REFERENCES campaign_state(campaign_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_events_cid_seq
+        ON campaign_events(campaign_id, seq);
+
+    -- QueryPlan cache (DB Retrieval Agent)
+
+    CREATE TABLE IF NOT EXISTS query_plan_cache (
+        cache_key   TEXT PRIMARY KEY,
+        plan_json   TEXT NOT NULL,
+        hit_count   INTEGER NOT NULL DEFAULT 0,
+        created_at  TEXT NOT NULL,
+        last_used   TEXT NOT NULL
+    );
+
+    -- ===================================================================
+    -- DB Retrieval Agent: Canonical Data Contract (Req 1)
+    -- Stable views that the DB Agent queries — not raw tables directly.
+    -- ===================================================================
+
+    -- View 1: Run/Campaign — the "experiment" entity
+    CREATE VIEW IF NOT EXISTS v_experiment_runs AS
+    SELECT
+        r.id              AS run_id,
+        r.campaign_id,
+        c.name            AS campaign_name,
+        r.trigger_type,
+        r.status          AS run_status,
+        r.graph_hash,
+        r.created_by      AS lab,
+        r.created_at      AS timestamp,
+        r.started_at,
+        r.ended_at,
+        cs.status         AS campaign_status,
+        cs.direction,
+        cs.best_kpi,
+        cs.total_rounds,
+        cs.current_round,
+        -- Experiment Index dimensions (Req 6)
+        ei.domain,
+        ei.system_id,
+        ei.instrument_set,
+        ei.protocol_version,
+        ei.workflow_template_id
+    FROM runs r
+    LEFT JOIN campaigns c      ON c.id = r.campaign_id
+    LEFT JOIN campaign_state cs ON cs.campaign_id = r.campaign_id
+    LEFT JOIN experiment_index ei ON ei.run_id = r.id;
+
+    -- View 2: Parameters (input)
+    CREATE VIEW IF NOT EXISTS v_experiment_params AS
+    SELECT
+        cc.campaign_id,
+        cc.round_number,
+        cc.candidate_index,
+        cc.run_id,
+        cc.params_json,
+        cc.graph_hash,
+        cc.status       AS candidate_status,
+        ps.param_name,
+        ps.param_type,
+        ps.unit,
+        ps.min_value,
+        ps.max_value,
+        ps.log_scale
+    FROM campaign_candidates cc
+    LEFT JOIN param_schema ps
+        ON ps.campaign_id = cc.campaign_id
+        AND json_extract(cc.params_json, '$.' || ps.param_name) IS NOT NULL;
+
+    -- View 3: Metrics (output/KPI)
+    CREATE VIEW IF NOT EXISTS v_experiment_metrics AS
+    SELECT
+        k.run_id,
+        k.kpi_name       AS metric_name,
+        k.kpi_value       AS value,
+        k.kpi_unit        AS unit,
+        k.kpi_schema_version AS extractor_version,
+        rs.step_key       AS stage,
+        rs.primitive,
+        -- QC flags from structured table
+        qf.flag_value     AS qc_flag,
+        qf.measured_value AS qc_measured,
+        qf.threshold      AS qc_threshold,
+        -- Review verdict
+        rr.verdict        AS review_verdict,
+        rr.score          AS review_score,
+        k.created_at
+    FROM run_kpis k
+    LEFT JOIN run_steps rs  ON rs.id = k.step_id
+    LEFT JOIN qc_flags qf
+        ON qf.run_id = k.run_id
+        AND qf.kpi_name = k.kpi_name
+    LEFT JOIN run_reviews rr ON rr.run_id = k.run_id;
+
+    -- View 4: Artifacts (file references)
+    CREATE VIEW IF NOT EXISTS v_experiment_artifacts AS
+    SELECT
+        a.id              AS artifact_id,
+        a.run_id,
+        a.kind            AS type,
+        a.uri,
+        a.checksum        AS hash,
+        a.metadata_json,
+        a.created_at
+    FROM artifacts a;
+
+    -- ===================================================================
+    -- DB Retrieval Agent: Dataset Snapshot & Watermark (Req 2)
+    -- ===================================================================
+
+    CREATE TABLE IF NOT EXISTS dataset_snapshots (
+        snapshot_id     TEXT PRIMARY KEY,
+        query_plan_id   TEXT,
+        campaign_id     TEXT,
+        db_watermark    INTEGER NOT NULL,
+        query_plan_hash TEXT NOT NULL,
+        result_hash     TEXT NOT NULL,
+        row_count       INTEGER NOT NULL,
+        run_ids_json    TEXT NOT NULL DEFAULT '[]',
+        snapshot_name   TEXT,
+        created_at      TEXT NOT NULL,
+        FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_snapshots_campaign
+        ON dataset_snapshots(campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_snapshots_watermark
+        ON dataset_snapshots(db_watermark);
+
+    CREATE TABLE IF NOT EXISTS snapshot_runs (
+        snapshot_id     TEXT NOT NULL,
+        run_id          TEXT NOT NULL,
+        PRIMARY KEY (snapshot_id, run_id),
+        FOREIGN KEY (snapshot_id) REFERENCES dataset_snapshots(snapshot_id),
+        FOREIGN KEY (run_id) REFERENCES runs(id)
+    );
+
+    -- ===================================================================
+    -- DB Retrieval Agent: Structured QC Flags (Req 4)
+    -- ===================================================================
+
+    CREATE TABLE IF NOT EXISTS qc_flags (
+        id              TEXT PRIMARY KEY,
+        run_id          TEXT NOT NULL,
+        step_id         TEXT,
+        kpi_name        TEXT NOT NULL,
+        flag_value      TEXT NOT NULL DEFAULT 'ok',
+            -- ok | missing | suspect | failed
+        measured_value  REAL,
+        threshold       REAL,
+        message         TEXT,
+        created_at      TEXT NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+        FOREIGN KEY (step_id) REFERENCES run_steps(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_qc_flags_run ON qc_flags(run_id);
+    CREATE INDEX IF NOT EXISTS idx_qc_flags_kpi ON qc_flags(kpi_name, flag_value);
+
+    CREATE TABLE IF NOT EXISTS run_failure_signatures (
+        id              TEXT PRIMARY KEY,
+        run_id          TEXT NOT NULL,
+        step_key        TEXT,
+        primitive       TEXT,
+        failure_type    TEXT NOT NULL,
+        severity        TEXT NOT NULL,
+        likely_cause    TEXT NOT NULL,
+        confidence      REAL,
+        retryable       INTEGER NOT NULL DEFAULT 0,
+        message_code    TEXT,
+        recommended_patch_json TEXT,
+        created_at      TEXT NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_fail_sig_run ON run_failure_signatures(run_id);
+    CREATE INDEX IF NOT EXISTS idx_fail_sig_type ON run_failure_signatures(failure_type);
+
+    -- ===================================================================
+    -- DB Retrieval Agent: Parameter Schema (Req 5)
+    -- Stores param_type + unit at the campaign level for DB-level queries.
+    -- ===================================================================
+
+    CREATE TABLE IF NOT EXISTS param_schema (
+        campaign_id     TEXT NOT NULL,
+        param_name      TEXT NOT NULL,
+        param_type      TEXT NOT NULL,
+            -- number | integer | categorical | boolean
+        unit            TEXT NOT NULL DEFAULT '',
+        min_value       REAL,
+        max_value       REAL,
+        log_scale       INTEGER NOT NULL DEFAULT 0,
+        choices_json    TEXT,
+        PRIMARY KEY (campaign_id, param_name),
+        FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+    );
+
+    -- ===================================================================
+    -- DB Retrieval Agent: Experiment Index (Req 6)
+    -- Cross-SDL dimension fields for structured filtering.
+    -- ===================================================================
+
+    CREATE TABLE IF NOT EXISTS experiment_index (
+        run_id              TEXT PRIMARY KEY,
+        domain              TEXT,
+        system_id           TEXT,
+        instrument_set      TEXT,
+        protocol_version    TEXT,
+        workflow_template_id TEXT,
+        experiment_class    TEXT,
+        tags_json           TEXT NOT NULL DEFAULT '[]',
+        created_at          TEXT NOT NULL,
+        FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE,
+        FOREIGN KEY (workflow_template_id) REFERENCES protocol_templates(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_exp_idx_domain_sys
+        ON experiment_index(domain, system_id);
+    CREATE INDEX IF NOT EXISTS idx_exp_idx_protocol
+        ON experiment_index(protocol_version);
+    CREATE INDEX IF NOT EXISTS idx_exp_idx_workflow
+        ON experiment_index(workflow_template_id);
+
+    -- ===================================================================
+    -- Metric Dictionary (Req 4 supplement)
+    -- Registry of canonical metric names, units, definitions.
+    -- ===================================================================
+
+    CREATE TABLE IF NOT EXISTS metric_dictionary (
+        metric_name         TEXT PRIMARY KEY,
+        unit                TEXT NOT NULL,
+        definition          TEXT NOT NULL,
+        scope               TEXT NOT NULL DEFAULT 'run',
+            -- step | run
+        extractor_version   TEXT NOT NULL DEFAULT '1',
+        created_at          TEXT NOT NULL
+    );
     """
 
     with connection() as conn:

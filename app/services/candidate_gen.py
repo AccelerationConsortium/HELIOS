@@ -48,11 +48,24 @@ class SearchDimension:
 
 
 @dataclass(frozen=True)
+class SimplexConstraint:
+    """A simplex constraint: sum of named params must equal target (default 1.0).
+
+    Used for composition spaces where components must sum to 1 (or another value).
+    After sampling, the named parameters are normalized so their sum = target.
+    """
+
+    param_names: tuple[str, ...]  # which params form the simplex
+    target_sum: float = 1.0  # what they should sum to (usually 1.0)
+
+
+@dataclass(frozen=True)
 class ParameterSpace:
     """Complete parameter space definition for batch generation."""
 
     dimensions: tuple[SearchDimension, ...]
     protocol_template: dict[str, Any]  # base protocol, params to be overridden
+    simplex_constraints: tuple[SimplexConstraint, ...] = ()
 
     @property
     def n_dims(self) -> int:
@@ -306,6 +319,162 @@ def sample_prior_guided(
 
 
 # ---------------------------------------------------------------------------
+# Compositional (simplex-native) sampling
+# ---------------------------------------------------------------------------
+
+
+def sample_dirichlet(
+    space: ParameterSpace,
+    n: int,
+    *,
+    alpha: float | list[float] | None = None,
+    seed: int | None = None,
+) -> list[dict[str, Any]]:
+    """Sample compositions directly from a Dirichlet distribution.
+
+    For each SimplexConstraint in the space, the constrained parameters are
+    sampled from Dir(alpha) — this produces points that *naturally* lie on
+    the simplex without post-normalization.
+
+    Non-simplex dimensions are sampled uniformly (like ``sample_random``).
+
+    Parameters
+    ----------
+    alpha : float | list[float] | None
+        Dirichlet concentration parameter.
+        - float → symmetric Dirichlet (all components share one alpha)
+        - list[float] → asymmetric Dirichlet (per-component alpha)
+        - None → defaults to 1.0 (uniform on the simplex)
+
+    Returns
+    -------
+    list of param dicts with simplex dimensions summing to ``target_sum``.
+    """
+    rng = random.Random(seed)
+
+    # Index which param names belong to which simplex constraint
+    simplex_map: dict[str, SimplexConstraint] = {}
+    for constraint in space.simplex_constraints:
+        for name in constraint.param_names:
+            simplex_map[name] = constraint
+
+    candidates: list[dict[str, Any]] = []
+    for _ in range(n):
+        point: dict[str, Any] = {}
+
+        # Sample simplex-constrained groups via Dirichlet
+        done_constraints: set[int] = set()
+        for dim in space.dimensions:
+            if dim.param_name in simplex_map:
+                constraint = simplex_map[dim.param_name]
+                cid = id(constraint)
+                if cid in done_constraints:
+                    continue
+                done_constraints.add(cid)
+
+                k = len(constraint.param_names)
+                if alpha is None:
+                    alphas = [1.0] * k
+                elif isinstance(alpha, (int, float)):
+                    alphas = [float(alpha)] * k
+                else:
+                    alphas = list(alpha[:k])
+                    while len(alphas) < k:
+                        alphas.append(1.0)
+
+                # Dirichlet via Gamma samples (pure stdlib)
+                gammas = [_gamma_sample(a, rng) for a in alphas]
+                total = sum(gammas)
+                if total < 1e-15:
+                    fracs = [1.0 / k] * k
+                else:
+                    fracs = [g / total for g in gammas]
+
+                # Scale to target_sum
+                for name, frac in zip(constraint.param_names, fracs):
+                    point[name] = frac * constraint.target_sum
+            else:
+                # Non-simplex dimension: uniform random
+                point[dim.param_name] = _sample_dimension(dim, rng)
+
+        candidates.append(point)
+    return candidates
+
+
+def _gamma_sample(alpha: float, rng: random.Random) -> float:
+    """Sample from Gamma(alpha, 1) using Marsaglia & Tsang's method.
+
+    Pure stdlib implementation — no numpy required.
+    """
+    if alpha <= 0:
+        return 0.0
+
+    if alpha < 1.0:
+        # Boost: Gamma(alpha) = Gamma(alpha+1) * U^(1/alpha)
+        g = _gamma_sample(alpha + 1.0, rng)
+        u = rng.random()
+        return g * (u ** (1.0 / alpha)) if g > 0 else 0.0
+
+    # Marsaglia & Tsang for alpha >= 1
+    d = alpha - 1.0 / 3.0
+    c = 1.0 / math.sqrt(9.0 * d)
+
+    while True:
+        while True:
+            x = rng.gauss(0, 1)
+            v = 1.0 + c * x
+            if v > 0:
+                break
+        v = v * v * v
+        u = rng.random()
+
+        if u < 1.0 - 0.0331 * (x * x) * (x * x):
+            return d * v
+        if math.log(max(u, 1e-300)) < 0.5 * x * x + d * (1.0 - v + math.log(max(v, 1e-300))):
+            return d * v
+
+
+# ---------------------------------------------------------------------------
+# Simplex constraint enforcement (post-normalization fallback)
+# ---------------------------------------------------------------------------
+
+
+def _apply_simplex_constraints(
+    candidates: list[dict[str, Any]],
+    constraints: tuple[SimplexConstraint, ...],
+) -> list[dict[str, Any]]:
+    """Normalize simplex-constrained parameter groups.
+
+    For each candidate, each simplex constraint normalizes the named params
+    so they sum to ``target_sum``.  If all values are zero, assigns equal
+    fractions.  Negative values are clamped to zero before normalization.
+
+    This is a post-sampling step — works with any sampling strategy.
+    """
+    result: list[dict[str, Any]] = []
+    for point in candidates:
+        point = dict(point)  # shallow copy
+        for constraint in constraints:
+            names = constraint.param_names
+            target = constraint.target_sum
+            # Collect current values; treat missing as 0
+            vals = [max(0.0, float(point.get(n, 0.0))) for n in names]
+            total = sum(vals)
+            if total < 1e-15:
+                # All zero → equal fractions
+                equal = target / max(len(names), 1)
+                for n in names:
+                    point[n] = equal
+            else:
+                # Scale proportionally
+                scale = target / total
+                for n, v in zip(names, vals):
+                    point[n] = v * scale
+        result.append(point)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Scoring (advisory, never blocks)
 # ---------------------------------------------------------------------------
 
@@ -359,6 +528,8 @@ _STRATEGIES = {
     "random": "Random Sampling",
     "prior_guided": "Prior-Guided Sampling",
     "bayesian": "Bayesian Optimization (KNN surrogate + EI/UCB)",
+    "adaptive": "Adaptive Strategy Selection (auto-selects best method per round)",
+    "dirichlet": "Dirichlet Simplex Sampling (native compositional sampling)",
 }
 
 
@@ -372,6 +543,7 @@ def generate_batch(
     campaign_id: str | None = None,
     acquisition: str = "ei",
     kpi_name: str = "run_success_rate",
+    store: bool = True,
 ) -> BatchResult:
     """Generate a batch of candidate parameter sets and store them.
 
@@ -412,8 +584,44 @@ def generate_batch(
             acquisition=acquisition,
             seed=seed,
         )
+    elif strategy == "dirichlet":
+        raw_params = sample_dirichlet(space, n_candidates, seed=seed)
+    elif strategy == "adaptive":
+        # Delegate to the adaptive strategy selector
+        from app.services.optimization_backends import Observation as OptObs
+        from app.services.strategy_selector import (
+            CampaignSnapshot,
+            generate_adaptive_candidates,
+        )
+        from app.services.bayesian_opt import load_observations_from_db
+
+        bo_obs = load_observations_from_db(
+            space, campaign_id=campaign_id, kpi_name=kpi_name,
+        )
+        opt_obs = [
+            OptObs(params={}, objective=obs.objective)
+            for obs in bo_obs
+        ]
+        # Build snapshot from available context
+        snapshot = CampaignSnapshot(
+            round_number=max(1, len(bo_obs) // max(n_candidates, 1) + 1),
+            max_rounds=20,  # sensible default; orchestrator passes real value
+            n_observations=len(bo_obs),
+            n_dimensions=space.n_dims,
+            has_categorical=any(d.choices is not None for d in space.dimensions),
+            has_log_scale=any(d.log_scale for d in space.dimensions),
+            kpi_history=tuple(obs.objective for obs in bo_obs),
+            direction="maximize",
+        )
+        raw_params, _decision = generate_adaptive_candidates(
+            space, n_candidates, opt_obs, snapshot, seed=seed,
+        )
     else:
         raise ValueError(f"Unknown strategy: {strategy}")
+
+    # Apply simplex constraints (normalize composition groups)
+    if space.simplex_constraints:
+        raw_params = _apply_simplex_constraints(raw_params, space.simplex_constraints)
 
     # Score candidates (advisory, never fails)
     candidates: list[Candidate] = []
@@ -444,7 +652,8 @@ def generate_batch(
         space=space,
     )
 
-    _store_batch(result, created_by=created_by, campaign_id=campaign_id)
+    if store:
+        _store_batch(result, created_by=created_by, campaign_id=campaign_id)
     return result
 
 

@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OTbot Auto Recording</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            font-family: 'JetBrains Mono', monospace;
+            color: #0f0;
+        }
+        #controls {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 10000;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border: 1px solid #0f0;
+            border-radius: 5px;
+        }
+        button {
+            background: #0f0;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            font-family: inherit;
+            font-weight: bold;
+            border-radius: 3px;
+        }
+        button:hover {
+            background: #0f0;
+            opacity: 0.8;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        #status {
+            margin-top: 10px;
+            font-size: 12px;
+        }
+        #timer {
+            font-size: 20px;
+            font-weight: bold;
+            color: #f00;
+        }
+        iframe {
+            width: 100vw;
+            height: 100vh;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <div>🎬 OTbot Auto Recorder</div>
+        <button id="startBtn" onclick="startRecording()">开始录制</button>
+        <button id="stopBtn" onclick="stopRecording()" disabled>停止录制</button>
+        <div id="status">Ready</div>
+        <div id="timer"></div>
+    </div>
+
+    <!-- Embed lab.html in iframe -->
+    <iframe id="labFrame" src="/static/lab.html"></iframe>
+
+    <script>
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let startTime = null;
+        let timerInterval = null;
+        let campaignId = null;
+
+        const API_BASE = '/api/v1';
+        const DURATION = 50; // seconds
+
+        async function startRecording() {
+            try {
+                // 1. 获取iframe的MediaStream
+                const iframe = document.getElementById('labFrame');
+                const iframeWindow = iframe.contentWindow;
+
+                // 使用getDisplayMedia让用户选择要录制的标签页/窗口
+                const stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        mediaSource: 'browser',
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 },
+                        frameRate: { ideal: 30 }
+                    },
+                    audio: false
+                });
+
+                // 2. 创建MediaRecorder
+                recordedChunks = [];
+                mediaRecorder = new MediaRecorder(stream, {
+                    mimeType: 'video/webm;codecs=vp9',
+                    videoBitsPerSecond: 2500000
+                });
+
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        recordedChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = () => {
+                    saveRecording();
+                    stream.getTracks().forEach(track => track.stop());
+                };
+
+                // 3. 开始录制
+                mediaRecorder.start(1000); // 每秒保存一次数据
+                startTime = Date.now();
+
+                // 4. 更新UI
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                document.getElementById('status').textContent = '🔴 Recording...';
+
+                // 5. 启动计时器
+                updateTimer();
+                timerInterval = setInterval(updateTimer, 1000);
+
+                // 6. 等待2秒后触发demo
+                setTimeout(async () => {
+                    await triggerDemo();
+                }, 2000);
+
+                // 7. 自动停止录制
+                setTimeout(() => {
+                    if (mediaRecorder && mediaRecorder.state === 'recording') {
+                        stopRecording();
+                    }
+                }, DURATION * 1000);
+
+            } catch (err) {
+                console.error('Recording failed:', err);
+                document.getElementById('status').textContent = '❌ Error: ' + err.message;
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                clearInterval(timerInterval);
+
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                document.getElementById('status').textContent = '⏹️ Stopped, saving...';
+            }
+        }
+
+        function updateTimer() {
+            if (!startTime) return;
+
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const remaining = Math.max(0, DURATION - elapsed);
+            const mins = Math.floor(remaining / 60);
+            const secs = remaining % 60;
+
+            document.getElementById('timer').textContent =
+                `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        async function triggerDemo() {
+            try {
+                const response = await fetch(`${API_BASE}/orchestrate/demo`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        objective_kpi: 'overpotential_eta10',
+                        max_rounds: 2
+                    })
+                });
+
+                const data = await response.json();
+                campaignId = data.campaign_id;
+
+                console.log('Demo triggered:', campaignId);
+                document.getElementById('status').textContent = `🔴 Recording (Campaign: ${campaignId})`;
+
+            } catch (err) {
+                console.error('Failed to trigger demo:', err);
+            }
+        }
+
+        function saveRecording() {
+            if (recordedChunks.length === 0) {
+                alert('No recorded data');
+                return;
+            }
+
+            // 创建Blob
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+
+            // 创建下载链接
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = `OTbot_Demo_${Date.now()}.webm`;
+
+            document.body.appendChild(a);
+            a.click();
+
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 100);
+
+            document.getElementById('status').textContent = '✅ Saved! Check Downloads folder';
+
+            // 也在新标签页打开，方便预览
+            window.open(url, '_blank');
+        }
+
+        // 键盘快捷键
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'r' && e.ctrlKey) {
+                e.preventDefault();
+                startRecording();
+            } else if (e.key === 's' && e.ctrlKey) {
+                e.preventDefault();
+                stopRecording();
+            }
+        });
+    </script>
+</body>
+</html>

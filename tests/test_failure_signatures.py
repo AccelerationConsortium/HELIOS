@@ -50,6 +50,10 @@ def _setup_db():
         conn.execute("DELETE FROM artifacts")
         conn.execute("DELETE FROM provenance_events")
         conn.execute("DELETE FROM run_steps")
+        conn.execute("DELETE FROM snapshot_runs")
+        conn.execute("DELETE FROM qc_flags")
+        conn.execute("DELETE FROM run_failure_signatures")
+        conn.execute("DELETE FROM experiment_index")
         conn.execute("DELETE FROM runs")
         conn.commit()
 

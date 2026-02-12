@@ -24,6 +24,7 @@ from app.services.conversation_engine import (
     start_session,
     submit_round,
 )
+from app.services.contract_bridge import injection_pack_to_task_contract
 from app.services.injection_pack import (
     build_diff_summary,
     create_campaign_from_pack,
@@ -142,12 +143,16 @@ async def confirm_session(session_id: str) -> dict:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    # Also produce a TaskContract for optional orchestrator usage
+    task_contract = injection_pack_to_task_contract(pack)
+
     return {
         "campaign_id": campaign.get("id"),
         "injection_pack": pack.model_dump(),
         "diff_summary": diff_summary,
         "warnings": warnings,
         "status": "campaign_created",
+        "task_contract": task_contract.model_dump(),
     }
 
 

@@ -1,0 +1,186 @@
+# Recovery Playbook Configuration
+# Maps error conditions to recovery strategies
+
+# =============================================================================
+# Error Classification Rules
+# =============================================================================
+error_profiles:
+  # Safety violations - high priority, may recover via degradation
+  safety_violation:
+    unsafe: true
+    recoverable: true
+    default_strategy: degrade
+    safe_shutdown_required: true
+
+  overshoot:
+    unsafe: true
+    recoverable: true
+    default_strategy: degrade
+    safe_shutdown_required: true
+
+  # Hardware failures - cannot recover
+  sensor_fail:
+    unsafe: true
+    recoverable: false
+    default_strategy: abort
+    safe_shutdown_required: true
+
+  # Transient errors - retry with backoff
+  timeout:
+    unsafe: false
+    recoverable: true
+    default_strategy: retry
+    safe_shutdown_required: false
+    diagnostics: [read_state]
+
+  communication_error:
+    unsafe: false
+    recoverable: true
+    default_strategy: retry
+    safe_shutdown_required: false
+    diagnostics: [read_state]
+
+  # Logic errors - retry with escalation
+  postcondition_failed:
+    unsafe: false
+    recoverable: true
+    default_strategy: retry
+    safe_shutdown_required: false
+    diagnostics: [read_state]
+
+  # Unknown errors - treat as unsafe
+  unknown:
+    unsafe: true
+    recoverable: false
+    default_strategy: abort
+    safe_shutdown_required: true
+
+# =============================================================================
+# Recovery Behavior Configuration
+# =============================================================================
+recovery:
+  # Backoff schedule for retries (seconds)
+  backoff:
+    schedule: [0, 2, 5, 10]  # retry 0: 0s, retry 1: 2s, retry 2: 5s, retry 3: 10s
+    max_wait: 10
+
+  # Retry limits
+  retry:
+    max_per_error_type: 3
+
+  # Temperature degradation settings
+  degrade:
+    default_target: 110.0  # °C - fallback if no target available
+    delta_drift: 10.0      # °C - reduce target by this for drift/noisy modes
+    delta_default: 15.0    # °C - reduce target by this for other modes
+    ambient_temp: 25.0     # °C - minimum safe temperature
+
+  # Stabilization wait times after recovery (seconds)
+  stabilize:
+    oscillation: 10.0
+    drift: 5.0
+    default: 2.0
+
+# =============================================================================
+# Decision Rules (ordered by priority)
+# =============================================================================
+decision_rules:
+  # Rule 0: Unsafe preemption - always handle first
+  - name: unsafe_degrade
+    condition:
+      profile.unsafe: true
+      profile.recoverable: true
+      mode: [drift, noisy]
+      stage: ["!cleanup"]  # not in cleanup stage
+    decision: degrade
+    actions: [cool_down, set_temperature_degraded, wait_stabilize]
+    sample_status: compromised
+
+  - name: unsafe_abort
+    condition:
+      profile.unsafe: true
+    decision: abort
+    actions: [cool_down]
+    sample_status: destroyed
+
+  # Rule 1: Non-recoverable errors
+  - name: non_recoverable
+    condition:
+      profile.recoverable: false
+    decision: abort
+    actions: [cool_down]
+    sample_status: compromised
+
+  # Rule 2: Transient errors (timeout, communication)
+  - name: transient_retry
+    condition:
+      error.type: [timeout, communication_error]
+    decision: retry
+    actions: [wait_backoff]
+    sample_status: intact
+
+  # Rule 3: Postcondition failures with stall
+  - name: postcondition_stall
+    condition:
+      error.type: postcondition_failed
+      mode: stall
+    decision: abort
+    actions: [cool_down]
+    sample_status: compromised
+
+  # Rule 4: Postcondition first retry
+  - name: postcondition_retry_first
+    condition:
+      error.type: postcondition_failed
+      retry_count: 0
+    decision: retry
+    actions: []
+    sample_status: intact
+
+  # Rule 5: Postcondition second retry with wait
+  - name: postcondition_retry_second
+    condition:
+      error.type: postcondition_failed
+      retry_count: 1
+    decision: retry
+    actions: [wait_2s]
+    sample_status: intact
+
+  # Rule 6: Postcondition repeated failures - degrade
+  - name: postcondition_degrade
+    condition:
+      error.type: postcondition_failed
+      retry_count: ">=2"
+      target: present
+    decision: degrade
+    actions: [cool_down, set_temperature_degraded]
+    sample_status: compromised
+
+  # Rule 7: Safety violations with known target
+  - name: safety_degrade
+    condition:
+      error.type: [safety_violation, overshoot]
+      target: present
+    decision: degrade
+    actions: [cool_down, set_temperature_degraded]
+    sample_status: compromised
+
+  # Rule 8: Fallback - abort safely
+  - name: fallback_abort
+    condition: {}  # matches everything
+    decision: abort
+    actions: [cool_down]
+    sample_status: compromised
+
+# =============================================================================
+# Sample Status Definitions
+# =============================================================================
+sample_status:
+  intact:
+    description: "Sample is unaffected, experiment can continue normally"
+  compromised:
+    description: "Sample may be affected, results should be flagged for review"
+  destroyed:
+    description: "Sample is unusable, experiment must be aborted"
+  anomalous:
+    description: "Sample shows unexpected but potentially valid results (scientific anomaly)"

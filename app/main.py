@@ -60,3 +60,9 @@ if _static_dir.is_dir():
 @app.get("/", include_in_schema=False)
 async def root_redirect():
     return RedirectResponse(url="/static/init.html")
+
+
+@app.get("/lab", include_in_schema=False)
+async def lab_redirect():
+    """New single-input agent UI."""
+    return RedirectResponse(url="/static/lab.html")

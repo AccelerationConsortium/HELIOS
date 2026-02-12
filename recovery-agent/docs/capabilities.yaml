@@ -1,0 +1,74 @@
+version: 1
+
+# Capability registry: intent -> tool sequences per device.
+# Each sequence declares preconditions, effects, risk, and verification.
+
+levels:
+  L0: observe_only
+  L1: safe_controls
+  L2: full_controls
+
+intents:
+  ENTER_SAFE_STATE: {}
+  REDUCE_RISK_HEAT: {}
+  LOWER_TARGET: {}
+  RESET_DEVICE: {}
+  RUN_SELF_TEST: {}
+  RETRY_COMMUNICATION: {}
+  NOTIFY_HUMAN: {}
+
+devices:
+  heater_1:
+    level: L1
+    tools:
+      read_state:
+        outputs: [current_temp, target_temp, heater_power, sensor_health, device_heartbeat]
+
+      stop_heating:
+        inputs: []
+        effects:
+          heater_power: 0
+        verify:
+          any:
+            - eq: [heater_power, 0]
+        risk: {class: low}
+
+      cool_down_to:
+        inputs: [temp]
+        effects:
+          current_temp: "decreasing"
+        verify:
+          all:
+            - lt: [current_temp, "temp+eps"]
+        risk: {class: low}
+
+      set_target_temp:
+        inputs: [temp]
+        effects:
+          target_temp: "temp"
+        verify:
+          eq: [target_temp, "temp"]
+        risk: {class: medium}
+
+    intent_map:
+      ENTER_SAFE_STATE:
+        - sequence: [stop_heating, cool_down_to]
+          pre:
+            any:
+              - eq: [sensor_health, ok]
+              - eq: [sensor_health, degraded]
+              - eq: [sensor_health, unknown]
+          verify:
+            any:
+              - eq: [heater_power, 0]
+          unlocks: [L1]
+
+      LOWER_TARGET:
+        - sequence: [set_target_temp]
+          pre:
+            all:
+              - eq: [sensor_health, ok]
+              - eq: [device_heartbeat, ok]
+          verify:
+            eq: [target_temp, "temp"]
+          unlocks: [L2]

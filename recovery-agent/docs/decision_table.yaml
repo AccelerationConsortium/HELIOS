@@ -1,0 +1,66 @@
+version: 1
+
+# Decision table rows are evaluated top-down (first match wins).
+# Each row: when -> then. Keep it minimal and agent-first.
+
+inputs:
+  hazards: [thermal_runaway, thermal_overshoot, sensor_untrusted, comms_unreliable]
+  capability_level: [L0, L1, L2]
+  step_criticality: [critical, optional]
+  retry_remaining: int
+  signature: [drift, stall, oscillation, stable, unknown]
+
+rows:
+  # 1) Hard safety: runaway or untrusted sensor => safe state
+  - id: hard_safety_sensor_untrusted
+    when:
+      hazards_any: [sensor_untrusted]
+    then:
+      decision: ABORT
+      required_intents: [ENTER_SAFE_STATE, NOTIFY_HUMAN]
+
+  - id: hard_safety_thermal_runaway
+    when:
+      hazards_any: [thermal_runaway]
+    then:
+      decision: ABORT
+      required_intents: [ENTER_SAFE_STATE, NOTIFY_HUMAN]
+
+  # 2) Overshoot: degrade only when L2 + drift + budget
+  - id: overshoot_degrade
+    when:
+      hazards_any: [thermal_overshoot]
+      capability_level_in: [L2]
+      signature_in: [drift]
+    then:
+      decision: DEGRADE
+      required_intents: [REDUCE_RISK_HEAT, LOWER_TARGET]
+
+  - id: overshoot_abort
+    when:
+      hazards_any: [thermal_overshoot]
+    then:
+      decision: ABORT
+      required_intents: [ENTER_SAFE_STATE]
+
+  # 3) Timeout/comms: retry if safe and budget remains
+  - id: comms_retry
+    when:
+      hazards_any: [comms_unreliable]
+      retry_remaining_gt: 0
+    then:
+      decision: RETRY
+      required_intents: [RETRY_COMMUNICATION]
+
+  # 4) Optional step fallback
+  - id: optional_step_skip_on_abort
+    when:
+      step_criticality_in: [optional]
+      last_policy_decision_in: [ABORT]
+    then:
+      decision: SKIP
+      required_intents: []
+
+fallback:
+  decision: ESCALATE
+  required_intents: [NOTIFY_HUMAN]

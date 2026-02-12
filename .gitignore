@@ -8,3 +8,11 @@ data/orchestrator.db-shm
 data/orchestrator.db-wal
 data/object_store/
 .env
+
+# macOS
+.DS_Store
+
+# Database files
+*.db
+*.db-shm
+*.db-wal

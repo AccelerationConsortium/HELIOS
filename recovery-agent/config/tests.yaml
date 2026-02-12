@@ -1,0 +1,226 @@
+# Recovery Policy Test Scenarios
+# CI-runnable tests for recovery decision validation
+
+test_scenarios:
+  # ==========================================================================
+  # Overshoot Scenarios
+  # ==========================================================================
+  - name: overshoot_with_drift
+    description: "Temperature overshooting with drift signature -> DEGRADE"
+    input:
+      error:
+        type: overshoot
+        severity: high
+        message: "Temperature exceeded target by 8°C"
+      state:
+        status: running
+        telemetry:
+          temperature: 128.0
+          target: 120.0
+      history:
+        - {temperature: 118.0}
+        - {temperature: 122.0}
+        - {temperature: 125.0}
+        - {temperature: 128.0}
+      last_action:
+        name: set_temperature
+        params: {temperature: 120.0}
+      retry_count: 0
+    expected:
+      decision: degrade
+      sample_status: compromised
+      actions_contain: [cool_down, set_temperature]
+
+  - name: overshoot_no_target
+    description: "Temperature overshooting but no target available -> ABORT"
+    input:
+      error:
+        type: overshoot
+        severity: high
+      state:
+        telemetry:
+          temperature: 135.0
+      history:
+        - {temperature: 130.0}
+        - {temperature: 133.0}
+        - {temperature: 135.0}
+      last_action: null
+      retry_count: 0
+    expected:
+      decision: abort
+      sample_status: destroyed
+      actions_contain: [cool_down]
+
+  # ==========================================================================
+  # Sensor Failure Scenarios
+  # ==========================================================================
+  - name: sensor_fail_immediate
+    description: "Sensor failure always aborts immediately"
+    input:
+      error:
+        type: sensor_fail
+        severity: high
+        message: "Temperature sensor returned -999"
+      state:
+        telemetry:
+          temperature: -999
+      history: []
+      retry_count: 0
+    expected:
+      decision: abort
+      sample_status: compromised
+      actions_contain: [cool_down]
+
+  # ==========================================================================
+  # Timeout Scenarios
+  # ==========================================================================
+  - name: timeout_first_retry
+    description: "First timeout -> RETRY immediately"
+    input:
+      error:
+        type: timeout
+        severity: medium
+        message: "Device did not respond within 5s"
+      state:
+        telemetry:
+          temperature: 100.0
+      history:
+        - {temperature: 100.0}
+      retry_count: 0
+    expected:
+      decision: retry
+      sample_status: intact
+      actions_contain: []  # no wait on first retry (backoff[0] = 0)
+
+  - name: timeout_second_retry
+    description: "Second timeout -> RETRY with 2s backoff"
+    input:
+      error:
+        type: timeout
+        severity: medium
+      state:
+        telemetry:
+          temperature: 100.0
+      retry_count: 1
+    expected:
+      decision: retry
+      sample_status: intact
+      backoff_time: 2
+
+  - name: timeout_third_retry
+    description: "Third timeout -> RETRY with 5s backoff"
+    input:
+      error:
+        type: timeout
+        severity: medium
+      retry_count: 2
+    expected:
+      decision: retry
+      sample_status: intact
+      backoff_time: 5
+
+  # ==========================================================================
+  # Postcondition Failed Scenarios
+  # ==========================================================================
+  - name: postcondition_failed_first
+    description: "First postcondition failure -> RETRY immediately"
+    input:
+      error:
+        type: postcondition_failed
+        severity: medium
+        message: "Temperature did not reach target within timeout"
+      state:
+        telemetry:
+          temperature: 115.0
+          target: 120.0
+      history:
+        - {temperature: 110.0}
+        - {temperature: 113.0}
+        - {temperature: 115.0}
+      retry_count: 0
+    expected:
+      decision: retry
+      sample_status: intact
+
+  - name: postcondition_failed_with_stall
+    description: "Postcondition failed + stall signature -> ABORT (device stuck)"
+    input:
+      error:
+        type: postcondition_failed
+        severity: medium
+      state:
+        telemetry:
+          temperature: 100.0
+      history:
+        - {temperature: 100.0}
+        - {temperature: 100.0}
+        - {temperature: 100.0}
+        - {temperature: 100.0}
+      retry_count: 1
+    expected:
+      decision: abort
+      sample_status: compromised
+      signature: stall
+
+  - name: postcondition_failed_repeated
+    description: "Repeated postcondition failures -> DEGRADE"
+    input:
+      error:
+        type: postcondition_failed
+        severity: medium
+      state:
+        telemetry:
+          temperature: 115.0
+      history:
+        - {temperature: 112.0}
+        - {temperature: 114.0}
+        - {temperature: 115.0}
+      last_action:
+        name: set_temperature
+        params: {temperature: 120.0}
+      retry_count: 2
+    expected:
+      decision: degrade
+      sample_status: compromised
+      degraded_target: 110.0  # 120 - 10 (drift delta)
+
+  # ==========================================================================
+  # Oscillation Scenarios
+  # ==========================================================================
+  - name: oscillation_detected
+    description: "Temperature oscillating -> signature detection works"
+    input:
+      error:
+        type: postcondition_failed
+        severity: medium
+      state:
+        telemetry:
+          temperature: 118.0
+      history:
+        - {temperature: 115.0}
+        - {temperature: 122.0}
+        - {temperature: 116.0}
+        - {temperature: 121.0}
+        - {temperature: 118.0}
+      retry_count: 0
+    expected:
+      signature: oscillation
+      decision: retry
+
+# ==========================================================================
+# Test Runner Configuration
+# ==========================================================================
+runner:
+  # How to compare decisions
+  comparison:
+    decision: exact_match
+    sample_status: exact_match
+    actions_contain: subset_match
+    signature: exact_match_if_present
+    backoff_time: tolerance_1s
+    degraded_target: tolerance_2c
+
+  # Reporting
+  output:
+    format: junit_xml
+    path: test-results/recovery-policy.xml

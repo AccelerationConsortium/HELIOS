@@ -1,0 +1,28 @@
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual env
+.venv/
+venv/
+
+# Logs
+logs/
+*.log
+
+# Local configs / secrets
+lab_config.json
+workflow_config.json
+**/*secret*
+
+# Rust
+rust/target/
+
+# Editor
+.vscode/
+.idea/

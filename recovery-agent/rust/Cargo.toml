@@ -1,0 +1,52 @@
+[package]
+name = "exp_agent_core"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance Rust core for exp-agent recovery system"
+authors = ["User <user@example.com>"]
+
+[lib]
+name = "exp_agent_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# PyO3 for Python bindings
+pyo3 = { version = "0.22", features = ["extension-module", "auto-initialize"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+
+# Serial communication
+tokio-serial = "5.4"
+
+# WebSocket server
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+
+# Async traits
+async-trait = "0.1"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Ring buffer for telemetry
+ringbuf = "0.4"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[features]
+default = []
+simulation = []  # Enable simulated devices for testing

@@ -23,6 +23,7 @@ class OrchestratorScheduler:
         self._settings = get_settings()
         self._tasks: list[asyncio.Task[Any]] = []
         self._active_workers: dict[str, asyncio.Task[Any]] = {}
+        self._orchestrator_tasks: dict[str, asyncio.Task[Any]] = {}
         self._stopped = asyncio.Event()
 
     async def start(self) -> None:
@@ -31,6 +32,7 @@ class OrchestratorScheduler:
             asyncio.create_task(self._campaign_loop(), name="campaign-loop"),
             asyncio.create_task(self._dispatch_loop(), name="dispatch-loop"),
             asyncio.create_task(self._reap_loop(), name="reap-loop"),
+            asyncio.create_task(self._orchestrator_reap_loop(), name="orchestrator-reap-loop"),
         ]
 
     async def stop(self) -> None:
@@ -50,6 +52,14 @@ class OrchestratorScheduler:
                     await task
             mark_run_failed_if_running(run_id, "worker terminated during scheduler shutdown")
         self._active_workers.clear()
+
+        # Cancel active orchestrator tasks
+        for campaign_id, task in list(self._orchestrator_tasks.items()):
+            if not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+        self._orchestrator_tasks.clear()
 
     async def _campaign_loop(self) -> None:
         while not self._stopped.is_set():
@@ -96,3 +106,25 @@ class OrchestratorScheduler:
                 mark_run_failed_if_running(run_id, str(exc))
 
             self._active_workers.pop(run_id, None)
+
+    async def _orchestrator_reap_loop(self) -> None:
+        """Periodically clean up completed orchestrator campaign tasks."""
+        while not self._stopped.is_set():
+            await self._reap_orchestrator_tasks()
+            await asyncio.sleep(5)
+
+    async def _reap_orchestrator_tasks(self) -> None:
+        """Remove completed orchestrator tasks from the tracking dict."""
+        for campaign_id, task in list(self._orchestrator_tasks.items()):
+            if not task.done():
+                continue
+
+            try:
+                task.result()
+                logger.info("Orchestrator campaign %s completed", campaign_id)
+            except asyncio.CancelledError:
+                logger.info("Orchestrator campaign %s was cancelled", campaign_id)
+            except Exception as exc:
+                logger.error("Orchestrator campaign %s failed: %s", campaign_id, exc)
+
+            self._orchestrator_tasks.pop(campaign_id, None)
