@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OTbot &mdash; Campaign Setup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        /* ================================================================
+           Design System: Battery Lab Dashboard
+           ================================================================ */
+        :root {
+            --color-navy: #213C51;
+            --color-steel: #6594B1;
+            --color-pink: #DDAED3;
+            --color-light: #EEEEEE;
+
+            --bg-primary: #f8f9fa;
+            --bg-secondary: #ffffff;
+            --bg-tertiary: #e9ecef;
+
+            --text-primary: #213C51;
+            --text-secondary: #6594B1;
+            --text-muted: #8a9ba8;
+
+            --border-color: #dee2e6;
+            --border-light: #e9ecef;
+
+            --accent-success: #28a745;
+            --accent-warning: #ffc107;
+            --accent-danger: #dc3545;
+
+            --font-display: 'JetBrains Mono', monospace;
+            --font-body: 'JetBrains Mono', monospace;
+
+            --shadow-sm: 0 1px 3px rgba(33, 60, 81, 0.08);
+            --shadow-md: 0 4px 12px rgba(33, 60, 81, 0.12);
+            --shadow-lg: 0 8px 24px rgba(33, 60, 81, 0.16);
+
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --radius-full: 9999px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ================================================================
+           Main Layout
+           ================================================================ */
+        .app-container {
+            display: flex;
+            height: 100vh;
+            max-width: 1600px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* ================================================================
+           Chat Panel (Main conversation area)
+           ================================================================ */
+        .chat-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+        }
+
+        .chat-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+        }
+
+        .chat-header h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--color-navy);
+            margin-bottom: 4px;
+        }
+
+        .chat-header .subtitle {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        /* Messages Area */
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* Message Bubbles */
+        .message {
+            display: flex;
+            gap: 12px;
+            max-width: 85%;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message-bot {
+            align-self: flex-start;
+        }
+
+        .message-user {
+            align-self: flex-end;
+            flex-direction: row-reverse;
+        }
+
+        .message-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-full);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+
+        .message-bot .message-avatar {
+            background: var(--color-navy);
+            color: white;
+        }
+
+        .message-user .message-avatar {
+            background: var(--color-pink);
+            color: var(--color-navy);
+        }
+
+        .message-content {
+            background: var(--bg-tertiary);
+            padding: 14px 18px;
+            border-radius: var(--radius-lg);
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .message-user .message-content {
+            background: var(--color-navy);
+            color: white;
+        }
+
+        .message-content p {
+            margin-bottom: 12px;
+        }
+
+        .message-content p:last-child {
+            margin-bottom: 0;
+        }
+
+        /* Typing Indicator */
+        .typing-indicator {
+            display: flex;
+            gap: 4px;
+            padding: 8px 0;
+        }
+
+        .typing-indicator span {
+            width: 8px;
+            height: 8px;
+            background: var(--text-muted);
+            border-radius: 50%;
+            animation: bounce 1.4s ease-in-out infinite;
+        }
+
+        .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes bounce {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-8px); }
+        }
+
+        /* Quick Reply Chips */
+        .quick-replies {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .quick-reply {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            padding: 8px 16px;
+            border-radius: var(--radius-full);
+            font-size: 0.85rem;
+            font-family: var(--font-body);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            color: var(--text-primary);
+        }
+
+        .quick-reply:hover {
+            background: var(--color-navy);
+            color: white;
+            border-color: var(--color-navy);
+        }
+
+        .quick-reply.selected {
+            background: var(--color-navy);
+            color: white;
+            border-color: var(--color-navy);
+        }
+
+        /* Input Area */
+        .chat-input-area {
+            padding: 16px 24px;
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+        }
+
+        .input-wrapper {
+            display: flex;
+            gap: 12px;
+            align-items: flex-end;
+        }
+
+        .chat-input {
+            flex: 1;
+            resize: none;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 12px 16px;
+            font-family: var(--font-body);
+            font-size: 0.9rem;
+            min-height: 48px;
+            max-height: 120px;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+
+        .chat-input:focus {
+            border-color: var(--color-navy);
+        }
+
+        .chat-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .send-btn {
+            width: 48px;
+            height: 48px;
+            border-radius: var(--radius-md);
+            background: var(--color-navy);
+            color: white;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        .send-btn:hover {
+            background: var(--color-steel);
+        }
+
+        .send-btn:disabled {
+            background: var(--border-color);
+            cursor: not-allowed;
+        }
+
+        .send-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* ================================================================
+           Summary Panel (Right sidebar)
+           ================================================================ */
+        .summary-panel {
+            width: 380px;
+            background: var(--bg-secondary);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .summary-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .summary-header h2 {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--color-navy);
+            margin-bottom: 4px;
+        }
+
+        .summary-header .subtitle {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .summary-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        /* Progress Steps */
+        .progress-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 24px;
+        }
+
+        .progress-step {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+            transition: all 0.2s ease;
+        }
+
+        .progress-step.active {
+            background: var(--color-navy);
+            color: white;
+        }
+
+        .progress-step.completed {
+            background: rgba(40, 167, 69, 0.1);
+            border: 1px solid var(--accent-success);
+        }
+
+        .step-number {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 600;
+            background: var(--border-color);
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+
+        .progress-step.active .step-number {
+            background: white;
+            color: var(--color-navy);
+        }
+
+        .progress-step.completed .step-number {
+            background: var(--accent-success);
+            color: white;
+        }
+
+        .step-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .step-title {
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .step-status {
+            font-size: 0.75rem;
+            opacity: 0.7;
+        }
+
+        /* Config Summary Cards */
+        .config-section {
+            margin-bottom: 16px;
+        }
+
+        .config-card {
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+            padding: 12px;
+            margin-bottom: 8px;
+        }
+
+        .config-card-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .config-item {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            padding: 4px 0;
+        }
+
+        .config-key {
+            color: var(--text-muted);
+        }
+
+        .config-value {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        /* Launch Button */
+        .summary-footer {
+            padding: 16px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .launch-btn {
+            width: 100%;
+            padding: 14px;
+            background: var(--accent-success);
+            color: white;
+            border: none;
+            border-radius: var(--radius-md);
+            font-family: var(--font-body);
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .launch-btn:hover:not(:disabled) {
+            background: #218838;
+        }
+
+        .launch-btn:disabled {
+            background: var(--border-color);
+            color: var(--text-muted);
+            cursor: not-allowed;
+        }
+
+        /* ================================================================
+           Responsive
+           ================================================================ */
+        @media (max-width: 900px) {
+            .summary-panel {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="app-container">
+    <!-- Chat Panel -->
+    <div class="chat-panel">
+        <div class="chat-header">
+            <h1>OTbot Campaign Setup</h1>
+            <div class="subtitle">Configure your autonomous experiment campaign through conversation</div>
+        </div>
+
+        <div class="chat-messages" id="chat-messages">
+            <!-- Messages will be inserted here -->
+        </div>
+
+        <div class="chat-input-area">
+            <div class="input-wrapper">
+                <textarea
+                    class="chat-input"
+                    id="chat-input"
+                    placeholder="Type your response..."
+                    rows="1"
+                ></textarea>
+                <button class="send-btn" id="send-btn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Summary Panel -->
+    <div class="summary-panel">
+        <div class="summary-header">
+            <h2>Campaign Configuration</h2>
+            <div class="subtitle">Your setup progress</div>
+        </div>
+
+        <div class="summary-content">
+            <div class="progress-steps" id="progress-steps">
+                <div class="progress-step active" data-step="1">
+                    <div class="step-number">1</div>
+                    <div class="step-info">
+                        <div class="step-title">Goal Specification</div>
+                        <div class="step-status">Current</div>
+                    </div>
+                </div>
+                <div class="progress-step" data-step="2">
+                    <div class="step-number">2</div>
+                    <div class="step-info">
+                        <div class="step-title">Safety Rules</div>
+                        <div class="step-status">Pending</div>
+                    </div>
+                </div>
+                <div class="progress-step" data-step="3">
+                    <div class="step-number">3</div>
+                    <div class="step-info">
+                        <div class="step-title">Protocol Pattern</div>
+                        <div class="step-status">Pending</div>
+                    </div>
+                </div>
+                <div class="progress-step" data-step="4">
+                    <div class="step-number">4</div>
+                    <div class="step-info">
+                        <div class="step-title">Parameter Space</div>
+                        <div class="step-status">Pending</div>
+                    </div>
+                </div>
+                <div class="progress-step" data-step="5">
+                    <div class="step-number">5</div>
+                    <div class="step-info">
+                        <div class="step-title">Human Gate Policy</div>
+                        <div class="step-status">Pending</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="config-section" id="config-summary">
+                <!-- Config summary will be populated here -->
+            </div>
+        </div>
+
+        <div class="summary-footer">
+            <button class="launch-btn" id="launch-btn" disabled>
+                Complete All Steps to Launch
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+/* ==========================================================================
+   OTbot Conversational Campaign Setup
+   ========================================================================== */
+
+const API = '/api/v1/init';
+
+// State
+let sessionId = null;
+let currentStep = 1;
+let currentSlots = [];
+let collectedData = {};
+let awaitingResponse = false;
+
+// DOM refs
+const chatMessages = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+const sendBtn = document.getElementById('send-btn');
+const launchBtn = document.getElementById('launch-btn');
+const progressSteps = document.querySelectorAll('.progress-step');
+const configSummary = document.getElementById('config-summary');
+
+// Conversation flow definitions
+const CONVERSATION_FLOW = {
+    1: {
+        name: 'Goal Specification',
+        questions: [
+            {
+                key: 'objective_type',
+                question: "What type of experiment would you like to run?",
+                hint: "For example: OER screening, battery cycling, catalyst testing...",
+                suggestions: ['OER Screening', 'HER Screening', 'Battery Cycling', 'Catalyst Optimization']
+            },
+            {
+                key: 'objective_kpi',
+                question: "What's the main metric (KPI) you want to optimize?",
+                hint: "This is the key performance indicator we'll track.",
+                suggestions: ['Overpotential (mV)', 'Current Density', 'Coulombic Efficiency', 'Stability Index']
+            },
+            {
+                key: 'direction',
+                question: "Should we minimize or maximize this metric?",
+                suggestions: ['Minimize', 'Maximize']
+            },
+            {
+                key: 'target_value',
+                question: "Do you have a target value in mind? (optional)",
+                hint: "You can specify a target or just say 'no target' to optimize without bounds.",
+                optional: true
+            }
+        ]
+    },
+    2: {
+        name: 'Safety Rules',
+        questions: [
+            {
+                key: 'available_instruments',
+                question: "Which instruments will be available for this campaign?",
+                suggestions: ['Potentiostat', 'Dispenser', 'Temperature Controller', 'Spectrometer'],
+                multi: true
+            },
+            {
+                key: 'max_temp_c',
+                question: "What's the maximum safe temperature (in Celsius)?",
+                hint: "Enter a number, e.g., '85' for 85°C"
+            },
+            {
+                key: 'max_volume_ul',
+                question: "What's the maximum safe volume per well (in microliters)?",
+                hint: "Enter a number, e.g., '1000' for 1000 µL"
+            },
+            {
+                key: 'require_lid',
+                question: "Should experiments require a lid for safety?",
+                suggestions: ['Yes', 'No']
+            }
+        ]
+    },
+    3: {
+        name: 'Protocol Pattern',
+        questions: [
+            {
+                key: 'pattern_id',
+                question: "Which protocol pattern should we use as a base?",
+                hint: "This defines the sequence of experimental steps.",
+                suggestions: ['OER Standard', 'HER Standard', 'CV Characterization', 'Custom Protocol']
+            },
+            {
+                key: 'optional_steps',
+                question: "Any optional steps you'd like to include?",
+                hint: "These are additional measurements or procedures.",
+                suggestions: ['Post-CV', 'EIS Measurement', 'Stability Test'],
+                multi: true,
+                optional: true
+            }
+        ]
+    },
+    4: {
+        name: 'Parameter Space',
+        questions: [
+            {
+                key: 'strategy',
+                question: "What optimization strategy should we use?",
+                suggestions: ['Bayesian Optimization', 'Grid Search', 'Random Search', 'Adaptive']
+            },
+            {
+                key: 'batch_size',
+                question: "How many experiments per batch?",
+                hint: "Enter a number, e.g., '5' for 5 experiments per round"
+            },
+            {
+                key: 'params_to_optimize',
+                question: "Which parameters should be optimized?",
+                hint: "Tell me which experimental parameters you want the system to tune.",
+                suggestions: ['Catalyst Loading', 'Electrolyte pH', 'Scan Rate', 'Temperature'],
+                multi: true
+            }
+        ]
+    },
+    5: {
+        name: 'Human Gate Policy',
+        questions: [
+            {
+                key: 'max_rounds',
+                question: "What's the maximum number of optimization rounds?",
+                hint: "Enter a number, e.g., '10' for up to 10 rounds"
+            },
+            {
+                key: 'plateau_threshold',
+                question: "After how many rounds without improvement should we stop? (plateau threshold)",
+                hint: "Enter a number, e.g., '3' to stop after 3 rounds with no improvement"
+            },
+            {
+                key: 'human_gate_triggers',
+                question: "When should the system pause for human approval?",
+                suggestions: ['Large parameter changes', 'Safety violations', 'Anomalous results', 'Budget exceeded'],
+                multi: true
+            }
+        ]
+    }
+};
+
+let currentQuestionIndex = 0;
+
+/* ========================================================================
+   Message Rendering
+   ======================================================================== */
+
+function addBotMessage(content, quickReplies = null) {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message message-bot';
+
+    msgDiv.innerHTML = `
+        <div class="message-avatar">OT</div>
+        <div class="message-content">
+            ${content}
+            ${quickReplies ? renderQuickReplies(quickReplies) : ''}
+        </div>
+    `;
+
+    chatMessages.appendChild(msgDiv);
+    scrollToBottom();
+}
+
+function addUserMessage(content) {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message message-user';
+
+    msgDiv.innerHTML = `
+        <div class="message-avatar">You</div>
+        <div class="message-content">${escapeHtml(content)}</div>
+    `;
+
+    chatMessages.appendChild(msgDiv);
+    scrollToBottom();
+}
+
+function addTypingIndicator() {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message message-bot';
+    msgDiv.id = 'typing-indicator';
+
+    msgDiv.innerHTML = `
+        <div class="message-avatar">OT</div>
+        <div class="message-content">
+            <div class="typing-indicator">
+                <span></span><span></span><span></span>
+            </div>
+        </div>
+    `;
+
+    chatMessages.appendChild(msgDiv);
+    scrollToBottom();
+}
+
+function removeTypingIndicator() {
+    const indicator = document.getElementById('typing-indicator');
+    if (indicator) indicator.remove();
+}
+
+function renderQuickReplies(options) {
+    const isMulti = options.multi;
+    const items = options.items || options;
+
+    return `
+        <div class="quick-replies" data-multi="${isMulti || false}">
+            ${items.map(opt => `<button class="quick-reply" data-value="${opt}">${opt}</button>`).join('')}
+        </div>
+    `;
+}
+
+function scrollToBottom() {
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+/* ========================================================================
+   Conversation Flow
+   ======================================================================== */
+
+function startConversation() {
+    addBotMessage(`
+        <p>Welcome! I'm OTbot, your autonomous lab assistant.</p>
+        <p>I'll help you set up a new experiment campaign. Let's configure everything through a quick conversation.</p>
+    `);
+
+    setTimeout(() => {
+        askCurrentQuestion();
+    }, 500);
+}
+
+function askCurrentQuestion() {
+    const stepConfig = CONVERSATION_FLOW[currentStep];
+    const questions = stepConfig.questions;
+
+    if (currentQuestionIndex >= questions.length) {
+        // Move to next step
+        completeStep(currentStep);
+        currentStep++;
+        currentQuestionIndex = 0;
+
+        if (currentStep > 5) {
+            finishSetup();
+            return;
+        }
+
+        updateProgressUI();
+
+        addBotMessage(`<p>Great! Let's move on to <strong>${CONVERSATION_FLOW[currentStep].name}</strong>.</p>`);
+        setTimeout(() => askCurrentQuestion(), 500);
+        return;
+    }
+
+    const q = questions[currentQuestionIndex];
+    let content = `<p>${q.question}</p>`;
+    if (q.hint) {
+        content += `<p style="font-size: 0.85rem; opacity: 0.8;">${q.hint}</p>`;
+    }
+
+    const quickReplies = q.suggestions ? { items: q.suggestions, multi: q.multi } : null;
+
+    addBotMessage(content, quickReplies);
+    awaitingResponse = true;
+
+    // Attach click handlers to quick replies
+    setTimeout(() => {
+        const replies = chatMessages.querySelectorAll('.quick-reply:not([data-bound])');
+        replies.forEach(btn => {
+            btn.dataset.bound = 'true';
+            btn.addEventListener('click', () => handleQuickReply(btn, q));
+        });
+    }, 100);
+}
+
+function handleQuickReply(btn, question) {
+    if (question.multi) {
+        btn.classList.toggle('selected');
+    } else {
+        // Single select - send immediately
+        handleUserInput(btn.dataset.value);
+    }
+}
+
+function handleUserInput(text) {
+    if (!awaitingResponse || !text.trim()) return;
+
+    awaitingResponse = false;
+
+    // Check for multi-select
+    const quickRepliesContainer = chatMessages.querySelector('.quick-replies[data-multi="true"]');
+    if (quickRepliesContainer) {
+        const selected = quickRepliesContainer.querySelectorAll('.quick-reply.selected');
+        if (selected.length > 0) {
+            text = Array.from(selected).map(btn => btn.dataset.value).join(', ');
+        }
+    }
+
+    addUserMessage(text);
+
+    // Store the response
+    const stepConfig = CONVERSATION_FLOW[currentStep];
+    const question = stepConfig.questions[currentQuestionIndex];
+
+    collectedData[question.key] = parseUserInput(text, question);
+
+    // Update config summary
+    updateConfigSummary();
+
+    // Move to next question
+    currentQuestionIndex++;
+
+    addTypingIndicator();
+    setTimeout(() => {
+        removeTypingIndicator();
+        askCurrentQuestion();
+    }, 600);
+}
+
+function parseUserInput(text, question) {
+    // Handle multi-select
+    if (question.multi) {
+        return text.split(',').map(s => s.trim()).filter(s => s);
+    }
+
+    // Handle yes/no
+    if (text.toLowerCase() === 'yes') return true;
+    if (text.toLowerCase() === 'no') return false;
+
+    // Handle numbers
+    const num = parseFloat(text);
+    if (!isNaN(num) && question.key.includes('max_') || question.key.includes('_size') || question.key.includes('rounds') || question.key.includes('threshold')) {
+        return num;
+    }
+
+    // Handle "no target" type responses
+    if (question.optional && (text.toLowerCase().includes('no') || text.toLowerCase().includes('skip'))) {
+        return null;
+    }
+
+    return text;
+}
+
+function completeStep(step) {
+    const stepEl = document.querySelector(`.progress-step[data-step="${step}"]`);
+    if (stepEl) {
+        stepEl.classList.remove('active');
+        stepEl.classList.add('completed');
+        stepEl.querySelector('.step-status').textContent = 'Completed';
+        stepEl.querySelector('.step-number').innerHTML = '✓';
+    }
+}
+
+function updateProgressUI() {
+    progressSteps.forEach(step => {
+        const stepNum = parseInt(step.dataset.step);
+        if (stepNum === currentStep) {
+            step.classList.add('active');
+            step.querySelector('.step-status').textContent = 'Current';
+        }
+    });
+}
+
+function updateConfigSummary() {
+    let html = '';
+
+    // Group data by step
+    for (let step = 1; step <= currentStep; step++) {
+        const stepConfig = CONVERSATION_FLOW[step];
+        const hasData = stepConfig.questions.some(q => collectedData[q.key] !== undefined);
+
+        if (hasData) {
+            html += `
+                <div class="config-card">
+                    <div class="config-card-title">${stepConfig.name}</div>
+                    ${stepConfig.questions.map(q => {
+                        const value = collectedData[q.key];
+                        if (value === undefined) return '';
+                        const displayValue = Array.isArray(value) ? value.join(', ') :
+                                           typeof value === 'boolean' ? (value ? 'Yes' : 'No') :
+                                           value || '—';
+                        return `
+                            <div class="config-item">
+                                <span class="config-key">${q.key.replace(/_/g, ' ')}</span>
+                                <span class="config-value">${displayValue}</span>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+        }
+    }
+
+    configSummary.innerHTML = html;
+}
+
+function finishSetup() {
+    addBotMessage(`
+        <p>Excellent! Your campaign configuration is complete.</p>
+        <p>Here's a summary of what we've set up:</p>
+        <ul style="margin: 10px 0; padding-left: 20px;">
+            <li><strong>Goal:</strong> ${collectedData.objective_type || '—'}</li>
+            <li><strong>KPI:</strong> ${collectedData.objective_kpi || '—'} (${collectedData.direction || '—'})</li>
+            <li><strong>Strategy:</strong> ${collectedData.strategy || '—'}</li>
+            <li><strong>Max Rounds:</strong> ${collectedData.max_rounds || '—'}</li>
+        </ul>
+        <p>Click <strong>Launch Campaign</strong> when you're ready to start!</p>
+    `);
+
+    launchBtn.disabled = false;
+    launchBtn.textContent = 'Launch Campaign';
+}
+
+/* ========================================================================
+   API Integration
+   ======================================================================== */
+
+async function launchCampaign() {
+    launchBtn.disabled = true;
+    launchBtn.textContent = 'Creating Campaign...';
+
+    try {
+        // Convert collected data to API format
+        const payload = {
+            goal: {
+                objective_type: collectedData.objective_type,
+                objective_kpi: collectedData.objective_kpi,
+                direction: collectedData.direction?.toLowerCase(),
+                target_value: collectedData.target_value
+            },
+            safety: {
+                available_instruments: collectedData.available_instruments,
+                max_temp_c: collectedData.max_temp_c,
+                max_volume_ul: collectedData.max_volume_ul,
+                require_lid: collectedData.require_lid
+            },
+            protocol: {
+                pattern_id: collectedData.pattern_id,
+                optional_steps: collectedData.optional_steps
+            },
+            param_space: {
+                strategy: collectedData.strategy,
+                batch_size: collectedData.batch_size,
+                params_to_optimize: collectedData.params_to_optimize
+            },
+            human_gate: {
+                max_rounds: collectedData.max_rounds,
+                plateau_threshold: collectedData.plateau_threshold,
+                human_gate_triggers: collectedData.human_gate_triggers
+            }
+        };
+
+        // For demo purposes, create campaign directly
+        const res = await fetch('/api/v1/campaigns', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: `Campaign: ${collectedData.objective_type}`,
+                cadence_seconds: 300,
+                protocol_json: payload.protocol,
+                inputs_json: payload.param_space,
+                policy_json: payload.human_gate
+            })
+        });
+
+        if (res.ok) {
+            const result = await res.json();
+            launchBtn.textContent = '✓ Campaign Created!';
+            launchBtn.style.background = 'var(--accent-success)';
+
+            addBotMessage(`
+                <p>🎉 <strong>Campaign launched successfully!</strong></p>
+                <p>Campaign ID: <code>${result.id?.substring(0, 8) || 'demo'}</code></p>
+                <p>The autonomous experiment loop is now running. You can monitor progress on the <a href="/static/dashboard.html">Dashboard</a>.</p>
+            `);
+        } else {
+            throw new Error('Failed to create campaign');
+        }
+    } catch (err) {
+        console.error(err);
+        launchBtn.textContent = 'Launch Campaign';
+        launchBtn.disabled = false;
+        addBotMessage(`<p style="color: var(--accent-danger);">Sorry, there was an error creating the campaign. Please try again.</p>`);
+    }
+}
+
+/* ========================================================================
+   Event Listeners
+   ======================================================================== */
+
+// Auto-resize textarea
+chatInput.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+
+// Send on Enter (Shift+Enter for new line)
+chatInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+    }
+});
+
+sendBtn.addEventListener('click', sendMessage);
+
+function sendMessage() {
+    const text = chatInput.value.trim();
+    if (text) {
+        handleUserInput(text);
+        chatInput.value = '';
+        chatInput.style.height = 'auto';
+    }
+}
+
+launchBtn.addEventListener('click', launchCampaign);
+
+/* ========================================================================
+   Initialize
+   ======================================================================== */
+
+startConversation();
+</script>
+
+</body>
+</html>

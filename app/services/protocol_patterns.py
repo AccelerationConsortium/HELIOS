@@ -436,6 +436,93 @@ register_pattern(OER_SCREENING)
 
 
 # ---------------------------------------------------------------------------
+# OER screening pattern WITH cleaning steps
+# ---------------------------------------------------------------------------
+
+_CLEAN_PRE_PARAMS = (
+    PatternParam(
+        name="pre_clean_workflow",
+        param_type="categorical",
+        default="pre_deposition_clean",
+        choices=("pre_deposition_clean", "full_cycle_clean", "none"),
+        optimizable=False,
+        description="Cleaning workflow to run before deposition",
+    ),
+)
+
+_CLEAN_POST_PARAMS = (
+    PatternParam(
+        name="post_clean_workflow",
+        param_type="categorical",
+        default="post_deposition_clean",
+        choices=("post_deposition_clean", "full_cycle_clean", "none"),
+        optimizable=False,
+        description="Cleaning workflow to run after electrochemical test",
+    ),
+)
+
+OER_SCREENING_WITH_CLEANING = ProtocolPattern(
+    id="oer_screening_with_cleaning",
+    name="OER Catalyst Screening with Cleaning",
+    domain="oer",
+    description=(
+        "Six-step OER catalyst screening workflow: pre-clean, ink synthesis, "
+        "thin-film deposition, thermal annealing, electrochemical "
+        "characterisation, and post-clean. Cleaning steps use the "
+        "cleaning_skills registry."
+    ),
+    steps=(
+        PatternStep(
+            name="pre_clean",
+            primitive="cleanup.run_full",
+            params=_CLEAN_PRE_PARAMS,
+            order=0,
+            description="Run pre-deposition cleaning workflow",
+        ),
+        PatternStep(
+            name="synthesis",
+            primitive="robot.aspirate",
+            params=_OER_SYNTHESIS_PARAMS,
+            order=1,
+            description="Prepare catalyst ink from metal-salt precursors",
+        ),
+        PatternStep(
+            name="deposition",
+            primitive="robot.dispense",
+            params=_OER_DEPOSITION_PARAMS,
+            order=2,
+            description="Deposit catalyst ink onto substrate via spin-coating",
+        ),
+        PatternStep(
+            name="annealing",
+            primitive="heat",
+            params=_OER_ANNEALING_PARAMS,
+            order=3,
+            description="Anneal deposited film to form metal-oxide phase",
+        ),
+        PatternStep(
+            name="electrochem_test",
+            primitive="squidstat.run_experiment",
+            params=_OER_ELECTROCHEM_PARAMS,
+            order=4,
+            description="Run electrochemical OER characterisation (LSV/CV)",
+        ),
+        PatternStep(
+            name="post_clean",
+            primitive="cleanup.run_full",
+            params=_CLEAN_POST_PARAMS,
+            order=5,
+            description="Run post-test cleaning workflow",
+        ),
+    ),
+    version="1.0",
+    tags=("oer", "screening", "electrocatalysis", "high-throughput", "cleaning"),
+)
+
+register_pattern(OER_SCREENING_WITH_CLEANING)
+
+
+# ---------------------------------------------------------------------------
 # Convenience builder
 # ---------------------------------------------------------------------------
 

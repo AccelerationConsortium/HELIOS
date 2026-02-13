@@ -82,6 +82,10 @@ LEGACY_SAFETY_MAP: dict[str, SafetyClass] = {
     "plc.set_pump_on_timer": SafetyClass.CAREFUL,
     "plc.set_ultrasonic_on_timer": SafetyClass.CAREFUL,
     "cleanup.run_full": SafetyClass.CAREFUL,
+    "cleanup.ultrasonic_water": SafetyClass.CAREFUL,
+    "cleanup.ultrasonic_acid": SafetyClass.CAREFUL,
+    "cleanup.water_flush": SafetyClass.CAREFUL,
+    "cleanup.electrode_clean": SafetyClass.CAREFUL,
     # CRITICAL → HAZARDOUS (irreversible liquid/experiment)
     "robot.aspirate": SafetyClass.HAZARDOUS,
     "robot.dispense": SafetyClass.HAZARDOUS,

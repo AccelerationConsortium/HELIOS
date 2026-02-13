@@ -24,7 +24,10 @@ class Settings:
         self.adapter_mode: str = os.getenv("ADAPTER_MODE", "simulated")  # simulated | battery_lab
         self.adapter_dry_run: bool = os.getenv("ADAPTER_DRY_RUN", "true").lower() in ("true", "1", "yes")
 
-        # OT-2 robot
+        # Robot type: "ot2" | "flex"
+        self.robot_type: str = os.getenv("ROBOT_TYPE", "ot2")
+
+        # Robot IP
         self.robot_ip: str = os.getenv("ROBOT_IP", "localhost")
 
         # PLC (Modbus TCP) — address configured inside OT_PLC_Client_Edit

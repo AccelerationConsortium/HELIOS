@@ -36,10 +36,10 @@ def new_run_bundle_id() -> str:
 class SlotAssignment(BaseModel):
     """What's in a deck slot."""
 
-    slot_number: int = Field(ge=1, le=11)
+    slot_number: int | str  # int for OT-2 (1-11), str for Flex ("A1"-"D3")
     labware_name: str
     labware_definition: str  # Opentrons labware def name
-    role: Literal["source", "destination", "tips", "waste", "wash", "reagent"]
+    role: Literal["source", "destination", "tips", "waste", "wash", "reagent", "custom"]
     contents: dict[str, Any] = Field(default_factory=dict)  # well -> content description
 
 

@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OTbot — Campaign Dashboard</title>
+    <link rel="stylesheet" href="/static/init.css">
+    <style>
+        /* Dashboard-specific styles */
+        .dashboard-container {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-default);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .logo {
+            padding: var(--gap-lg);
+            border-bottom: 1px solid var(--border-default);
+            display: flex;
+            align-items: center;
+            gap: var(--gap-md);
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--color-navy) 0%, var(--color-steel) 100%);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 18px;
+            font-weight: 600;
+            box-shadow: 0 4px 16px var(--color-accent-glow);
+        }
+
+        .logo-text {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--color-navy);
+        }
+
+        .logo-subtitle {
+            font-size: 11px;
+            color: var(--text-tertiary);
+        }
+
+        .nav-section {
+            padding: var(--gap-md);
+        }
+
+        .nav-section-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: var(--gap-sm);
+            padding: 0 var(--gap-sm);
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: var(--gap-sm);
+            padding: var(--gap-sm) var(--gap-md);
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+            margin-bottom: 2px;
+        }
+
+        .nav-item:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background: var(--color-accent-dim);
+            color: var(--color-accent-bright);
+        }
+
+        .nav-item .count {
+            margin-left: auto;
+            background: var(--bg-tertiary);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+        }
+
+        .nav-item.active .count {
+            background: rgba(101, 148, 177, 0.2);
+        }
+
+        /* Main Content */
+        .main-content {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            background: var(--bg-primary);
+        }
+
+        .main-header {
+            padding: var(--gap-lg) var(--gap-xl);
+            border-bottom: 1px solid var(--border-default);
+            background: var(--bg-secondary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .main-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--color-navy);
+        }
+
+        .main-subtitle {
+            font-size: 13px;
+            color: var(--text-tertiary);
+            margin-top: 2px;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: var(--gap-sm);
+        }
+
+        .main-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--gap-xl);
+        }
+
+        /* Metric Cards Grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: var(--gap-md);
+            margin-bottom: var(--gap-xl);
+        }
+
+        .metric-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            padding: var(--gap-lg);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+        }
+
+        .metric-card.accent::before {
+            background: linear-gradient(90deg, var(--color-accent) 0%, var(--color-accent-bright) 100%);
+        }
+
+        .metric-card.success::before {
+            background: var(--color-success);
+        }
+
+        .metric-card.warning::before {
+            background: var(--color-warning);
+        }
+
+        .metric-card.pink::before {
+            background: var(--color-pink);
+        }
+
+        .metric-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: var(--gap-sm);
+        }
+
+        .metric-value {
+            font-size: 32px;
+            font-weight: 600;
+            color: var(--text-primary);
+            line-height: 1;
+        }
+
+        .metric-sublabel {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin-top: var(--gap-sm);
+        }
+
+        .metric-trend {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            padding: 2px 8px;
+            border-radius: var(--radius-sm);
+            margin-top: var(--gap-sm);
+        }
+
+        .metric-trend.up {
+            color: var(--color-success);
+            background: var(--color-success-dim);
+        }
+
+        .metric-trend.down {
+            color: var(--color-error);
+            background: var(--color-error-dim);
+        }
+
+        /* Section Cards */
+        .section-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-lg);
+            margin-bottom: var(--gap-lg);
+            overflow: hidden;
+        }
+
+        .section-header {
+            padding: var(--gap-md) var(--gap-lg);
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--color-navy);
+        }
+
+        .section-body {
+            padding: var(--gap-lg);
+        }
+
+        /* Table Styles */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .data-table th {
+            text-align: left;
+            padding: var(--gap-sm) var(--gap-md);
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-tertiary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border-default);
+        }
+
+        .data-table td {
+            padding: var(--gap-md);
+            font-size: 13px;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .data-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .data-table tr:hover td {
+            background: var(--bg-tertiary);
+        }
+
+        .run-id {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--color-accent);
+        }
+
+        /* Timeline */
+        .timeline {
+            position: relative;
+            padding-left: var(--gap-xl);
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 8px;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: var(--border-default);
+        }
+
+        .timeline-item {
+            position: relative;
+            padding-bottom: var(--gap-lg);
+        }
+
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -26px;
+            top: 4px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--color-accent);
+            border: 2px solid var(--bg-secondary);
+        }
+
+        .timeline-item.success::before {
+            background: var(--color-success);
+        }
+
+        .timeline-item.pending::before {
+            background: var(--text-muted);
+        }
+
+        .timeline-time {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        .timeline-content {
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        .timeline-detail {
+            font-size: 12px;
+            color: var(--text-tertiary);
+            margin-top: 4px;
+        }
+
+        /* KPI Chart Placeholder */
+        .chart-container {
+            height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+            color: var(--text-muted);
+        }
+
+        /* Evolution Proposals */
+        .proposal-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: var(--gap-md);
+            margin-bottom: var(--gap-md);
+        }
+
+        .proposal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--gap-sm);
+        }
+
+        .proposal-type {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--color-highlight);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+
+        .proposal-magnitude {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: var(--color-warning-dim);
+            color: var(--color-warning);
+        }
+
+        .proposal-body {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: var(--gap-md);
+        }
+
+        .proposal-actions {
+            display: flex;
+            gap: var(--gap-sm);
+        }
+
+        /* Progress Bar */
+        .progress-bar {
+            height: 6px;
+            background: var(--bg-tertiary);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--color-accent) 0%, var(--color-pink) 100%);
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: var(--gap-xl);
+            color: var(--text-muted);
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: var(--gap-md);
+            opacity: 0.5;
+        }
+
+        /* Refresh indicator */
+        .refresh-indicator {
+            display: flex;
+            align-items: center;
+            gap: var(--gap-sm);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .refresh-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--color-success);
+            animation: pulse 2s infinite;
+        }
+
+        /* Two column layout */
+        .two-columns {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--gap-lg);
+        }
+
+        @media (max-width: 1200px) {
+            .metrics-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .two-columns {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .dashboard-container {
+                grid-template-columns: 1fr;
+            }
+            .sidebar {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="dashboard-container">
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="logo">
+            <div class="logo-icon">OT</div>
+            <div>
+                <div class="logo-text">OTbot</div>
+                <div class="logo-subtitle">Lab Orchestrator</div>
+            </div>
+        </div>
+
+        <div class="nav-section">
+            <div class="nav-section-title">Overview</div>
+            <div class="nav-item active">
+                <span>📊</span> Dashboard
+            </div>
+            <a href="/static/init.html" class="nav-item" style="text-decoration: none;">
+                <span>➕</span> New Campaign
+            </a>
+        </div>
+
+        <div class="nav-section">
+            <div class="nav-section-title">Monitoring</div>
+            <div class="nav-item">
+                <span>🧪</span> Campaigns
+                <span class="count" id="nav-campaigns-count">0</span>
+            </div>
+            <div class="nav-item">
+                <span>🔬</span> Runs
+                <span class="count" id="nav-runs-count">0</span>
+            </div>
+            <div class="nav-item">
+                <span>📈</span> Metrics
+            </div>
+        </div>
+
+        <div class="nav-section">
+            <div class="nav-section-title">Evolution</div>
+            <div class="nav-item">
+                <span>🧬</span> Proposals
+                <span class="count" id="nav-proposals-count">0</span>
+            </div>
+            <div class="nav-item">
+                <span>🎯</span> Optimization
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <div class="main-header">
+            <div>
+                <div class="main-title">Campaign Dashboard</div>
+                <div class="main-subtitle">Real-time autonomous experiment monitoring</div>
+            </div>
+            <div class="header-actions">
+                <div class="refresh-indicator">
+                    <div class="refresh-dot"></div>
+                    <span>Auto-refresh: <span id="refresh-countdown">5</span>s</span>
+                </div>
+                <button class="btn btn-secondary" onclick="refreshAll()">↻ Refresh</button>
+                <a href="/static/init.html" class="btn btn-primary">+ New Campaign</a>
+            </div>
+        </div>
+
+        <div class="main-body">
+            <!-- Metrics Overview -->
+            <div class="metrics-grid">
+                <div class="metric-card accent">
+                    <div class="metric-label">Active Campaigns</div>
+                    <div class="metric-value" id="metric-campaigns">0</div>
+                    <div class="metric-sublabel">Running experiments</div>
+                </div>
+                <div class="metric-card success">
+                    <div class="metric-label">Total Runs</div>
+                    <div class="metric-value" id="metric-runs">0</div>
+                    <div class="metric-trend up" id="metric-runs-trend">↑ +0 today</div>
+                </div>
+                <div class="metric-card warning">
+                    <div class="metric-label">Avg Success Rate</div>
+                    <div class="metric-value" id="metric-success">—%</div>
+                    <div class="metric-sublabel">Last 24 hours</div>
+                </div>
+                <div class="metric-card pink">
+                    <div class="metric-label">Evolution Proposals</div>
+                    <div class="metric-value" id="metric-proposals">0</div>
+                    <div class="metric-sublabel">Pending review</div>
+                </div>
+            </div>
+
+            <div class="two-columns">
+                <!-- Recent Runs -->
+                <div class="section-card">
+                    <div class="section-header">
+                        <div class="section-title">Recent Runs</div>
+                        <span class="status-badge active">Live</span>
+                    </div>
+                    <div class="section-body" style="padding: 0;">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Run ID</th>
+                                    <th>Campaign</th>
+                                    <th>Status</th>
+                                    <th>Score</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="runs-table-body">
+                                <tr>
+                                    <td colspan="5" class="empty-state">
+                                        <div>No runs yet. Create a campaign to start.</div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Activity Timeline -->
+                <div class="section-card">
+                    <div class="section-header">
+                        <div class="section-title">Activity Timeline</div>
+                    </div>
+                    <div class="section-body">
+                        <div class="timeline" id="activity-timeline">
+                            <div class="timeline-item pending">
+                                <div class="timeline-time">Waiting</div>
+                                <div class="timeline-content">No activity yet</div>
+                                <div class="timeline-detail">Start a campaign to see activity</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="two-columns">
+                <!-- KPI Trends -->
+                <div class="section-card">
+                    <div class="section-header">
+                        <div class="section-title">KPI Trends</div>
+                    </div>
+                    <div class="section-body">
+                        <div id="kpi-content">
+                            <div class="chart-container">
+                                📊 KPI data will appear after runs complete
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Evolution Proposals -->
+                <div class="section-card">
+                    <div class="section-header">
+                        <div class="section-title">Evolution Proposals</div>
+                    </div>
+                    <div class="section-body" id="proposals-content">
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🧬</div>
+                            <div>No pending proposals</div>
+                            <div style="font-size: 12px; margin-top: 8px;">
+                                Proposals are generated after successful runs
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Campaigns List -->
+            <div class="section-card">
+                <div class="section-header">
+                    <div class="section-title">Active Campaigns</div>
+                </div>
+                <div class="section-body" style="padding: 0;">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Campaign ID</th>
+                                <th>Objective</th>
+                                <th>Target KPI</th>
+                                <th>Runs</th>
+                                <th>Progress</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="campaigns-table-body">
+                            <tr>
+                                <td colspan="6" class="empty-state">
+                                    <div>No active campaigns</div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const API_BASE = '/api/v1';
+let refreshInterval = null;
+let countdown = 5;
+
+// Fetch and update dashboard data
+async function fetchCampaigns() {
+    try {
+        const res = await fetch(`${API_BASE}/campaigns`);
+        if (!res.ok) return [];
+        const data = await res.json();
+        // API returns array directly
+        return Array.isArray(data) ? data : (data.campaigns || []);
+    } catch (e) {
+        console.error('Failed to fetch campaigns:', e);
+        return [];
+    }
+}
+
+async function fetchRuns() {
+    try {
+        const res = await fetch(`${API_BASE}/runs`);
+        if (!res.ok) return [];
+        const data = await res.json();
+        // API returns array directly
+        return Array.isArray(data) ? data : (data.runs || []);
+    } catch (e) {
+        console.error('Failed to fetch runs:', e);
+        return [];
+    }
+}
+
+async function fetchProposals() {
+    try {
+        const res = await fetch(`${API_BASE}/evolution/proposals?status=pending`);
+        if (!res.ok) return [];
+        const data = await res.json();
+        // API returns array directly
+        return Array.isArray(data) ? data : (data.proposals || []);
+    } catch (e) {
+        console.error('Failed to fetch proposals:', e);
+        return [];
+    }
+}
+
+function formatTime(timestamp) {
+    if (!timestamp) return '—';
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = (now - date) / 1000;
+
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return date.toLocaleDateString();
+}
+
+function getStatusBadge(status) {
+    const statusMap = {
+        'scheduled': '<span class="status-badge active">Scheduled</span>',
+        'running': '<span class="status-badge active">Running</span>',
+        'completed': '<span class="status-badge completed">Completed</span>',
+        'succeeded': '<span class="status-badge completed">Completed</span>',
+        'failed': '<span class="status-badge error">Failed</span>',
+        'pending': '<span class="status-badge">Pending</span>',
+    };
+    return statusMap[status?.toLowerCase()] || `<span class="status-badge">${status || 'Unknown'}</span>`;
+}
+
+function updateMetrics(campaigns, runs, proposals) {
+    document.getElementById('metric-campaigns').textContent = campaigns.filter(c => c.is_active).length;
+    document.getElementById('metric-runs').textContent = runs.length;
+    document.getElementById('metric-proposals').textContent = proposals.length;
+
+    // Calculate success rate (handle both 'completed' and 'succeeded')
+    const completedRuns = runs.filter(r => ['completed', 'succeeded', 'failed'].includes(r.status?.toLowerCase()));
+    const successfulRuns = runs.filter(r => ['completed', 'succeeded'].includes(r.status?.toLowerCase()));
+    const successRate = completedRuns.length > 0
+        ? Math.round((successfulRuns.length / completedRuns.length) * 100)
+        : '—';
+    document.getElementById('metric-success').textContent = successRate + (successRate !== '—' ? '%' : '');
+
+    // Update nav counts
+    document.getElementById('nav-campaigns-count').textContent = campaigns.length;
+    document.getElementById('nav-runs-count').textContent = runs.length;
+    document.getElementById('nav-proposals-count').textContent = proposals.length;
+
+    // Today's runs
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayRuns = runs.filter(r => new Date(r.created_at) >= today).length;
+    document.getElementById('metric-runs-trend').textContent = `↑ +${todayRuns} today`;
+}
+
+function updateRunsTable(runs) {
+    const tbody = document.getElementById('runs-table-body');
+
+    if (runs.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="5" class="empty-state">
+                    <div>No runs yet. Create a campaign to start.</div>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    // Sort by created_at descending, take last 10
+    const recentRuns = runs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 10);
+
+    tbody.innerHTML = recentRuns.map(run => `
+        <tr>
+            <td><span class="run-id">${(run.id || run.run_id)?.slice(0, 8) || '—'}...</span></td>
+            <td>${run.campaign_id?.slice(0, 8) || '—'}...</td>
+            <td>${getStatusBadge(run.status)}</td>
+            <td>${run.score !== undefined ? run.score + '/100' : '—'}</td>
+            <td>${formatTime(run.created_at)}</td>
+        </tr>
+    `).join('');
+}
+
+function updateCampaignsTable(campaigns) {
+    const tbody = document.getElementById('campaigns-table-body');
+
+    if (campaigns.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="empty-state">
+                    <div>No active campaigns. <a href="/static/init.html">Create one</a></div>
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    tbody.innerHTML = campaigns.map(campaign => {
+        // Parse inputs to get objective info
+        const inputs = campaign.inputs || {};
+        const policy = campaign.policy || {};
+        const maxRounds = policy.max_rounds || 15;
+        const progress = 60; // Simulated progress
+
+        return `
+            <tr>
+                <td><span class="run-id">${(campaign.id || campaign.campaign_id)?.slice(0, 8) || '—'}...</span></td>
+                <td>${campaign.name || '—'}</td>
+                <td>${Object.keys(inputs)[0] || 'custom'}</td>
+                <td>—/${maxRounds}</td>
+                <td>
+                    <div class="progress-bar" style="width: 100px;">
+                        <div class="progress-fill" style="width: ${progress}%;"></div>
+                    </div>
+                </td>
+                <td>${campaign.is_active ? getStatusBadge('running') : getStatusBadge('completed')}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function updateTimeline(runs, proposals) {
+    const timeline = document.getElementById('activity-timeline');
+    const events = [];
+
+    // Add run events
+    runs.slice(0, 5).forEach(run => {
+        const isSuccess = ['completed', 'succeeded'].includes(run.status?.toLowerCase());
+        events.push({
+            time: run.created_at,
+            type: isSuccess ? 'success' : (run.status === 'running' ? 'active' : 'pending'),
+            title: `Run ${(run.id || run.run_id)?.slice(0, 8)}`,
+            detail: `Status: ${run.status}${run.score ? `, Score: ${run.score}` : ''}`
+        });
+    });
+
+    // Add proposal events
+    proposals.slice(0, 3).forEach(p => {
+        events.push({
+            time: p.created_at,
+            type: 'pending',
+            title: `Evolution Proposal`,
+            detail: `${p.proposal_type}: ${(p.change_summary || p.description)?.slice(0, 50) || 'Parameter optimization'}`
+        });
+    });
+
+    // Sort by time
+    events.sort((a, b) => new Date(b.time) - new Date(a.time));
+
+    if (events.length === 0) {
+        timeline.innerHTML = `
+            <div class="timeline-item pending">
+                <div class="timeline-time">Waiting</div>
+                <div class="timeline-content">No activity yet</div>
+                <div class="timeline-detail">Start a campaign to see activity</div>
+            </div>
+        `;
+        return;
+    }
+
+    timeline.innerHTML = events.slice(0, 8).map(e => `
+        <div class="timeline-item ${e.type}">
+            <div class="timeline-time">${formatTime(e.time)}</div>
+            <div class="timeline-content">${e.title}</div>
+            <div class="timeline-detail">${e.detail}</div>
+        </div>
+    `).join('');
+}
+
+function updateProposals(proposals) {
+    const container = document.getElementById('proposals-content');
+
+    if (proposals.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">🧬</div>
+                <div>No pending proposals</div>
+                <div style="font-size: 12px; margin-top: 8px;">
+                    Proposals are generated after successful runs
+                </div>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = proposals.slice(0, 3).map(p => `
+        <div class="proposal-card">
+            <div class="proposal-header">
+                <span class="proposal-type">${p.proposal_type || 'Prior Tightening'}</span>
+                <span class="proposal-magnitude">${Math.round(p.magnitude) || '—'}% change</span>
+            </div>
+            <div class="proposal-body">
+                ${p.change_summary || p.description || 'Parameter optimization based on successful run results'}
+            </div>
+            <div class="proposal-actions">
+                <button class="btn btn-success btn-sm" onclick="approveProposal('${p.id || p.proposal_id}')">
+                    ✓ Approve
+                </button>
+                <button class="btn btn-danger btn-sm" onclick="rejectProposal('${p.id || p.proposal_id}')">
+                    ✗ Reject
+                </button>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function approveProposal(proposalId) {
+    try {
+        const res = await fetch(`${API_BASE}/evolution/proposals/${proposalId}/approve`, {
+            method: 'POST'
+        });
+        if (res.ok) {
+            refreshAll();
+        }
+    } catch (e) {
+        console.error('Failed to approve proposal:', e);
+    }
+}
+
+async function rejectProposal(proposalId) {
+    try {
+        const res = await fetch(`${API_BASE}/evolution/proposals/${proposalId}/reject`, {
+            method: 'POST'
+        });
+        if (res.ok) {
+            refreshAll();
+        }
+    } catch (e) {
+        console.error('Failed to reject proposal:', e);
+    }
+}
+
+async function refreshAll() {
+    const [campaigns, runs, proposals] = await Promise.all([
+        fetchCampaigns(),
+        fetchRuns(),
+        fetchProposals()
+    ]);
+
+    updateMetrics(campaigns, runs, proposals);
+    updateRunsTable(runs);
+    updateCampaignsTable(campaigns);
+    updateTimeline(runs, proposals);
+    updateProposals(proposals);
+}
+
+// Countdown timer
+function startCountdown() {
+    countdown = 5;
+    if (refreshInterval) clearInterval(refreshInterval);
+
+    refreshInterval = setInterval(() => {
+        countdown--;
+        document.getElementById('refresh-countdown').textContent = countdown;
+
+        if (countdown <= 0) {
+            refreshAll();
+            countdown = 5;
+        }
+    }, 1000);
+}
+
+// Initialize
+document.addEventListener('DOMContentLoaded', () => {
+    refreshAll();
+    startCountdown();
+});
+</script>
+
+</body>
+</html>

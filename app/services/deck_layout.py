@@ -1,29 +1,41 @@
-"""Deck/Layout Agent — OT-2 deck resource binding and validation.
+"""Deck/Layout Agent — deck resource binding and validation.
 
 Maps protocol steps to physical deck slots, assigns labware,
 validates pipette reachability, and computes volume budgets.
 
+Supports both OT-2 (11 numeric slots) and Flex (12 alphanumeric slots).
 This agent sits in L1 (compilation layer) and ensures the protocol
-can physically execute on the OT-2 deck.
+can physically execute on the target robot deck.
 """
 from __future__ import annotations
 
 import logging
 import math
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# OT-2 Deck Constants
+# Robot Type
+# ---------------------------------------------------------------------------
+
+class RobotType(str, Enum):
+    """Supported robot platforms."""
+    OT2 = "ot2"
+    FLEX = "flex"
+
+
+# ---------------------------------------------------------------------------
+# OT-2 Deck Constants (backward-compat aliases)
 # ---------------------------------------------------------------------------
 
 TOTAL_SLOTS = 11
 SLOT_RANGE = range(1, TOTAL_SLOTS + 1)
 
-# Pipette specs
+# Pipette specs (OT-2 — kept as backward-compat alias)
 PIPETTE_SPECS: dict[str, dict[str, Any]] = {
     "p20_single_gen2": {
         "max_volume_ul": 20.0,
@@ -38,6 +50,60 @@ PIPETTE_SPECS: dict[str, dict[str, Any]] = {
         "channels": 1,
     },
 }
+
+# Flex pipette specs
+FLEX_PIPETTE_SPECS: dict[str, dict[str, Any]] = {
+    "flex_1channel_1000": {
+        "max_volume_ul": 1000.0,
+        "min_volume_ul": 5.0,
+        "mount": "right",
+        "channels": 1,
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Flex valid slots
+# ---------------------------------------------------------------------------
+
+FLEX_SLOT_NAMES: list[str] = [
+    "A1", "A2", "A3",
+    "B1", "B2", "B3",
+    "C1", "C2", "C3",
+    "D1", "D2", "D3",
+]
+
+
+# ---------------------------------------------------------------------------
+# Per-robot configuration
+# ---------------------------------------------------------------------------
+
+ROBOT_CONFIGS: dict[RobotType, dict[str, Any]] = {
+    RobotType.OT2: {
+        "total_slots": 11,
+        "slot_names": list(range(1, 12)),       # [1,2,...,11]
+        "slot_type": "numeric",
+        "pipette_specs": PIPETTE_SPECS,
+        "tip_slots": [7, 8, 9],
+        "waste_slot": 10,
+        "fixed_trash": 12,
+    },
+    RobotType.FLEX: {
+        "total_slots": 12,
+        "slot_names": FLEX_SLOT_NAMES,
+        "slot_type": "alphanumeric",
+        "pipette_specs": FLEX_PIPETTE_SPECS,
+        "tip_slots": ["B1", "B2", "B3"],
+        "waste_slot": "A3",
+        "fixed_trash": None,
+    },
+}
+
+
+def valid_slot(slot_id: int | str, robot_type: RobotType = RobotType.OT2) -> bool:
+    """Check if a slot identifier is valid for the given robot type."""
+    cfg = ROBOT_CONFIGS[robot_type]
+    return slot_id in cfg["slot_names"]
 
 # Common labware definitions
 LABWARE_CATALOG: dict[str, dict[str, Any]] = {
@@ -78,9 +144,57 @@ LABWARE_CATALOG: dict[str, dict[str, Any]] = {
         "wells": 1,
         "well_volume_ul": 1100000.0,
     },
+    "opentrons_15_tuberack_falcon_15ml_conical": {
+        "type": "tuberack",
+        "wells": 15,
+        "well_volume_ul": 15000.0,
+    },
+    "corning_24_wellplate_3.4ml_flat": {
+        "type": "wellplate",
+        "wells": 24,
+        "well_volume_ul": 3400.0,
+    },
+    # Custom labware for electrochemistry setups
+    "custom_ultrasonic_bath_2chamber": {
+        "type": "wash",
+        "wells": 2,
+        "well_volume_ul": 500000.0,
+        "is_custom": True,
+    },
+    "custom_electrode_holder_2x2": {
+        "type": "custom",
+        "wells": 4,
+        "well_volume_ul": 0.0,
+        "is_custom": True,
+    },
+    "custom_tool_holder_4pos": {
+        "type": "custom",
+        "wells": 4,
+        "well_volume_ul": 0.0,
+        "is_custom": True,
+    },
+    # --- Flex-specific labware ---
+    "opentrons_flex_96_tiprack_1000ul": {
+        "type": "tiprack",
+        "wells": 96,
+        "tip_volume_ul": 1000.0,
+        "compatible_pipettes": ["flex_1channel_1000"],
+    },
+    "opentrons_flex_96_tiprack_200ul": {
+        "type": "tiprack",
+        "wells": 96,
+        "tip_volume_ul": 200.0,
+        "compatible_pipettes": ["flex_1channel_1000"],
+    },
+    "opentrons_flex_96_tiprack_50ul": {
+        "type": "tiprack",
+        "wells": 96,
+        "tip_volume_ul": 50.0,
+        "compatible_pipettes": ["flex_1channel_50"],
+    },
 }
 
-# Default deck layout template
+# Default deck layout template (OT-2 — backward-compat alias)
 DEFAULT_DECK_TEMPLATE: dict[int, dict[str, str]] = {
     1: {"role": "source", "labware": ""},
     2: {"role": "source", "labware": ""},
@@ -95,6 +209,29 @@ DEFAULT_DECK_TEMPLATE: dict[int, dict[str, str]] = {
     11: {"role": "wash", "labware": ""},
 }
 
+# Flex deck layout template
+FLEX_DECK_TEMPLATE: dict[str, dict[str, str]] = {
+    "D1": {"role": "source", "labware": ""},
+    "D2": {"role": "source", "labware": ""},
+    "D3": {"role": "destination", "labware": ""},
+    "C1": {"role": "reagent", "labware": ""},
+    "C2": {"role": "reagent", "labware": ""},
+    "C3": {"role": "reagent", "labware": ""},
+    "B1": {"role": "tips", "labware": ""},
+    "B2": {"role": "tips", "labware": ""},
+    "B3": {"role": "tips", "labware": ""},
+    "A1": {"role": "wash", "labware": ""},
+    "A2": {"role": "custom", "labware": ""},
+    "A3": {"role": "waste", "labware": ""},
+}
+
+
+def get_deck_template(robot_type: RobotType = RobotType.OT2) -> dict[int | str, dict[str, str]]:
+    """Get the default deck template for the given robot type."""
+    if robot_type == RobotType.FLEX:
+        return dict(FLEX_DECK_TEMPLATE)  # type: ignore[return-value]
+    return dict(DEFAULT_DECK_TEMPLATE)  # type: ignore[return-value]
+
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -103,7 +240,7 @@ DEFAULT_DECK_TEMPLATE: dict[int, dict[str, str]] = {
 @dataclass
 class SlotAssignment:
     """What is assigned to a single deck slot."""
-    slot_number: int
+    slot_number: int | str  # int for OT-2 (1-11), str for Flex ("A1"-"D3")
     role: str  # source | destination | tips | waste | wash | reagent | empty
     labware_name: str  # human label
     labware_definition: str  # Opentrons def name
@@ -113,9 +250,10 @@ class SlotAssignment:
 @dataclass
 class DeckPlan:
     """Complete deck layout for a run."""
-    slots: dict[int, SlotAssignment]
+    slots: dict[int | str, SlotAssignment]
     pipette_left: str | None = None  # pipette model on left mount
     pipette_right: str | None = None  # pipette model on right mount
+    robot_type: str = "ot2"  # "ot2" | "flex"
 
     def get_slots_by_role(self, role: str) -> list[SlotAssignment]:
         return [s for s in self.slots.values() if s.role == role]
@@ -164,25 +302,29 @@ class LayoutValidation:
 # ---------------------------------------------------------------------------
 
 
-def select_pipette(volume_ul: float) -> str | None:
+def select_pipette(
+    volume_ul: float,
+    robot_type: RobotType = RobotType.OT2,
+) -> str | None:
     """Select the best pipette for a given volume.
 
     Returns the pipette model name, or None if no pipette can handle it.
     Prefers the smaller pipette when volume is within its range (better accuracy).
     """
-    # Try p20 first for small volumes (more accurate)
-    p20 = PIPETTE_SPECS["p20_single_gen2"]
-    if p20["min_volume_ul"] <= volume_ul <= p20["max_volume_ul"]:
-        return "p20_single_gen2"
+    specs = ROBOT_CONFIGS[robot_type]["pipette_specs"]
 
-    # Fall back to p300
-    p300 = PIPETTE_SPECS["p300_single_gen2"]
-    if p300["min_volume_ul"] <= volume_ul <= p300["max_volume_ul"]:
-        return "p300_single_gen2"
+    # Sort by max_volume ascending → prefer smaller/more accurate pipette first
+    sorted_pipettes = sorted(specs.items(), key=lambda x: x[1]["max_volume_ul"])
 
-    # Volume too large -- needs multiple transfers
-    if volume_ul > p300["max_volume_ul"]:
-        return "p300_single_gen2"  # will need multiple aspirate/dispense cycles
+    for model, spec in sorted_pipettes:
+        if spec["min_volume_ul"] <= volume_ul <= spec["max_volume_ul"]:
+            return model
+
+    # Volume too large — use the largest pipette (needs multiple transfers)
+    if sorted_pipettes:
+        largest_model, largest_spec = sorted_pipettes[-1]
+        if volume_ul > largest_spec["max_volume_ul"]:
+            return largest_model
 
     return None
 
@@ -200,13 +342,15 @@ def compute_transfers(volume_ul: float, pipette_model: str) -> int:
 
 def estimate_tip_usage(
     protocol_steps: list[dict[str, Any]],
+    robot_type: RobotType = RobotType.OT2,
 ) -> dict[str, int]:
     """Estimate total tip usage from protocol steps.
 
     Each aspirate->dispense->drop_tip cycle uses one tip.
     Conservative estimate: one tip per aspirate primitive.
     """
-    tip_count: dict[str, int] = {"p20_single_gen2": 0, "p300_single_gen2": 0}
+    specs = ROBOT_CONFIGS[robot_type]["pipette_specs"]
+    tip_count: dict[str, int] = {model: 0 for model in specs}
 
     for step in protocol_steps:
         primitive = step.get("primitive", "")
@@ -214,7 +358,7 @@ def estimate_tip_usage(
 
         if primitive in ("robot.aspirate", "aspirate"):
             volume = float(params.get("volume_ul", params.get("volume", 0)))
-            pipette_model = select_pipette(volume)
+            pipette_model = select_pipette(volume, robot_type)
             if pipette_model:
                 transfers = compute_transfers(volume, pipette_model)
                 tip_count[pipette_model] += transfers
@@ -273,108 +417,147 @@ def plan_deck_layout(
     protocol_steps: list[dict[str, Any]],
     available_instruments: list[str] | None = None,
     batch_size: int = 1,
-    custom_assignments: dict[int, dict[str, str]] | None = None,
+    custom_assignments: dict[int | str, dict[str, str]] | None = None,
+    robot_type: RobotType = RobotType.OT2,
 ) -> DeckPlan:
-    """Plan the OT-2 deck layout for a given protocol.
+    """Plan deck layout for a given protocol.
 
     Auto-assigns labware to slots based on protocol requirements.
-    Uses DEFAULT_DECK_TEMPLATE as a starting point, then fills in
-    specific labware based on the protocol steps.
+    Supports both OT-2 (numeric slots 1-11) and Flex (alphanumeric A1-D3).
 
     Args:
         protocol_steps: Compiled protocol step list.
         available_instruments: List of available instrument IDs.
         batch_size: Number of candidates per round (affects tip/volume planning).
         custom_assignments: Optional manual slot overrides.
+        robot_type: Target robot platform.
 
     Returns:
         DeckPlan with all slots assigned.
     """
-    slots: dict[int, SlotAssignment] = {}
+    cfg = ROBOT_CONFIGS[robot_type]
+    template = get_deck_template(robot_type)
+    slots: dict[int | str, SlotAssignment] = {}
 
     # Start with defaults
-    for slot_num, template in DEFAULT_DECK_TEMPLATE.items():
-        slots[slot_num] = SlotAssignment(
-            slot_number=slot_num,
-            role=template["role"],
-            labware_name=template.get("labware", ""),
-            labware_definition=template.get("labware", ""),
+    for slot_id, tmpl in template.items():
+        slots[slot_id] = SlotAssignment(
+            slot_number=slot_id,
+            role=tmpl["role"],
+            labware_name=tmpl.get("labware", ""),
+            labware_definition=tmpl.get("labware", ""),
         )
 
     # Apply custom overrides
     if custom_assignments:
-        for slot_num, assignment in custom_assignments.items():
-            if slot_num in SLOT_RANGE:
-                slots[slot_num] = SlotAssignment(
-                    slot_number=slot_num,
+        for slot_id, assignment in custom_assignments.items():
+            if valid_slot(slot_id, robot_type):
+                slots[slot_id] = SlotAssignment(
+                    slot_number=slot_id,
                     role=assignment.get("role", "source"),
                     labware_name=assignment.get("name", ""),
                     labware_definition=assignment.get("labware", ""),
                 )
 
     # Determine pipettes needed
-    tip_usage = estimate_tip_usage(protocol_steps)
+    tip_usage = estimate_tip_usage(protocol_steps, robot_type)
     pipette_left = None
     pipette_right = None
 
-    if "p20_single_gen2" in tip_usage:
-        pipette_left = "p20_single_gen2"
-    if "p300_single_gen2" in tip_usage:
-        pipette_right = "p300_single_gen2"
+    if robot_type == RobotType.OT2:
+        if "p20_single_gen2" in tip_usage:
+            pipette_left = "p20_single_gen2"
+        if "p300_single_gen2" in tip_usage:
+            pipette_right = "p300_single_gen2"
+        if not pipette_left and not pipette_right:
+            pipette_right = "p300_single_gen2"
+    else:
+        # Flex: use first available pipette
+        for model in cfg["pipette_specs"]:
+            mount = cfg["pipette_specs"][model].get("mount", "right")
+            if mount == "left":
+                pipette_left = model
+            else:
+                pipette_right = model
+        if not pipette_left and not pipette_right:
+            # Default to first pipette on right
+            first_model = next(iter(cfg["pipette_specs"]), None)
+            if first_model:
+                pipette_right = first_model
 
-    # If no specific pipettes detected, default to p300
-    if not pipette_left and not pipette_right:
-        pipette_right = "p300_single_gen2"
-
-    # Assign tip racks to tip slots (7, 8, 9)
+    # Assign tip racks to tip slots
     racks_needed = compute_tip_racks_needed(
         {k: v * batch_size for k, v in tip_usage.items()}
     )
-    tip_slots = [7, 8, 9]
+    tip_slots = list(cfg["tip_slots"])
     tip_slot_idx = 0
 
     for pipette_model, n_racks in racks_needed.items():
-        tip_rack_def = (
-            "opentrons_96_tiprack_20ul"
-            if "p20" in pipette_model
-            else "opentrons_96_tiprack_300ul"
-        )
+        tip_rack_def = _default_tiprack_for_pipette(pipette_model, robot_type)
         for _ in range(min(n_racks, len(tip_slots) - tip_slot_idx)):
             if tip_slot_idx < len(tip_slots):
-                slot_num = tip_slots[tip_slot_idx]
-                slots[slot_num] = SlotAssignment(
-                    slot_number=slot_num,
+                slot_id = tip_slots[tip_slot_idx]
+                slots[slot_id] = SlotAssignment(
+                    slot_number=slot_id,
                     role="tips",
                     labware_name=f"tiprack_{pipette_model}_{tip_slot_idx + 1}",
                     labware_definition=tip_rack_def,
                 )
                 tip_slot_idx += 1
 
-    # Fill remaining tip slots with p300 racks by default
+    # Fill remaining tip slots with default racks
+    default_rack = _default_tiprack_for_pipette(None, robot_type)
     while tip_slot_idx < len(tip_slots):
-        slot_num = tip_slots[tip_slot_idx]
-        if not slots[slot_num].labware_definition:
-            slots[slot_num] = SlotAssignment(
-                slot_number=slot_num,
+        slot_id = tip_slots[tip_slot_idx]
+        if not slots[slot_id].labware_definition:
+            slots[slot_id] = SlotAssignment(
+                slot_number=slot_id,
                 role="tips",
                 labware_name=f"tiprack_default_{tip_slot_idx + 1}",
-                labware_definition="opentrons_96_tiprack_300ul",
+                labware_definition=default_rack,
             )
         tip_slot_idx += 1
 
     # Ensure waste slot has trash
-    slots[10] = SlotAssignment(
-        slot_number=10,
-        role="waste",
-        labware_name="trash",
-        labware_definition="opentrons_1_trash_1100ml_fixed",
-    )
+    waste_slot = cfg["waste_slot"]
+    if robot_type == RobotType.OT2:
+        slots[waste_slot] = SlotAssignment(
+            slot_number=waste_slot,
+            role="waste",
+            labware_name="trash",
+            labware_definition="opentrons_1_trash_1100ml_fixed",
+        )
+    else:
+        # Flex uses a movable trash bin (no fixed labware def needed)
+        if waste_slot in slots and not slots[waste_slot].labware_definition:
+            slots[waste_slot] = SlotAssignment(
+                slot_number=waste_slot,
+                role="waste",
+                labware_name="trash",
+                labware_definition="opentrons_flex_trash",
+            )
 
     return DeckPlan(
         slots=slots,
         pipette_left=pipette_left,
         pipette_right=pipette_right,
+        robot_type=robot_type.value,
     )
+
+
+def _default_tiprack_for_pipette(
+    pipette_model: str | None,
+    robot_type: RobotType = RobotType.OT2,
+) -> str:
+    """Return the default tiprack definition for a pipette model."""
+    if robot_type == RobotType.FLEX:
+        if pipette_model and "50" in pipette_model:
+            return "opentrons_flex_96_tiprack_50ul"
+        return "opentrons_flex_96_tiprack_1000ul"
+    # OT-2
+    if pipette_model and "p20" in pipette_model:
+        return "opentrons_96_tiprack_20ul"
+    return "opentrons_96_tiprack_300ul"
 
 
 def validate_deck_layout(
@@ -382,6 +565,7 @@ def validate_deck_layout(
     protocol_steps: list[dict[str, Any]],
     policy_snapshot: dict[str, Any] | None = None,
     batch_size: int = 1,
+    robot_type: RobotType = RobotType.OT2,
 ) -> LayoutValidation:
     """Validate a deck layout against protocol requirements.
 
@@ -397,6 +581,7 @@ def validate_deck_layout(
     """
     errors: list[str] = []
     warnings: list[str] = []
+    specs = ROBOT_CONFIGS[robot_type]["pipette_specs"]
 
     # 1. Check labware references
     loaded_labware: set[str] = set()
@@ -421,7 +606,7 @@ def validate_deck_layout(
 
         if primitive in ("robot.aspirate", "robot.dispense", "aspirate"):
             volume = float(params.get("volume_ul", params.get("volume", 0)))
-            pipette = select_pipette(volume)
+            pipette = select_pipette(volume, robot_type)
 
             if pipette is None and volume > 0:
                 errors.append(
@@ -439,11 +624,11 @@ def validate_deck_layout(
                     )
 
     # 3. Tip budget
-    tip_usage = estimate_tip_usage(protocol_steps)
+    tip_usage = estimate_tip_usage(protocol_steps, robot_type)
     scaled_tip_usage = {k: v * batch_size for k, v in tip_usage.items()}
 
     # Count available tips from deck
-    available_tips: dict[str, int] = {"p20_single_gen2": 0, "p300_single_gen2": 0}
+    available_tips: dict[str, int] = {model: 0 for model in specs}
     for slot in deck_plan.slots.values():
         if slot.role == "tips" and slot.labware_definition:
             catalog_entry = LABWARE_CATALOG.get(slot.labware_definition)
@@ -466,11 +651,11 @@ def validate_deck_layout(
     volume_reqs = compute_volume_requirements(protocol_steps, batch_size)
 
     # 5. No duplicate slot assignments (sanity check)
-    used_slots = set()
-    for slot_num, slot in deck_plan.slots.items():
-        if slot.labware_definition and slot_num in used_slots:
-            errors.append(f"slot {slot_num} has duplicate assignment")
-        used_slots.add(slot_num)
+    used_slots: set[int | str] = set()
+    for slot_id, slot in deck_plan.slots.items():
+        if slot.labware_definition and slot_id in used_slots:
+            errors.append(f"slot {slot_id} has duplicate assignment")
+        used_slots.add(slot_id)
 
     return LayoutValidation(
         valid=len(errors) == 0,

@@ -249,7 +249,8 @@ async def emit_detailed_round_execution(
         await asyncio.sleep(0.3)
 
     emitter.emit_thinking("Planning deck layout...")
-    emitter.emit_log("info", "Deck: 11 slots, P20 + P300 pipettes")
+    # Dynamic deck info based on robot type (OT-2: 11 slots / Flex: 12 slots)
+    emitter.emit_log("info", "Deck layout planned, compiling protocol steps...")
 
     if simulate:
         await asyncio.sleep(0.2)
