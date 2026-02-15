@@ -257,6 +257,54 @@ class NexusAdvisor:
             logger.warning("Nexus hypothesis_status failed: %s", exc)
             return None
 
+    def upload_spectral_data(
+        self,
+        campaign_id: str,
+        spectral_matrix: list[list[float]],
+        var_names: list[str],
+    ) -> dict | None:
+        """Send spectral data to Nexus for embedding / SSL processing.
+
+        Returns ``{"embeddings": [[...], ...], "similarity_matrix": [[...], ...]}``
+        on success, ``None`` on failure.
+        """
+        try:
+            raw = _post("/analysis/embedding", {
+                "campaign_id": campaign_id,
+                "data": spectral_matrix,
+                "var_names": var_names,
+            })
+            if raw is None or "error" in raw:
+                return None
+            return raw
+        except Exception as exc:
+            logger.warning("Nexus upload_spectral_data failed: %s", exc)
+            return None
+
+    def get_similar_experiments(
+        self,
+        campaign_id: str,
+        record_id: str,
+        top_k: int = 5,
+    ) -> list[dict] | None:
+        """Ask Nexus which historical experiments are most similar.
+
+        Uses learned embeddings to find nearest neighbours.
+        Returns ``None`` if Nexus is unreachable.
+        """
+        try:
+            raw = _post("/analysis/similarity", {
+                "campaign_id": campaign_id,
+                "record_id": record_id,
+                "top_k": top_k,
+            })
+            if raw is None or "error" in raw:
+                return None
+            return raw.get("similar", [])
+        except Exception as exc:
+            logger.warning("Nexus get_similar_experiments failed: %s", exc)
+            return None
+
     def sync_campaign(
         self,
         campaign_id: str,

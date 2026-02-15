@@ -75,10 +75,67 @@ def _handle_heat(*, instrument_id: str, primitive: str, params: dict[str, Any]) 
 
 
 def _handle_eis(*, instrument_id: str, primitive: str, params: dict[str, Any]) -> dict[str, Any]:
+    # Simulated Nyquist spectrum using a simple Randles circuit:
+    #   Z = R_sol + R_ct / (1 + j*w*R_ct*C)
+    import math
+
+    n_points = 15
+    frequencies = [10 ** (i * 0.4) for i in range(n_points)]  # ~1 Hz to ~100 kHz
+    r_sol = random.uniform(5, 15)
+    r_ct = random.uniform(50, 150)
+    c_dl = random.uniform(1e-6, 1e-4)  # double-layer capacitance
+
+    z_real_list: list[float] = []
+    z_imag_list: list[float] = []
+    for f in frequencies:
+        w = 2.0 * math.pi * f
+        denom = 1.0 + (w * r_ct * c_dl) ** 2
+        z_r = r_sol + r_ct / denom
+        z_i = -(w * r_ct**2 * c_dl) / denom
+        z_real_list.append(round(z_r, 5))
+        z_imag_list.append(round(z_i, 5))
+
     return {
         "instrument_id": instrument_id,
         "primitive": primitive,
-        "impedance_ohm": round(random.uniform(90.0, 110.0), 5),
+        "impedance_ohm": round(r_sol + r_ct, 5),  # backward compat scalar
+        "spectrum": {
+            "technique": "eis",
+            "frequencies_hz": [round(f, 5) for f in frequencies],
+            "z_real": z_real_list,
+            "z_imag": z_imag_list,
+            "r_sol_ohm": round(r_sol, 5),
+            "r_ct_ohm": round(r_ct, 5),
+        },
+        "ok": True,
+    }
+
+
+def _handle_lsv(*, instrument_id: str, primitive: str, params: dict[str, Any]) -> dict[str, Any]:
+    """Simulated Linear Sweep Voltammetry (LSV) curve."""
+    import math
+
+    n_points = 20
+    e_start = float(params.get("e_start_v", 0.0))
+    e_end = float(params.get("e_end_v", 1.0))
+    potentials = [e_start + i * (e_end - e_start) / (n_points - 1) for i in range(n_points)]
+
+    # Tafel-like exponential current with noise
+    i0 = random.uniform(0.01, 0.1)  # exchange current mA
+    b = random.uniform(0.05, 0.15)  # Tafel slope proxy
+    currents: list[float] = []
+    for e in potentials:
+        current = i0 * (math.exp(e / b) - 1.0) + random.gauss(0, 0.005)
+        currents.append(round(current, 6))
+
+    return {
+        "instrument_id": instrument_id,
+        "primitive": primitive,
+        "spectrum": {
+            "technique": "lsv",
+            "potential_v": [round(p, 6) for p in potentials],
+            "current_ma": currents,
+        },
         "ok": True,
     }
 
@@ -104,6 +161,7 @@ _PRIMITIVE_HANDLERS: dict[str, Any] = {
     "aspirate": _handle_aspirate,
     "heat": _handle_heat,
     "eis": _handle_eis,
+    "lsv": _handle_lsv,
     "wait": _handle_wait,
     "upload_artifact": _handle_upload_artifact,
     # Battery-lab primitives — all simulated as generic ok

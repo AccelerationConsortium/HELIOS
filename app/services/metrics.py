@@ -22,6 +22,46 @@ from app.core.db import connection, json_dumps, parse_json, run_txn, utcnow_iso
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Spectral data capture hook
+# ---------------------------------------------------------------------------
+
+
+def _capture_spectral_data(run_id: str, campaign_id: str, step_result: dict) -> None:
+    """If *step_result* contains ``spectrum``, store it in :class:`SpectralStore`.
+
+    Called from KPI extraction for every step artifact that contains a
+    ``spectrum`` key.  Failures are logged and swallowed.
+    """
+    spectrum = step_result.get("spectrum")
+    if spectrum is None:
+        return
+    try:
+        from app.services.spectral_store import SpectralRecord, SpectralStore
+
+        store = SpectralStore()
+        record = SpectralRecord(
+            record_id=str(uuid.uuid4()),
+            run_id=run_id,
+            campaign_id=campaign_id,
+            technique=spectrum.get("technique", "unknown"),
+            raw_data=spectrum,
+            metadata={
+                "instrument_id": step_result.get("instrument_id", ""),
+                "primitive": step_result.get("primitive", ""),
+            },
+            timestamp=utcnow_iso(),
+        )
+        store.store(record)
+        logger.debug(
+            "Captured spectral data %s for run %s", record.record_id, run_id,
+        )
+    except Exception:
+        logger.warning(
+            "Spectral capture failed for run %s", run_id, exc_info=True,
+        )
+
 # ---------------------------------------------------------------------------
 # KPI schema versioning
 # ---------------------------------------------------------------------------
@@ -678,6 +718,7 @@ def extract_and_store_kpis(run_id: str) -> list[KpiValue]:
             artifacts_by_step[a["step_id"]] = dict(a)
 
         now = utcnow_iso()
+        _captured_steps: set[str] = set()  # track spectral capture per step
 
         # --- Step-level KPIs ---
         for defn in KPI_DEFINITIONS_V1:
@@ -700,6 +741,15 @@ def extract_and_store_kpis(run_id: str) -> list[KpiValue]:
                             artifact_payload = json.load(f)
                     except Exception:
                         pass
+
+                # Capture spectral data if present (once per step)
+                if step["id"] not in _captured_steps and artifact_payload is not None:
+                    _captured_steps.add(step["id"])
+                    _capture_spectral_data(
+                        run_id,
+                        run.get("campaign_id", ""),
+                        artifact_payload,
+                    )
 
                 kpi = extractor_fn(step, artifact, artifact_payload)
                 if kpi is not None:
