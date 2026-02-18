@@ -262,6 +262,9 @@ class PhaseConfig:
     stabilize_top_k: int = 2  # how many top points to consider
     stabilize_budget_fraction: float = 0.15  # max fraction of remaining rounds for stabilization
 
+    # --- Nexus MCP integration (v5, opt-in) ---
+    enable_nexus: bool = False  # enable causal-discovery & meta-learning via Nexus advisor
+
     # --- Backend preferences ---
     exploitation_backends: tuple[str, ...] = (
         "optuna_tpe",

@@ -22,6 +22,46 @@ from app.core.db import connection, json_dumps, parse_json, run_txn, utcnow_iso
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Spectral data capture hook
+# ---------------------------------------------------------------------------
+
+
+def _capture_spectral_data(run_id: str, campaign_id: str, step_result: dict) -> None:
+    """If *step_result* contains ``spectrum``, store it in :class:`SpectralStore`.
+
+    Called from KPI extraction for every step artifact that contains a
+    ``spectrum`` key.  Failures are logged and swallowed.
+    """
+    spectrum = step_result.get("spectrum")
+    if spectrum is None:
+        return
+    try:
+        from app.services.spectral_store import SpectralRecord, SpectralStore
+
+        store = SpectralStore()
+        record = SpectralRecord(
+            record_id=str(uuid.uuid4()),
+            run_id=run_id,
+            campaign_id=campaign_id,
+            technique=spectrum.get("technique", "unknown"),
+            raw_data=spectrum,
+            metadata={
+                "instrument_id": step_result.get("instrument_id", ""),
+                "primitive": step_result.get("primitive", ""),
+            },
+            timestamp=utcnow_iso(),
+        )
+        store.store(record)
+        logger.debug(
+            "Captured spectral data %s for run %s", record.record_id, run_id,
+        )
+    except Exception:
+        logger.warning(
+            "Spectral capture failed for run %s", run_id, exc_info=True,
+        )
+
 # ---------------------------------------------------------------------------
 # KPI schema versioning
 # ---------------------------------------------------------------------------
@@ -120,6 +160,28 @@ KPI_DEFINITIONS_V1: list[KpiDefinition] = [
         scope="step",
         primitive="squidstat.run_experiment",
         extractor="extract_charge_passed",
+    ),
+    # --- pH measurement KPIs ---
+    KpiDefinition(
+        name="ph_value",
+        unit="pH",
+        scope="step",
+        primitive="ph_sensor.read_value",
+        extractor="extract_ph_value",
+    ),
+    KpiDefinition(
+        name="ph_std",
+        unit="pH",
+        scope="step",
+        primitive="ph_sensor.read_value",
+        extractor="extract_ph_std",
+    ),
+    KpiDefinition(
+        name="delta_ph",
+        unit="pH",
+        scope="step",
+        primitive="ph_sensor.read_value",
+        extractor="extract_delta_ph",
     ),
 ]
 
@@ -422,6 +484,98 @@ def extract_charge_passed(
 
 
 # ---------------------------------------------------------------------------
+# pH measurement step-level extractor functions
+# ---------------------------------------------------------------------------
+
+
+def extract_ph_value(
+    step: dict[str, Any],
+    artifact: dict[str, Any] | None,
+    artifact_payload: dict[str, Any] | None,
+) -> KpiValue | None:
+    """Mean pH reading from colorimetric strip measurement.
+
+    Reads ``ph_mean`` from artifact payload (produced by PhSensorController.read_ph).
+    """
+    if artifact_payload is None:
+        return None
+    ph = artifact_payload.get("ph_mean")
+    if ph is None:
+        return None
+    return KpiValue(
+        kpi_name="ph_value",
+        kpi_value=round(float(ph), 3),
+        kpi_unit="pH",
+        step_id=step["id"],
+        source_artifact_id=artifact["id"] if artifact else None,
+        details={
+            "ph_mean": float(ph),
+            "ph_readings": artifact_payload.get("ph_readings", []),
+            "well": artifact_payload.get("well", ""),
+            "n_readings": artifact_payload.get("n_readings", 0),
+        },
+    )
+
+
+def extract_ph_std(
+    step: dict[str, Any],
+    artifact: dict[str, Any] | None,
+    artifact_payload: dict[str, Any] | None,
+) -> KpiValue | None:
+    """Standard deviation of pH readings (measurement precision indicator).
+
+    Reads ``ph_std`` from artifact payload.
+    """
+    if artifact_payload is None:
+        return None
+    std = artifact_payload.get("ph_std")
+    if std is None:
+        return None
+    return KpiValue(
+        kpi_name="ph_std",
+        kpi_value=round(float(std), 4),
+        kpi_unit="pH",
+        step_id=step["id"],
+        source_artifact_id=artifact["id"] if artifact else None,
+        details={"ph_std": float(std)},
+    )
+
+
+def extract_delta_ph(
+    step: dict[str, Any],
+    artifact: dict[str, Any] | None,
+    artifact_payload: dict[str, Any] | None,
+) -> KpiValue | None:
+    """Deviation from target pH (|measured - target|).
+
+    Reads ``ph_mean`` from payload and ``target_ph`` from step params.
+    Useful for Bayesian optimization objective tracking.
+    """
+    if artifact_payload is None:
+        return None
+    measured = artifact_payload.get("ph_mean")
+    if measured is None:
+        return None
+    params = parse_json(step.get("params_json", "{}"), {})
+    target = params.get("target_ph")
+    if target is None:
+        return None
+    delta = abs(float(measured) - float(target))
+    return KpiValue(
+        kpi_name="delta_ph",
+        kpi_value=round(delta, 4),
+        kpi_unit="pH",
+        step_id=step["id"],
+        source_artifact_id=artifact["id"] if artifact else None,
+        details={
+            "measured_ph": float(measured),
+            "target_ph": float(target),
+            "delta": delta,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Run-level extractor functions
 # ---------------------------------------------------------------------------
 
@@ -510,6 +664,10 @@ _STEP_EXTRACTORS: dict[str, Callable] = {
     "extract_coulombic_efficiency": extract_coulombic_efficiency,
     "extract_stability_decay": extract_stability_decay,
     "extract_charge_passed": extract_charge_passed,
+    # pH measurement extractors
+    "extract_ph_value": extract_ph_value,
+    "extract_ph_std": extract_ph_std,
+    "extract_delta_ph": extract_delta_ph,
 }
 
 _RUN_EXTRACTORS: dict[str, Callable] = {
@@ -560,6 +718,7 @@ def extract_and_store_kpis(run_id: str) -> list[KpiValue]:
             artifacts_by_step[a["step_id"]] = dict(a)
 
         now = utcnow_iso()
+        _captured_steps: set[str] = set()  # track spectral capture per step
 
         # --- Step-level KPIs ---
         for defn in KPI_DEFINITIONS_V1:
@@ -582,6 +741,15 @@ def extract_and_store_kpis(run_id: str) -> list[KpiValue]:
                             artifact_payload = json.load(f)
                     except Exception:
                         pass
+
+                # Capture spectral data if present (once per step)
+                if step["id"] not in _captured_steps and artifact_payload is not None:
+                    _captured_steps.add(step["id"])
+                    _capture_spectral_data(
+                        run_id,
+                        run.get("campaign_id", ""),
+                        artifact_payload,
+                    )
 
                 kpi = extractor_fn(step, artifact, artifact_payload)
                 if kpi is not None:

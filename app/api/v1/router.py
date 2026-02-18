@@ -20,6 +20,7 @@ from app.api.v1.endpoints.nl_parse import router as nl_parse_router
 from app.api.v1.endpoints.onboarding import router as onboarding_router
 from app.api.v1.endpoints.workflows import router as workflows_router
 from app.api.v1.endpoints.orchestrate_demo import router as orchestrate_demo_router
+from app.api.v1.endpoints.confirmations import router as confirmations_router
 from app.api.v1.endpoints.swarms import router as swarms_router
 
 api_router = APIRouter()
@@ -41,4 +42,5 @@ api_router.include_router(orchestrate_events_router)
 api_router.include_router(orchestrate_demo_router)
 api_router.include_router(nl_parse_router)
 api_router.include_router(onboarding_router)
+api_router.include_router(confirmations_router)
 api_router.include_router(swarms_router)

@@ -49,9 +49,50 @@ class OrchestratorInput(BaseModel):
     # Options
     dry_run: bool = False
     plan_only: bool = False  # if True, only produce the plan, don't execute
+    require_manual_confirmation: bool = Field(
+        default=False,
+        description=(
+            "When True, every candidate execution requires operator approval "
+            "via POST /api/v1/runs/{run_id}/approve before hardware runs. "
+            "SSE events are emitted for each pending approval. "
+            "Cleaning steps also require confirmation."
+        ),
+    )
 
     # External campaign ID (if provided by the API layer)
     campaign_id: str = ""
+
+    # --- Enhancement: Auto deck layout from NL description ---
+    deck_description: str = Field(
+        default="",
+        description="NL deck layout description (parsed by DeckLayoutAgent)",
+    )
+
+    # --- Enhancement: Tool holder configs ---
+    tool_holders: list[str] = Field(
+        default_factory=list,
+        description="Paths to tool holder config JSON files to load",
+    )
+
+    # --- Enhancement: NLP code generation ---
+    nl_intent: str = Field(
+        default="",
+        description="NL experiment description for code generation via NLPCodeAgent",
+    )
+    nl_auto_approve: bool = Field(
+        default=False,
+        description="Auto-approve NLP-generated code (skip user confirmation)",
+    )
+
+    # --- Enhancement: Cleaning workflows ---
+    pre_clean_workflow: str = Field(
+        default="",
+        description="Cleaning workflow ID to run before each candidate execution",
+    )
+    post_clean_workflow: str = Field(
+        default="",
+        description="Cleaning workflow ID to run after each candidate execution",
+    )
 
 
 class RankedRecipe(BaseModel):
@@ -100,11 +141,19 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
     layer = "top"
 
     def __init__(self):
-        """Initialize orchestrator with recovery agent."""
+        """Initialize orchestrator with recovery agent and strategy router."""
         super().__init__()
         # Import here to avoid circular dependency
         from app.agents.recovery_agent import RecoveryAgent
         self.recovery = RecoveryAgent()
+
+        # RL strategy router (optional — defaults to rule-based mode)
+        try:
+            from app.services.strategy_router import StrategyRouter, RouterConfig
+            self._strategy_router = StrategyRouter()
+        except Exception:
+            self._strategy_router = None
+            logger.debug("Strategy router not available, using rule-based only", exc_info=True)
 
     def _emit(self, campaign_id: str, event: dict[str, Any]) -> None:
         """Persist event to DB, then publish to SSE subscribers (best-effort)."""
@@ -143,6 +192,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
     ) -> OrchestratorOutput:
         campaign_id = input_data.campaign_id or f"camp-{uuid.uuid4().hex[:12]}"
         agent_trace: list[dict[str, Any]] = []
+        # Store manual confirmation flag for _execute_real_run and cleaning hooks
+        self._require_manual_confirmation = input_data.require_manual_confirmation
 
         # --- Checkpoint: create campaign in DB ---
         from app.services.campaign_state import (
@@ -290,6 +341,105 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     agent_trace=agent_trace,
                 )
 
+        # ---- Phase 1.5: Enhancement pre-processing ----
+
+        # Enhancement 1: Auto deck layout from NL description
+        if input_data.deck_description and resume_from_round is None:
+            try:
+                from app.agents.deck_layout_agent import DeckLayoutAgent, DeckLayoutInput
+                deck_agent = DeckLayoutAgent()
+                deck_input = DeckLayoutInput(
+                    phase="parse",
+                    deck_text=input_data.deck_description,
+                    protocol_steps=input_data.protocol_template.get("steps", []),
+                )
+                deck_result = await deck_agent.run(deck_input)
+                if deck_result.success and deck_result.output:
+                    agent_trace.append({
+                        "agent": "deck_layout",
+                        "success": True,
+                        "status": deck_result.output.status,
+                        "slot_count": deck_result.output.slot_count,
+                    })
+                    self._emit(campaign_id, {
+                        "type": "agent_result",
+                        "agent": "deck_layout",
+                        "status": deck_result.output.status,
+                        "message": deck_result.output.chat_message,
+                    })
+                    # Register custom labware
+                    if deck_result.output.custom_labware_definitions:
+                        from app.services.custom_labware_registry import (
+                            register_custom_labware,
+                            get_custom_labware_definition,
+                        )
+                        for cld in deck_result.output.custom_labware_definitions:
+                            load_name = cld.get("load_name", "")
+                            defn = get_custom_labware_definition(load_name)
+                            if defn:
+                                register_custom_labware(defn)
+            except Exception:
+                logger.debug("Deck layout enhancement failed", exc_info=True)
+
+        # Enhancement 2: NLP code generation (with confirmation)
+        if input_data.nl_intent and resume_from_round is None:
+            try:
+                from app.agents.nlp_code_agent import NLPCodeAgent, NLPCodeInput
+                nlp_agent = NLPCodeAgent()
+                nlp_input = NLPCodeInput(
+                    phase="generate",
+                    intent=input_data.nl_intent,
+                    context={
+                        "dimensions": input_data.dimensions,
+                        "objective_kpi": input_data.objective_kpi,
+                    },
+                    auto_approve=input_data.nl_auto_approve,
+                    campaign_id=campaign_id,
+                )
+                nlp_result = await nlp_agent.run(nlp_input)
+                if nlp_result.success and nlp_result.output:
+                    agent_trace.append({
+                        "agent": "nlp_code",
+                        "success": True,
+                        "status": nlp_result.output.status,
+                    })
+                    self._emit(campaign_id, {
+                        "type": "agent_result",
+                        "agent": "nlp_code",
+                        "status": nlp_result.output.status,
+                        "message": nlp_result.output.chat_message,
+                    })
+                    # If auto-approved, inject generated steps into protocol template
+                    if nlp_result.output.status in ("auto_approved", "confirmed"):
+                        if nlp_result.output.protocol_steps:
+                            existing_steps = input_data.protocol_template.get("steps", [])
+                            input_data.protocol_template["steps"] = (
+                                existing_steps + nlp_result.output.protocol_steps
+                            )
+            except Exception:
+                logger.debug("NLP code enhancement failed", exc_info=True)
+
+        # Enhancement 3: Load tool holder configs
+        if input_data.tool_holders:
+            try:
+                from app.services.tool_holder_config import load_tool_holder_config
+                for th_path in input_data.tool_holders:
+                    config = load_tool_holder_config(th_path)
+                    agent_trace.append({
+                        "agent": "tool_holder_loader",
+                        "holder_name": config.holder_name,
+                        "slot": config.slot_number,
+                        "positions": config.position_names(),
+                    })
+                    self._emit(campaign_id, {
+                        "type": "tool_holder_loaded",
+                        "holder_name": config.holder_name,
+                        "slot": config.slot_number,
+                        "message": f"Tool holder '{config.holder_name}' loaded ({len(config.positions)} positions)",
+                    })
+            except Exception:
+                logger.debug("Tool holder loading failed", exc_info=True)
+
         # ---- Phase 2: Execute rounds ----
         from app.agents.design_agent import DesignAgent, DesignInput
         from app.agents.compiler_agent import CompilerAgent, CompileInput
@@ -425,8 +575,23 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         all_kpis=tuple(all_kpis),
                         qc_fail_rate=qc_fail_rate,
                     )
-                    decision = select_strategy(snapshot)
+                    # Route through RL or rule-based strategy router
+                    if self._strategy_router is not None:
+                        decision = self._strategy_router.select_strategy(
+                            snapshot, campaign_id,
+                        )
+                    else:
+                        decision = select_strategy(snapshot)
                     strategy_decision = decision  # store for stabilize check
+                    _router_action = None  # track RL action for post-round hook
+                    if hasattr(decision, 'reason') and '[RL-' in (decision.reason or ''):
+                        # Extract action id from RL decision reason string
+                        try:
+                            import re
+                            _action_match = re.search(r'action=(\d+)', decision.reason)
+                            _router_action = int(_action_match.group(1)) if _action_match else None
+                        except Exception:
+                            _router_action = None
                     round_strategy = decision.backend_name
 
                     # Map backend names that aren't in candidate_gen._STRATEGIES
@@ -764,6 +929,48 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "message": "Safety check passed" if (not safety_result.success or safety_result.output.allowed) else f"Safety veto: {safety_result.output.violations}",
                 })
 
+                # Enhancement 4: Pre-execution cleaning
+                if input_data.pre_clean_workflow and not input_data.dry_run:
+                    # Manual confirmation gate for cleaning
+                    _clean_approved = True
+                    if getattr(self, "_require_manual_confirmation", False):
+                        _clean_approved = await self._await_cleaning_approval(
+                            campaign_id=campaign_id,
+                            workflow_id=input_data.pre_clean_workflow,
+                            phase="pre",
+                            round_num=round_num,
+                            candidate_idx=i,
+                        )
+                    if _clean_approved:
+                        try:
+                            from app.agents.cleaning_agent import CleaningAgent as _CleanAgent
+                            from app.agents.cleaning_agent import CleaningInput as _CleanInput
+                            _clean = _CleanAgent()
+                            _clean_in = _CleanInput(
+                                workflow_id=input_data.pre_clean_workflow,
+                                step_prefix=f"round_{round_num}_cand_{i}_pre_",
+                            )
+                            _clean_res = await _clean.run(_clean_in)
+                            if _clean_res.success and _clean_res.output:
+                                self._emit(campaign_id, {
+                                    "type": "cleaning_complete",
+                                    "phase": "pre",
+                                    "round": round_num,
+                                    "candidate": i,
+                                    "message": _clean_res.output.chat_message,
+                                })
+                        except Exception:
+                            logger.debug("Pre-clean failed", exc_info=True)
+                    else:
+                        self._emit(campaign_id, {
+                            "type": "cleaning_approval_resolved",
+                            "phase": "pre",
+                            "round": round_num,
+                            "candidate": i,
+                            "decision": "skipped",
+                            "message": f"Pre-clean skipped (not approved) for candidate {i}",
+                        })
+
                 # 2d. Execute
                 run_kpi: float | None = None
                 run_step_result: dict[str, Any] = {}
@@ -806,6 +1013,47 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "kpi": run_kpi,
                     "message": f"Execution complete — KPI={run_kpi}" if run_kpi is not None else "Execution complete — no KPI",
                 })
+
+                # Enhancement 4: Post-execution cleaning
+                if input_data.post_clean_workflow and not input_data.dry_run:
+                    _clean_approved = True
+                    if getattr(self, "_require_manual_confirmation", False):
+                        _clean_approved = await self._await_cleaning_approval(
+                            campaign_id=campaign_id,
+                            workflow_id=input_data.post_clean_workflow,
+                            phase="post",
+                            round_num=round_num,
+                            candidate_idx=i,
+                        )
+                    if _clean_approved:
+                        try:
+                            from app.agents.cleaning_agent import CleaningAgent as _CleanAgent
+                            from app.agents.cleaning_agent import CleaningInput as _CleanInput
+                            _clean = _CleanAgent()
+                            _clean_in = _CleanInput(
+                                workflow_id=input_data.post_clean_workflow,
+                                step_prefix=f"round_{round_num}_cand_{i}_post_",
+                            )
+                            _clean_res = await _clean.run(_clean_in)
+                            if _clean_res.success and _clean_res.output:
+                                self._emit(campaign_id, {
+                                    "type": "cleaning_complete",
+                                    "phase": "post",
+                                    "round": round_num,
+                                    "candidate": i,
+                                    "message": _clean_res.output.chat_message,
+                                })
+                        except Exception:
+                            logger.debug("Post-clean failed", exc_info=True)
+                    else:
+                        self._emit(campaign_id, {
+                            "type": "cleaning_approval_resolved",
+                            "phase": "post",
+                            "round": round_num,
+                            "candidate": i,
+                            "decision": "skipped",
+                            "message": f"Post-clean skipped (not approved) for candidate {i}",
+                        })
 
                 # 2e. Quality check via SensingAgent
                 step_result = run_step_result
@@ -926,6 +1174,36 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             except Exception:
                 logger.debug("Failed to checkpoint round completion", exc_info=True)
 
+            # --- RL post-round hook (online learning) ---
+            if self._strategy_router is not None:
+                try:
+                    from app.services.strategy_selector import compute_diagnostics
+                    _rl_diag = compute_diagnostics(snapshot) if strategy_decision and strategy_decision.diagnostics is None else (strategy_decision.diagnostics if strategy_decision else None)
+                    _round_qc_fails = sum(1 for k in round_batch_kpis if k is None) if round_batch_kpis else 0
+                    _prev_best = kpi_history[-2] if len(kpi_history) >= 2 else None
+                    _is_terminal = (round_num >= input_data.max_rounds)
+                    _target_reached = (
+                        input_data.target_value is not None
+                        and best_kpi is not None
+                        and (
+                            (input_data.direction == "maximize" and best_kpi >= input_data.target_value)
+                            or (input_data.direction == "minimize" and best_kpi <= input_data.target_value)
+                        )
+                    )
+                    self._strategy_router.on_round_complete(
+                        campaign_id=campaign_id,
+                        snapshot=snapshot,
+                        diagnostics=_rl_diag,
+                        action=_router_action if '_router_action' in dir() else None,
+                        kpi_prev=_prev_best,
+                        kpi_curr=best_kpi,
+                        n_qc_failures=_round_qc_fails,
+                        is_terminal=_is_terminal,
+                        target_reached=_target_reached,
+                    )
+                except Exception:
+                    logger.debug("RL post-round hook failed", exc_info=True)
+
             # 2f. Stop decision
             stop_input = StopInput(
                 kpi_history=kpi_history,
@@ -964,6 +1242,12 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 top_k = self._compute_top_k_ranking(
                     all_params, all_kpis, all_rounds, input_data.direction,
                 )
+                # --- RL campaign complete hook (early stop) ---
+                if self._strategy_router is not None:
+                    try:
+                        self._strategy_router.on_campaign_complete(campaign_id)
+                    except Exception:
+                        logger.debug("RL campaign hook failed", exc_info=True)
                 # --- Checkpoint: campaign completed (early stop) ---
                 try:
                     update_campaign_status(
@@ -997,6 +1281,12 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         top_k = self._compute_top_k_ranking(
             all_params, all_kpis, all_rounds, input_data.direction,
         )
+        # --- RL campaign complete hook (budget exhausted) ---
+        if self._strategy_router is not None:
+            try:
+                self._strategy_router.on_campaign_complete(campaign_id)
+            except Exception:
+                logger.debug("RL campaign hook failed", exc_info=True)
         # --- Checkpoint: campaign completed (budget exhausted) ---
         try:
             update_campaign_status(
@@ -1152,6 +1442,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             from app.worker import execute_run
 
             # Create DB run entry (compiles protocol, runs safety preflight)
+            # When manual confirmation is enabled, force human approval
+            effective_policy = dict(policy_snapshot)
+            if getattr(self, "_require_manual_confirmation", False):
+                effective_policy["require_human_approval"] = True
+
             run = await asyncio.to_thread(
                 create_run,
                 trigger_type="orchestrator",
@@ -1164,7 +1459,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 campaign_id=campaign_id,
                 protocol=protocol,
                 inputs=inputs,
-                policy_snapshot=policy_snapshot,
+                policy_snapshot=effective_policy,
                 actor="orchestrator_agent",
             )
 
@@ -1220,8 +1515,104 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "Round %d candidate %d: run rejected: %s",
                     round_num, candidate_idx, run.get("rejection_reason"),
                 )
+            elif run_status == "awaiting_approval":
+                # Emit SSE event for operator to review and approve
+                self._emit(campaign_id, {
+                    "type": "candidate_awaiting_approval",
+                    "run_id": run_id,
+                    "round": round_num,
+                    "candidate": candidate_idx,
+                    "candidate_params": candidate_params,
+                    "message": (
+                        f"⏳ Candidate {candidate_idx} (round {round_num}) "
+                        f"ready — approve via POST /api/v1/runs/{run_id}/approve"
+                    ),
+                })
+                logger.info(
+                    "Round %d candidate %d: awaiting operator approval (run %s)",
+                    round_num, candidate_idx, run_id,
+                )
+
+                # Poll DB until operator approves/rejects (or timeout)
+                from app.services.run_service import get_run as _get_run
+                _POLL_INTERVAL = 3.0   # seconds between polls
+                _POLL_TIMEOUT = 1800.0  # 30 minutes max wait
+                _elapsed = 0.0
+                _resolved = False
+
+                while _elapsed < _POLL_TIMEOUT:
+                    await asyncio.sleep(_POLL_INTERVAL)
+                    _elapsed += _POLL_INTERVAL
+                    _current = await asyncio.to_thread(_get_run, run_id)
+                    _cur_status = _current["status"] if _current else "unknown"
+
+                    if _cur_status == "scheduled":
+                        # Operator approved — execute now
+                        self._emit(campaign_id, {
+                            "type": "candidate_approval_resolved",
+                            "run_id": run_id,
+                            "round": round_num,
+                            "candidate": candidate_idx,
+                            "decision": "approved",
+                            "message": f"✅ Candidate {candidate_idx} approved — executing",
+                        })
+                        returncode = await asyncio.to_thread(execute_run, run_id)
+                        if returncode == 0:
+                            completed_run = await asyncio.to_thread(worker_load_run, run_id)
+                            step_result = {
+                                "run_id": run_id,
+                                "status": "succeeded",
+                                "candidate_params": candidate_params,
+                            }
+                            run_outputs = completed_run.get("outputs", {})
+                            if objective_kpi in run_outputs:
+                                kpi_value = float(run_outputs[objective_kpi])
+                            step_result["kpi"] = kpi_value
+                        else:
+                            step_result = {
+                                "run_id": run_id,
+                                "status": "failed",
+                                "returncode": returncode,
+                            }
+                        _resolved = True
+                        break
+                    elif _cur_status == "rejected":
+                        self._emit(campaign_id, {
+                            "type": "candidate_approval_resolved",
+                            "run_id": run_id,
+                            "round": round_num,
+                            "candidate": candidate_idx,
+                            "decision": "rejected",
+                            "message": f"❌ Candidate {candidate_idx} rejected by operator",
+                        })
+                        step_result = {
+                            "run_id": run_id,
+                            "status": "rejected",
+                            "reason": _current.get("rejection_reason", "operator rejected"),
+                        }
+                        _resolved = True
+                        break
+
+                if not _resolved:
+                    # Timeout — skip this candidate
+                    self._emit(campaign_id, {
+                        "type": "candidate_approval_resolved",
+                        "run_id": run_id,
+                        "round": round_num,
+                        "candidate": candidate_idx,
+                        "decision": "timeout",
+                        "message": f"⏰ Candidate {candidate_idx} approval timed out after {_POLL_TIMEOUT}s",
+                    })
+                    step_result = {
+                        "run_id": run_id,
+                        "status": "approval_timeout",
+                    }
+                    logger.warning(
+                        "Round %d candidate %d: approval timed out after %.0fs",
+                        round_num, candidate_idx, _POLL_TIMEOUT,
+                    )
             else:
-                # awaiting_approval or other — skip for autonomous mode
+                # Unknown status — skip
                 step_result = {
                     "run_id": run_id,
                     "status": run_status,
@@ -1236,6 +1627,94 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             step_result = {"status": "error", "error": str(exc)}
 
         return kpi_value, step_result
+
+    async def _await_cleaning_approval(
+        self,
+        *,
+        campaign_id: str,
+        workflow_id: str,
+        phase: str,
+        round_num: int,
+        candidate_idx: int,
+    ) -> bool:
+        """Wait for operator to approve a cleaning operation.
+
+        Creates a confirmation request in the in-memory store, emits an SSE
+        event, and polls until the operator responds or timeout.
+
+        Returns True if approved, False if rejected or timed out.
+        """
+        import asyncio
+        from app.services.code_confirmation import (
+            CodeConfirmationRequest,
+            request_code_confirmation,
+            get_confirmation_status,
+            CodeConfirmationStatus,
+        )
+
+        req = CodeConfirmationRequest(
+            confirmation_type="cleaning",
+            workflow_id=workflow_id,
+            description=f"{phase}-clean for round {round_num} candidate {candidate_idx}",
+            campaign_id=campaign_id,
+        )
+        req_id = request_code_confirmation(req)
+
+        self._emit(campaign_id, {
+            "type": "cleaning_awaiting_approval",
+            "request_id": req_id,
+            "workflow_id": workflow_id,
+            "phase": phase,
+            "round": round_num,
+            "candidate": candidate_idx,
+            "message": (
+                f"🫧 {phase.capitalize()}-clean ({workflow_id}) for candidate {candidate_idx} "
+                f"— approve via POST /api/v1/confirmations/{req_id}/respond"
+            ),
+        })
+
+        _POLL_INTERVAL = 2.0
+        _POLL_TIMEOUT = 600.0  # 10 minutes for cleaning approval
+        _elapsed = 0.0
+
+        while _elapsed < _POLL_TIMEOUT:
+            await asyncio.sleep(_POLL_INTERVAL)
+            _elapsed += _POLL_INTERVAL
+            status = get_confirmation_status(req_id)
+            if status == CodeConfirmationStatus.APPROVED:
+                self._emit(campaign_id, {
+                    "type": "cleaning_approval_resolved",
+                    "request_id": req_id,
+                    "phase": phase,
+                    "round": round_num,
+                    "candidate": candidate_idx,
+                    "decision": "approved",
+                    "message": f"✅ {phase.capitalize()}-clean approved",
+                })
+                return True
+            elif status in (CodeConfirmationStatus.REJECTED, CodeConfirmationStatus.MODIFIED):
+                self._emit(campaign_id, {
+                    "type": "cleaning_approval_resolved",
+                    "request_id": req_id,
+                    "phase": phase,
+                    "round": round_num,
+                    "candidate": candidate_idx,
+                    "decision": "rejected",
+                    "message": f"❌ {phase.capitalize()}-clean rejected",
+                })
+                return False
+
+        # Timeout
+        self._emit(campaign_id, {
+            "type": "cleaning_approval_resolved",
+            "request_id": req_id,
+            "phase": phase,
+            "round": round_num,
+            "candidate": candidate_idx,
+            "decision": "timeout",
+            "message": f"⏰ {phase.capitalize()}-clean approval timed out",
+        })
+        return False
 
     async def _execute_candidate_with_recovery(
         self,

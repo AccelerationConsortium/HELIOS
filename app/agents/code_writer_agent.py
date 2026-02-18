@@ -229,3 +229,61 @@ class CodeWriterAgent(BaseAgent[CodeWriterInput, CodeWriterOutput]):
             validation_warnings=validation_warnings,
             device_actions=device_action_dicts,
         )
+
+    # ------------------------------------------------------------------ #
+    # Workflow JSON → Protocol Steps converter
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def convert_workflow_json_to_protocol_steps(
+        workflow_json: str,
+        device_actions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Convert ot2-nlp-agent output into NeverOT compiler-ready protocol steps.
+
+        Bridges the gap between the ot2-nlp-agent's DeviceAction format
+        and the NeverOT orchestrator's protocol step format used by
+        the compiler and dispatcher.
+
+        Parameters
+        ----------
+        workflow_json:
+            Serialised workflow JSON string from the CodeWriterOutput.
+        device_actions:
+            List of DeviceAction dicts from the compiler output.
+
+        Returns
+        -------
+        list[dict]
+            Protocol steps in NeverOT format, each with step_key,
+            primitive, params, depends_on, and resources.
+        """
+        steps: list[dict[str, Any]] = []
+        prev_key: str | None = None
+
+        for i, action in enumerate(device_actions):
+            device = action.get("device", "robot")
+            action_type = action.get("action_type", "unknown")
+            primitive = f"{device}.{action_type}"
+
+            params = dict(action.get("parameters", {}))
+            # Carry over well/slot info if present
+            if "well" in action:
+                params["well"] = action["well"]
+            if "slot" in action:
+                params["slot"] = action["slot"]
+            if "labware" in action:
+                params["labware"] = action["labware"]
+
+            step_key = action.get("step_id", f"nlp_step_{i}")
+
+            steps.append({
+                "step_key": step_key,
+                "primitive": primitive,
+                "params": params,
+                "depends_on": [prev_key] if prev_key else [],
+                "resources": action.get("resources", []),
+            })
+            prev_key = step_key
+
+        return steps

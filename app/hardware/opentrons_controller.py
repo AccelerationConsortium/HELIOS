@@ -18,8 +18,8 @@ LOGGER = logging.getLogger(__name__)
 
 class OpentronsController:
     """
-    High-level controller for Opentrons OT-2 robot
-    Manages pipettes, labware, and liquid handling operations
+    High-level controller for Opentrons OT-2 / Flex robots.
+    Manages pipettes, labware, and liquid handling operations.
     """
 
     def __init__(
@@ -73,14 +73,14 @@ class OpentronsController:
 
     def load_standard_labware(
         self,
-        slot: int,
+        slot: int | str,
         labware_name: str
     ) -> str:
         """
         Load standard Opentrons labware
 
         Args:
-            slot: Deck slot number (1-11)
+            slot: Deck slot identifier (OT-2: 1-11, Flex: A1-D3)
             labware_name: Standard labware name (e.g., 'opentrons_96_tiprack_1000ul')
 
         Returns:
@@ -93,14 +93,14 @@ class OpentronsController:
 
     def load_custom_labware(
         self,
-        slot: int,
+        slot: int | str,
         labware_json_path: str
     ) -> str:
         """
         Load custom labware from JSON definition
 
         Args:
-            slot: Deck slot number (1-11)
+            slot: Deck slot identifier (OT-2: 1-11, Flex: A1-D3)
             labware_json_path: Path to labware JSON file
 
         Returns:
@@ -425,12 +425,12 @@ class OpentronsController:
 
         logging.info(f"Transferred {volume}µL from {source_labware}:{source_well} to {dest_labware}:{dest_well}")
 
-    def get_labware_id(self, slot: int) -> Optional[str]:
+    def get_labware_id(self, slot: int | str) -> Optional[str]:
         """
         Get labware ID for a given slot
 
         Args:
-            slot: Deck slot number
+            slot: Deck slot identifier (OT-2: 1-11, Flex: A1-D3)
 
         Returns:
             Labware ID or None if no labware in slot

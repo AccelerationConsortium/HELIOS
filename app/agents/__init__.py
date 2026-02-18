@@ -4,9 +4,13 @@ Individual agents follow the BaseAgent protocol. For paper-aligned
 grouping, use the four specialist swarms via SwarmFactory.
 """
 from app.agents.base import AgentResult, BaseAgent
+from app.agents.blueprint_reader_agent import BlueprintReaderAgent, BlueprintReaderInput, BlueprintReaderOutput
+from app.agents.cleaning_agent import CleaningAgent, CleaningInput, CleaningOutput
 from app.agents.code_writer_agent import CodeWriterAgent, CodeWriterInput, CodeWriterOutput
 from app.agents.compiler_agent import CompilerAgent, CompileInput, CompileOutput
+from app.agents.deck_layout_agent import DeckLayoutAgent, DeckLayoutInput, DeckLayoutOutput
 from app.agents.design_agent import DesignAgent, DesignInput, DesignOutput
+from app.agents.nlp_code_agent import NLPCodeAgent, NLPCodeInput, NLPCodeOutput
 from app.agents.onboarding_agent import OnboardingAgent, OnboardingInput, OnboardingOutput
 from app.agents.orchestrator import OrchestratorAgent, OrchestratorInput, OrchestratorOutput
 from app.agents.planner_agent import PlannerAgent, PlannerInput, PlannerOutput, PlannedRound
@@ -26,15 +30,20 @@ from app.agents.swarm import (
     ValidatorSwarm,
     list_swarms,
 )
+from app.agents.tool_holder_dialog_agent import ToolHolderDialogAgent, ToolHolderDialogInput, ToolHolderDialogOutput
 
 __all__ = [
     # Base
     "AgentResult",
     "BaseAgent",
     # Individual agents
+    "BlueprintReaderAgent", "BlueprintReaderInput", "BlueprintReaderOutput",
+    "CleaningAgent", "CleaningInput", "CleaningOutput",
     "CodeWriterAgent", "CodeWriterInput", "CodeWriterOutput",
     "CompilerAgent", "CompileInput", "CompileOutput",
+    "DeckLayoutAgent", "DeckLayoutInput", "DeckLayoutOutput",
     "DesignAgent", "DesignInput", "DesignOutput",
+    "NLPCodeAgent", "NLPCodeInput", "NLPCodeOutput",
     "OnboardingAgent", "OnboardingInput", "OnboardingOutput",
     "OrchestratorAgent", "OrchestratorInput", "OrchestratorOutput",
     "PlannerAgent", "PlannerInput", "PlannerOutput", "PlannedRound",
@@ -43,6 +52,7 @@ __all__ = [
     "SensingAgent", "SensingInput", "SensingOutput", "QCCheck", "QCResult",
     "QueryAgent", "QueryRequest", "QueryResult",
     "StopAgent", "StopInput", "StopOutput",
+    "ToolHolderDialogAgent", "ToolHolderDialogInput", "ToolHolderDialogOutput",
     # Swarm system (paper-aligned 4 specialist groups)
     "BaseSwarm",
     "SwarmContext",

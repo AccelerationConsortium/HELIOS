@@ -102,32 +102,32 @@ def _compute_adaptive_entropy_threshold(
 ) -> float:
     """
     Compute adaptive entropy threshold based on training progress.
-    
+
     Entropy measures uncertainty in phase assignment. High entropy means we're
-    uncertain whether to explore, exploit, refine, or stabilize. 
-    
+    uncertain whether to explore, exploit, refine, or stabilize.
+
     However, the posterior entropy is a property of the phase distribution,
     not directly of the data. If the phase posterior assigns high probability
     to exploit (despite high entropy), we should trust that signal.
-    
+
     This threshold blocks exploitation only when entropy is very high (>95% of max),
-    which indicates true ambiguity about the optimization phase. We scale the 
+    which indicates true ambiguity about the optimization phase. We scale the
     threshold based on sample size relative to problem dimensionality.
-    
+
     Args:
         n_observations: Total observations collected so far
         n_dimensions: Problem dimensionality
-        
+
     Returns:
         Entropy threshold above which exploitation is blocked
     """
     # Maximum entropy for 4-way phase distribution: log(4) ≈ 1.3863
     # We block exploit only when entropy > 95% of max ≈ 1.317
     # But adjust based on training maturity:
-    
+
     # Sample complexity: how many observations per dimension do we have?
     obs_per_dim = max(1, n_observations / max(1, n_dimensions))
-    
+
     if obs_per_dim < 3:
         # Very early (< 3 obs per dim): block exploitation more aggressively
         base = 1.10
@@ -137,7 +137,7 @@ def _compute_adaptive_entropy_threshold(
     else:
         # Late (> 10 obs per dim): use nominal threshold (95% of max)
         base = 1.32
-    
+
     return base
 
 
@@ -150,13 +150,14 @@ def select_strategy(
     Decision flow:
     1. User override → honor it
     2. Compute diagnostic signals (epistemic / aleatoric / saturation / drift)
-    3. Compute phase posterior (soft probabilities + entropy)
-    4. Adaptive weight scheduling based on signals
-    5. Generate candidate actions with adaptive utility scores
-    6. Govern: entropy gate + drift gate
-    7. Evidence decomposition
-    8. Build stabilize spec if needed
-    9. Generate explanation with evidence pointers
+    3. Optional Nexus enrichment (v5): causal insights + meta-learning
+    4. Compute phase posterior (soft probabilities + entropy)
+    5. Adaptive weight scheduling based on signals
+    6. Generate candidate actions with adaptive utility scores
+    7. Govern: entropy gate + drift gate
+    8. Evidence decomposition
+    9. Build stabilize spec if needed
+    10. Generate explanation with evidence pointers
     """
     if config is None:
         config = PhaseConfig()
@@ -170,6 +171,57 @@ def select_strategy(
     # ----- Compute diagnostics (now includes calibration + drift) -----
     diag = compute_diagnostics(snapshot, config)
 
+    # ----- Optional Nexus enrichment (v5) -----
+    nexus_evidence: list[EvidenceItem] = []
+    nexus_weight_adj: dict[str, float] = {}
+    if config.enable_nexus:
+        try:
+            from app.services.nexus_advisor import NexusAdvisor
+            _nexus = NexusAdvisor()
+
+            # Build causal data from snapshot history
+            _causal_data: list[list[float]] | None = None
+            _var_names: list[str] | None = None
+            if snapshot.all_params and snapshot.all_kpis:
+                _sample_keys = sorted(snapshot.all_params[0].keys()) if snapshot.all_params else []
+                _numeric_keys = [
+                    k for k in _sample_keys
+                    if isinstance(snapshot.all_params[0].get(k), (int, float))
+                ]
+                if _numeric_keys:
+                    _var_names = _numeric_keys + ["kpi"]
+                    _causal_data = [
+                        [float(p.get(k, 0)) for k in _numeric_keys] + [kpi]
+                        for p, kpi in zip(snapshot.all_params, snapshot.all_kpis)
+                    ]
+
+            # Try to get a campaign_id from snapshot metadata (best-effort)
+            _campaign_id = getattr(snapshot, "nexus_campaign_id", None) or "default"
+
+            insights = _nexus.get_enhanced_diagnostics(
+                campaign_id=_campaign_id,
+                causal_data=_causal_data,
+                var_names=_var_names,
+            )
+            if insights is not None:
+                # Inject causal edges as evidence items
+                for edge in insights.causal_edges:
+                    if edge.strength > 0.3:
+                        nexus_evidence.append(EvidenceItem(
+                            signal_name=f"nexus_causal_{edge.source}→{edge.target}",
+                            signal_value=edge.strength,
+                            target_action="exploit" if edge.strength > 0.7 else "explore",
+                            contribution=round(edge.strength * 0.15, 4),
+                            description=f"Nexus causal: {edge.source}→{edge.target} (str={edge.strength:.2f})",
+                        ))
+
+            meta = _nexus.get_meta_learning_advice(campaign_id=_campaign_id)
+            if meta is not None and meta.weight_adjustments:
+                nexus_weight_adj = meta.weight_adjustments
+                logger.info("Nexus meta-learning advice: %s", nexus_weight_adj)
+        except Exception:
+            logger.debug("Nexus enrichment skipped (unavailable or error)", exc_info=True)
+
     # ----- Phase posterior -----
     posterior = compute_phase_posterior(snapshot, diag, config)
 
@@ -177,6 +229,23 @@ def select_strategy(
     weights: WeightsUsed | None = None
     if config.enable_adaptive_weights:
         weights = schedule_weights(diag, posterior, config)
+
+    # ----- Apply Nexus meta-learning weight adjustments (v5) -----
+    if nexus_weight_adj and weights is not None:
+        w_imp = weights.w_improvement + nexus_weight_adj.get("w_improvement", 0.0)
+        w_info = weights.w_info_gain + nexus_weight_adj.get("w_info_gain", 0.0)
+        w_risk = weights.w_risk + nexus_weight_adj.get("w_risk", 0.0)
+        # Re-normalize
+        w_imp = max(0.1, w_imp)
+        w_info = max(0.1, w_info)
+        w_risk = max(0.05, w_risk)
+        total = w_imp + w_info + w_risk
+        weights = WeightsUsed(
+            w_improvement=round(w_imp / total, 4),
+            w_info_gain=round(w_info / total, 4),
+            w_risk=round(w_risk / total, 4),
+            reason=weights.reason + "; nexus meta-learning adj",
+        )
 
     # ----- Generate action candidates with adaptive weights -----
     actions = generate_action_candidates(
@@ -232,6 +301,12 @@ def select_strategy(
         reason="default weights",
     )
     evidence = compute_evidence(diag, eff_weights)
+
+    # ----- Merge Nexus evidence (v5) -----
+    if nexus_evidence:
+        merged = list(evidence) + nexus_evidence
+        merged.sort(key=lambda e: abs(e.contribution), reverse=True)
+        evidence = tuple(merged)
 
     # ----- Stabilize spec (v4) -----
     stabilize_spec = None
