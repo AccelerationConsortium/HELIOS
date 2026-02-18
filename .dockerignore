@@ -1,0 +1,60 @@
+# Version control
+.git
+.gitignore
+
+# Python artifacts
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.venv
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Data & DB (volume-mounted at runtime)
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Docs & non-essential markdown
+docs/
+*.md
+!README.md
+
+# Demo & presentation files
+demo_*.py
+auto_record_*.sh
+auto_record_*.py
+slides.pdf
+benchmarks/
+examples/
+models/
+
+# Plan & drafts
+plan/
+plan.md
+next.md
+
+# Claude config
+.claude/
+
+# Recovery-agent (built separately)
+recovery-agent/
+
+# OT2 NLP agent (built separately)
+ot2-nlp-agent/
+
+# Temp files
+*.tmp
+*.log

@@ -1,0 +1,79 @@
+# ============================================================
+# OTbot Docker Compose
+# ============================================================
+# Quick start (simulation):
+#   docker compose up
+#
+# With real hardware:
+#   docker compose --profile hardware up
+#
+# WSL2 + Docker Desktop on Windows:
+#   1. Install Docker Desktop with WSL2 backend
+#   2. Copy .env.example → .env and edit values
+#   3. For USB devices: install usbipd-win, attach devices to WSL2
+#   4. docker compose --profile hardware up
+# ============================================================
+
+services:
+  # ── Main orchestrator ──────────────────────────────────
+  otbot:
+    build:
+      context: .
+      args:
+        EXTRAS: ""  # Use "hardware" or "all" for real devices
+    image: otbot:latest
+    container_name: otbot
+    ports:
+      - "${OTBOT_PORT:-8000}:8000"
+    volumes:
+      - otbot-data:/app/data
+    env_file:
+      - .env
+    environment:
+      - ADAPTER_MODE=${ADAPTER_MODE:-simulated}
+      - ADAPTER_DRY_RUN=${ADAPTER_DRY_RUN:-true}
+      - ROBOT_IP=${ROBOT_IP:-localhost}
+      - RELAY_PORT=${RELAY_PORT:-auto}
+      - SQUIDSTAT_PORT=${SQUIDSTAT_PORT:-auto}
+      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-claude-sonnet-4-20250514}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # ── Recovery agent (hardware bridge) ───────────────────
+  # Only starts with: docker compose --profile hardware up
+  recovery-agent:
+    build:
+      context: ./recovery-agent
+      dockerfile: Dockerfile
+    image: otbot-recovery-agent:latest
+    container_name: otbot-recovery-agent
+    profiles:
+      - hardware
+    ports:
+      - "${RECOVERY_PORT:-8001}:8001"
+    volumes:
+      - otbot-data:/app/data
+    env_file:
+      - .env
+    environment:
+      - RELAY_PORT=${RELAY_PORT:-auto}
+      - SQUIDSTAT_PORT=${SQUIDSTAT_PORT:-auto}
+    # USB/serial device passthrough (uncomment as needed)
+    # devices:
+    #   - /dev/ttyUSB0:/dev/ttyUSB0
+    #   - /dev/ttyACM0:/dev/ttyACM0
+    restart: unless-stopped
+    depends_on:
+      otbot:
+        condition: service_healthy
+
+volumes:
+  otbot-data:
+    driver: local

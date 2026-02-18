@@ -44,7 +44,7 @@ class DeviceConfig:
         """Create the appropriate communication interface."""
         if self.connection_type == "serial":
             return SerialCommunication(
-                port=self.connection_params.get("port", "/dev/ttyUSB0"),
+                port=self.connection_params.get("port", "auto"),
                 baudrate=self.connection_params.get("baudrate", 9600),
                 timeout=self.timeout,
             )
@@ -117,7 +117,7 @@ class ConfigManager:
                     type="heater",
                     brand="Generic",
                     connection_type="serial",
-                    connection_params={"port": "/dev/ttyUSB0", "baudrate": 9600},
+                    connection_params={"port": "auto", "baudrate": 9600},
                     safety_limits={"max_temperature": 200.0, "min_temperature": -20.0},
                 )
             ],

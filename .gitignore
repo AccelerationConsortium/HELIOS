@@ -16,3 +16,37 @@ data/object_store/
 *.db
 *.db-shm
 *.db-wal
+
+# --- Development-only files (not needed for production) ---
+
+# All Markdown docs (summaries, guides, READMEs)
+*.md
+
+# BUT keep agent/ .md files — they are runtime dependencies
+# (SOUL.md, IDENTITY.md, TOOLS.md, skills/*.md loaded at startup)
+!agent/*.md
+!agent/**/*.md
+
+# Documentation folders
+docs/
+
+# Planning / paper files
+plan/
+
+# Demo files
+demo/
+
+# Test suite
+tests/
+
+# Node modules
+node_modules/
+
+# Presentation / slides
+recovery-agent/presentation/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo

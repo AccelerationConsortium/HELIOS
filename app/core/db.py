@@ -455,6 +455,25 @@ def init_db() -> None:
     CREATE INDEX IF NOT EXISTS idx_campaign_events_cid_seq
         ON campaign_events(campaign_id, seq);
 
+    -- Campaign-level Metrics Engine (outer meta-RL feedback)
+
+    CREATE TABLE IF NOT EXISTS campaign_metrics (
+        id                  TEXT PRIMARY KEY,
+        campaign_id         TEXT NOT NULL,
+        round_number        INTEGER NOT NULL,
+        discovery_velocity  REAL,
+        cost_per_insight    REAL,
+        success_rate        REAL,
+        meta_rl_signal_json TEXT NOT NULL DEFAULT '{}',
+        details_json        TEXT NOT NULL DEFAULT '{}',
+        schema_version      TEXT NOT NULL DEFAULT '1',
+        created_at          TEXT NOT NULL,
+        FOREIGN KEY (campaign_id) REFERENCES campaign_state(campaign_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_metrics_cid
+        ON campaign_metrics(campaign_id, round_number);
+
     -- QueryPlan cache (DB Retrieval Agent)
 
     CREATE TABLE IF NOT EXISTS query_plan_cache (

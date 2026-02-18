@@ -36,6 +36,7 @@ from app.services.convergence import (
     ConvergenceStatus,
     detect_convergence,
 )
+from app.services.campaign_metrics import compute_and_store_metrics
 from app.services.failure_signatures import learn_from_run
 from app.services.metrics import get_run_kpis
 
@@ -487,6 +488,9 @@ def run_campaign(
             round_result.convergence_status,
             len(round_result.kpi_values),
         )
+
+        # --- 4.5 Compute campaign-level metrics (advisory, outer meta-RL) ---
+        compute_and_store_metrics(campaign_id, round_number)
 
         # --- 5. Decide next action ---
         convergence = detect_convergence(

@@ -30,11 +30,11 @@ class Settings:
         # PLC (Modbus TCP) — address configured inside OT_PLC_Client_Edit
         # No separate setting needed; PLC auto-discovers or uses its own config.
 
-        # USB Relay
-        self.relay_port: str = os.getenv("RELAY_PORT", "COM11")
+        # USB Relay — use "auto" for cross-platform detection
+        self.relay_port: str = os.getenv("RELAY_PORT", "auto")
 
-        # Squidstat — not yet integrated; placeholder
-        self.squidstat_port: str = os.getenv("SQUIDSTAT_PORT", "")
+        # Squidstat — use "auto" for cross-platform detection
+        self.squidstat_port: str = os.getenv("SQUIDSTAT_PORT", "auto")
 
         # ---- LLM settings ----
         self.llm_provider: str = os.getenv("LLM_PROVIDER", "mock")  # "anthropic" | "mock"

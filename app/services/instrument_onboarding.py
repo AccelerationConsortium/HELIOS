@@ -570,7 +570,7 @@ class InstrumentOnboardingService:
 
         # Connection init code depends on communication type
         if comm in (CommunicationType.SERIAL, CommunicationType.USB):
-            init_params = "self, port: str = \"/dev/ttyUSB0\", baudrate: int = 9600"
+            init_params = "self, port: str = \"auto\", baudrate: int = 9600"
             init_body = textwrap.dedent(f"""\
                 self.port = port
                 self.baudrate = baudrate
@@ -1137,11 +1137,13 @@ def _python_default(val: Any) -> str:
 
 
 def _default_port(comm: CommunicationType) -> str:
-    """Default port string for a communication type."""
+    """Default port string for a communication type (cross-platform)."""
+    from app.core.port_utils import default_port
+
     if comm == CommunicationType.USB:
-        return "/dev/ttyUSB0"
+        return default_port("usb")
     if comm == CommunicationType.SERIAL:
-        return "/dev/ttyS0"
+        return default_port("serial")
     return ""
 
 
