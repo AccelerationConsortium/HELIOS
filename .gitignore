@@ -22,8 +22,8 @@ data/object_store/
 # All Markdown docs (summaries, guides, READMEs)
 *.md
 
-# BUT keep agent/ .md files — they are runtime dependencies
-# (SOUL.md, IDENTITY.md, TOOLS.md, skills/*.md loaded at startup)
+# BUT keep top-level README and agent/ .md files
+!README.md
 !agent/*.md
 !agent/**/*.md
 

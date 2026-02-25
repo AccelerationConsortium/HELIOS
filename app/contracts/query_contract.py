@@ -9,9 +9,10 @@ from __future__ import annotations
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.core.db import utcnow_iso
+from app.contracts.query_dsl import ExperimentQuery
 
 
 # ---------------------------------------------------------------------------
@@ -75,9 +76,18 @@ class QueryPlan(BaseModel):
 # ---------------------------------------------------------------------------
 
 class QueryRequest(BaseModel):
-    """Agent input — NL prompt + optional constraints."""
+    """Agent input — NL prompt **or** typed DSL query + optional constraints.
 
-    prompt: str = Field(..., min_length=1, max_length=2000)
+    At least one of ``prompt`` (NL path) or ``dsl_query`` (DSL path) must be
+    provided.  When ``dsl_query`` is set the NL path is skipped entirely —
+    the DSL is compiled deterministically without calling the LLM.
+    """
+
+    # NL path: free-text natural language query
+    prompt: str = Field(default="", max_length=2000)
+    # DSL path: typed query (Layer 1 — deterministic, no LLM)
+    dsl_query: ExperimentQuery | None = None
+
     constraints: QueryConstraints = Field(default_factory=QueryConstraints)
 
     # Optional disambiguation context
@@ -87,6 +97,12 @@ class QueryRequest(BaseModel):
     # Snapshot mode: capture result as immutable dataset
     snapshot_mode: bool = False
     snapshot_name: str | None = None
+
+    @model_validator(mode="after")
+    def _require_prompt_or_dsl(self) -> "QueryRequest":
+        if not self.prompt.strip() and self.dsl_query is None:
+            raise ValueError("Either 'prompt' or 'dsl_query' must be provided")
+        return self
 
 
 class QueryResult(BaseModel):

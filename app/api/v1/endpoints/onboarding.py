@@ -24,6 +24,7 @@ from app.agents.onboarding_agent import (
     OnboardingOutput,
     PrimitiveSpec,
 )
+from app.services.primitives_registry import refresh_registry
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,16 @@ _onboarding_sessions: dict[str, dict[str, Any]] = {}
 # ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
+
+
+class OnboardingDiscoverRequest(BaseModel):
+    """Request body for POST /onboarding/discover."""
+
+    instrument_name: str
+    manufacturer: str = ""
+    model: str = ""
+    sdk_package: str = ""
+    docs_url: str = ""
 
 
 class OnboardingGenerateRequest(BaseModel):
@@ -82,6 +93,8 @@ class OnboardingResponse(BaseModel):
     written_paths: list[str] = Field(default_factory=list)
     manual_todo: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    # Included for discover phase so the frontend can read discovered_primitives
+    serialised_result: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -106,12 +119,51 @@ def _output_to_response(
         written_paths=output.written_paths,
         manual_todo=output.manual_todo,
         warnings=output.warnings,
+        serialised_result=output.serialised_result,
     )
 
 
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.post("/discover", response_model=OnboardingResponse)
+async def onboarding_discover(
+    payload: OnboardingDiscoverRequest,
+) -> OnboardingResponse:
+    """Auto-discover primitives for an instrument via LLM inference.
+
+    Calls the LLM with instrument details and returns a list of proposed
+    primitives.  The session is stored so the caller can pass the
+    ``onboarding_id`` directly to ``/generate`` with primitives pre-filled.
+    """
+    import uuid
+
+    onboarding_id = f"onb-{uuid.uuid4().hex[:12]}"
+
+    agent = OnboardingAgent()
+    agent_input = OnboardingInput(
+        phase="discover",
+        instrument_name=payload.instrument_name,
+        manufacturer=payload.manufacturer,
+        model=payload.model,
+        sdk_package=payload.sdk_package,
+        docs_url=payload.docs_url,
+    )
+
+    result = await agent.run(agent_input)
+
+    if not result.success or result.output is None:
+        raise HTTPException(
+            status_code=400,
+            detail="; ".join(result.errors) if result.errors else "Discovery failed",
+        )
+
+    # Store discovered primitives so the wizard can carry them forward
+    _onboarding_sessions[onboarding_id] = result.output.serialised_result
+
+    return _output_to_response(onboarding_id, result.output)
 
 
 @router.post("/generate", response_model=OnboardingResponse)
@@ -224,6 +276,17 @@ async def onboarding_write(
 
     # Update session state
     _onboarding_sessions[payload.onboarding_id] = result.output.serialised_result
+
+    # Hot-reload primitives registry so newly written skill files are visible
+    # immediately without requiring a server restart.
+    if result.output.status == "written":
+        try:
+            refresh_registry()
+            logger.info(
+                "Registry refreshed after onboarding write: %s", payload.onboarding_id,
+            )
+        except Exception as exc:
+            logger.warning("refresh_registry failed (non-fatal): %s", exc)
 
     return _output_to_response(payload.onboarding_id, result.output)
 

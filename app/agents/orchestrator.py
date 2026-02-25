@@ -303,6 +303,14 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 "message": "Plan generated" if plan_result.success else f"Planning failed: {plan_result.errors}",
             })
 
+            if plan_result.success and plan_result.output and plan_result.output.decision_nodes:
+                self._emit(campaign_id, {
+                    "type": "agent_decision_tree",
+                    "agent": "planner",
+                    "round": 0,
+                    "nodes": plan_result.output.decision_nodes,
+                })
+
             if not plan_result.success:
                 update_campaign_status(campaign_id, "failed", error=str(plan_result.errors))
                 return OrchestratorOutput(
@@ -933,6 +941,15 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "message": "Safety check passed" if (not safety_result.success or safety_result.output.allowed) else f"Safety veto: {safety_result.output.violations}",
                 })
 
+                if safety_result.success and safety_result.output and safety_result.output.decision_nodes:
+                    self._emit(campaign_id, {
+                        "type": "agent_decision_tree",
+                        "agent": "safety",
+                        "round": round_num,
+                        "candidate": i,
+                        "nodes": safety_result.output.decision_nodes,
+                    })
+
                 # 2c-bis. Simulation — dry-run verification before physical execution
                 sim_input = SimulationInput(
                     compiled_graph=compile_result.output.compiled_graph,
@@ -960,6 +977,14 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         "summary": sim_out.summary,
                         "message": sim_out.summary,
                     })
+                    if sim_out.decision_nodes:
+                        self._emit(campaign_id, {
+                            "type": "agent_decision_tree",
+                            "agent": "simulation",
+                            "round": round_num,
+                            "candidate": i,
+                            "nodes": sim_out.decision_nodes,
+                        })
                     if sim_out.verdict == "fail":
                         logger.warning(
                             "Round %d candidate %d: simulation veto (%d errors)",
@@ -1282,6 +1307,13 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "best_kpi": analyzer_result.output.round_best_kpi,
                     "message": analyzer_result.output.narrative,
                 })
+                if analyzer_result.output.decision_nodes:
+                    self._emit(campaign_id, {
+                        "type": "agent_decision_tree",
+                        "agent": "analyzer",
+                        "round": round_num,
+                        "nodes": analyzer_result.output.decision_nodes,
+                    })
                 agent_trace.append({
                     "agent": "analyzer_agent",
                     "round": round_num,

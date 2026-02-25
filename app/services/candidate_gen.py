@@ -689,6 +689,17 @@ def _store_batch(
     now = utcnow_iso()
 
     def _txn(conn: _sqlite3.Connection) -> None:
+        # Orchestrator campaigns live in campaign_state, not campaigns.
+        # Only reference campaign_id when it exists in the campaigns table
+        # to avoid FK constraint violations.
+        stored_campaign_id: str | None = None
+        if campaign_id is not None:
+            row = conn.execute(
+                "SELECT 1 FROM campaigns WHERE id = ? LIMIT 1", (campaign_id,)
+            ).fetchone()
+            if row is not None:
+                stored_campaign_id = campaign_id
+
         conn.execute(
             "INSERT INTO batch_requests "
             "(id, campaign_id, protocol_template_json, space_json, strategy, "
@@ -696,7 +707,7 @@ def _store_batch(
             "VALUES (?, ?, ?, ?, ?, ?, 'generated', ?, ?)",
             (
                 result.batch_id,
-                campaign_id,
+                stored_campaign_id,
                 json_dumps(result.space.protocol_template),
                 json_dumps(_serialize_space(result.space)),
                 result.strategy,

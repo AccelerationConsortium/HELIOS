@@ -416,6 +416,8 @@ def get_registry() -> PrimitivesRegistry:
     """Return the singleton primitives registry, loading skills on first call."""
     registry = PrimitivesRegistry()
     registry.load_skills_dir(_DEFAULT_SKILLS_DIR)
+    # Also load LLM-generated skills from the generated/ subdirectory
+    registry.load_skills_dir(_DEFAULT_SKILLS_DIR / "generated")
     return registry
 
 

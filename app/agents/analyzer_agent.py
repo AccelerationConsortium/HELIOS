@@ -17,7 +17,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.agents.base import BaseAgent
+from app.agents.base import BaseAgent, DecisionNode
 from app.services.convergence import ConvergenceStatus, detect_convergence
 from app.services.strategy_diagnostics import compute_diagnostics
 from app.services.strategy_models import CampaignSnapshot, DiagnosticSignals
@@ -80,6 +80,7 @@ class AnalyzerOutput(BaseModel):
     aleatoric_std: float = 0.0
     # Human-readable 1-2 sentence summary
     narrative: str = ""
+    decision_nodes: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -290,10 +291,34 @@ class AnalyzerAgent(BaseAgent[AnalyzerInput, AnalyzerOutput]):
                 "message": "Computing diagnostic signals (epistemic / aleatoric / saturation)...",
             })
 
+        # Decision node 1: improvement trend (built now, used in final return)
+        if improvement is not None:
+            trend_selected = f"Δ={improvement:+.1f}% vs R{input_data.round_number - 1}"
+            trend_reason = f"round_best={round_best:.4g}, prev_best computed from {len(input_data.all_kpis) - len(input_data.round_kpis)} prior observations"
+        else:
+            trend_selected = "First round (no comparison)"
+            trend_reason = "round_number=1 or insufficient prior history"
+        improvement_node = DecisionNode(
+            id="improvement_trend",
+            label="Improvement vs last round",
+            options=["First round (no comparison)", f"Δ={improvement:+.1f}% vs R{input_data.round_number - 1}"] if improvement is not None else ["First round (no comparison)", "No prior data"],
+            selected=trend_selected,
+            reason=trend_reason,
+            outcome=f"round_best={round_best:.4g}",
+        )
+
         try:
             diagnostics: DiagnosticSignals = compute_diagnostics(snapshot)
         except Exception as exc:
             logger.warning("Diagnostics computation failed: %s", exc, exc_info=True)
+            diag_fail_node = DecisionNode(
+                id="diagnostics",
+                label="Diagnostic signals",
+                options=["OK", "Unavailable (exception)"],
+                selected="Unavailable (exception)",
+                reason=str(exc),
+                outcome="Returning minimal output",
+            )
             # Return a minimal output rather than propagating the failure
             return AnalyzerOutput(
                 round_number=input_data.round_number,
@@ -303,6 +328,7 @@ class AnalyzerAgent(BaseAgent[AnalyzerInput, AnalyzerOutput]):
                 improvement_vs_last=improvement,
                 aleatoric_std=aleatoric_std,
                 narrative=f"Round {input_data.round_number}: diagnostics unavailable.",
+                decision_nodes=[improvement_node.to_dict(), diag_fail_node.to_dict()],
             )
 
         if emit:
@@ -383,6 +409,45 @@ class AnalyzerAgent(BaseAgent[AnalyzerInput, AnalyzerOutput]):
                 "message": f"  → {narrative}",
             })
 
+        # Decision node 2: diagnostics status
+        diag_ok_node = DecisionNode(
+            id="diagnostics",
+            label="Diagnostic signals",
+            options=["OK", "Unavailable (exception)"],
+            selected="OK",
+            reason=f"coverage={diagnostics.space_coverage:.2f}, uncertainty={diagnostics.model_uncertainty}",
+        )
+
+        # Decision node 3: convergence
+        conv_node = DecisionNode(
+            id="convergence",
+            label="Convergence status",
+            options=["insufficient_data", "improving", "plateau", "diverging"],
+            selected=convergence.status,
+            reason=f"confidence={convergence.confidence:.2f}, {len(input_data.all_kpis)} observations",
+            outcome=f"conf={convergence.confidence:.2f}",
+        )
+
+        # Decision node 4: campaign phase
+        cov = diagnostics.space_coverage
+        vel = diagnostics.improvement_velocity
+        if cov < 0.3:
+            phase_selected = "Exploration"
+            phase_reason = f"space_coverage={cov:.2f} < 0.3"
+        elif vel is not None and vel > 0.02:
+            phase_selected = "Exploitation"
+            phase_reason = f"improvement_velocity={vel:.4f} > 0.02"
+        else:
+            phase_selected = "Transition"
+            phase_reason = f"coverage={cov:.2f}, velocity={vel}"
+        phase_node = DecisionNode(
+            id="campaign_phase",
+            label="Campaign phase",
+            options=["Exploration", "Exploitation", "Transition"],
+            selected=phase_selected,
+            reason=phase_reason,
+        )
+
         return AnalyzerOutput(
             round_number=input_data.round_number,
             diagnostics=_diagnostics_to_dict(diagnostics),
@@ -394,6 +459,12 @@ class AnalyzerAgent(BaseAgent[AnalyzerInput, AnalyzerOutput]):
             improvement_vs_last=improvement,
             aleatoric_std=aleatoric_std,
             narrative=narrative,
+            decision_nodes=[
+                improvement_node.to_dict(),
+                diag_ok_node.to_dict(),
+                conv_node.to_dict(),
+                phase_node.to_dict(),
+            ],
         )
 
 

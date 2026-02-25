@@ -40,17 +40,22 @@ async def _campaign_event_generator(
     If *last_event_id* is given, replay missed events from DB first,
     then switch to the live in-memory queue.
     """
-    # Phase 1: Replay from DB if reconnecting
-    if last_event_id is not None:
-        try:
-            from app.services.campaign_events import replay_events
-            for evt in replay_events(campaign_id, after_seq=last_event_id):
-                seq = evt["seq"]
-                event_type = evt["event_type"]
-                data = json.dumps(evt["payload"], separators=(",", ":"))
-                yield f"id: {seq}\nevent: {event_type}\ndata: {data}\n\n"
-        except Exception:
-            pass  # best-effort replay
+    # Phase 1: Always replay from DB.
+    # - On first connect (last_event_id is None) we default to 0 so the browser
+    #   gets all historical events even if the campaign finished before SSE was
+    #   established (common in simulated mode where campaigns complete in <1 s).
+    # - On reconnect, last_event_id is the last received seq so we only replay
+    #   missed events.
+    replay_from = last_event_id if last_event_id is not None else 0
+    try:
+        from app.services.campaign_events import replay_events
+        for evt in replay_events(campaign_id, after_seq=replay_from):
+            seq = evt["seq"]
+            event_type = evt["event_type"]
+            data = json.dumps(evt["payload"], separators=(",", ":"))
+            yield f"id: {seq}\nevent: {event_type}\ndata: {data}\n\n"
+    except Exception:
+        pass  # best-effort replay
 
     # Phase 2: Live stream from in-memory queue
     queue: asyncio.Queue = asyncio.Queue(maxsize=256)

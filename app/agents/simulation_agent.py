@@ -28,7 +28,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.agents.base import BaseAgent
+from app.agents.base import BaseAgent, DecisionNode
 from app.services.simulation import SimulationResult, SimulationViolation, simulate_protocol
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,7 @@ class SimulationOutput(BaseModel):
     resource_summary: dict[str, Any] = Field(default_factory=dict)
     # Human-readable one-liner
     summary: str = ""
+    decision_nodes: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +151,25 @@ class SimulationAgent(BaseAgent[SimulationInput, SimulationOutput]):
                     "verdict": "warn",
                     "message": f"Simulation engine error (proceeding): {exc}",
                 })
+            engine_err_node = DecisionNode(
+                id="engine_status",
+                label="Simulation engine",
+                options=["Engine OK", "Engine error (warn and proceed)"],
+                selected="Engine error (warn and proceed)",
+                reason=str(exc),
+                outcome="Proceeding with caution — physical run not blocked",
+            )
+            verdict_err_node = DecisionNode(
+                id="verdict",
+                label="Simulation verdict",
+                options=["pass", "warn", "fail"],
+                selected="warn",
+                reason="Engine exception treated as non-blocking warning",
+            )
             return SimulationOutput(
                 verdict="warn",
                 summary=f"Simulation engine error — proceeding with caution: {exc}",
+                decision_nodes=[engine_err_node.to_dict(), verdict_err_node.to_dict()],
             )
 
         # --- Serialise violations ---
@@ -208,6 +225,38 @@ class SimulationAgent(BaseAgent[SimulationInput, SimulationOutput]):
             for w in sim_result.warnings:
                 logger.info("Simulation warning: %s", w)
 
+        # Build decision nodes
+        engine_ok_node = DecisionNode(
+            id="engine_status",
+            label="Simulation engine",
+            options=["Engine OK", "Engine error (warn and proceed)"],
+            selected="Engine OK",
+            reason=f"Engine ran {n_steps} steps without exception",
+            outcome=f"est. duration {_format_duration(sim_result.estimated_duration_s)}",
+        )
+        violation_children = tuple(
+            DecisionNode(
+                id=f"violation_{vi}",
+                label=f"{v['step_key']} / {v['primitive']}",
+                options=["error", "warning"],
+                selected=v["severity"],
+                reason=v["message"],
+            )
+            for vi, v in enumerate(violations_dicts)
+        )
+        verdict_node = DecisionNode(
+            id="verdict",
+            label="Simulation verdict",
+            options=["pass", "warn", "fail"],
+            selected=verdict,
+            reason=(
+                f"{n_errors} error(s), {n_warnings} warning(s)"
+                if verdict != "pass" else f"All {n_steps} steps passed"
+            ),
+            outcome=summary,
+            children=violation_children,
+        )
+
         return SimulationOutput(
             verdict=verdict,
             n_errors=n_errors,
@@ -217,6 +266,7 @@ class SimulationAgent(BaseAgent[SimulationInput, SimulationOutput]):
             estimated_duration_s=sim_result.estimated_duration_s,
             resource_summary=sim_result.resource_summary,
             summary=summary,
+            decision_nodes=[engine_ok_node.to_dict(), verdict_node.to_dict()],
         )
 
 

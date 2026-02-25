@@ -143,6 +143,16 @@ def create_run(
     session = session_key or campaign_id or run_id
 
     def _txn(conn: sqlite3.Connection) -> dict[str, Any]:
+        # Orchestrator campaigns live in campaign_state, not campaigns.
+        # Only reference campaign_id when it exists in campaigns to avoid FK violations.
+        stored_campaign_id: str | None = None
+        if campaign_id is not None:
+            row = conn.execute(
+                "SELECT 1 FROM campaigns WHERE id = ? LIMIT 1", (campaign_id,)
+            ).fetchone()
+            if row is not None:
+                stored_campaign_id = campaign_id
+
         conn.execute(
             """
             INSERT INTO runs (
@@ -153,7 +163,7 @@ def create_run(
             """,
             (
                 run_id,
-                campaign_id,
+                stored_campaign_id,
                 trigger_type,
                 json_dumps(trigger_payload),
                 session,
