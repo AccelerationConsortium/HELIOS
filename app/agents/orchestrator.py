@@ -445,7 +445,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         from app.agents.compiler_agent import CompilerAgent, CompileInput
         from app.agents.safety_agent import SafetyAgent, SafetyCheckInput
         from app.agents.stop_agent import StopAgent, StopInput
-        from app.agents.sensing_agent import SensingAgent, SensingInput
+        from app.agents.monitor_agent import MonitorAgent, MonitorInput
+        from app.agents.analyzer_agent import AnalyzerAgent, AnalyzerInput
         from app.services.deck_layout import (
             create_well_allocator_from_deck_plan,
             plan_deck_layout,
@@ -456,7 +457,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         compiler = CompilerAgent()
         safety = SafetyAgent()
         stop_agent = StopAgent()
-        sensing = SensingAgent()
+        monitor = MonitorAgent()
+        analyzer = AnalyzerAgent()
 
         # --- Restore or init in-memory state ---
         if restored_state is not None:
@@ -1055,48 +1057,43 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                             "message": f"Post-clean skipped (not approved) for candidate {i}",
                         })
 
-                # 2e. Quality check via SensingAgent
+                # 2e. Quality check via MonitorAgent
                 step_result = run_step_result
-                sensing_input = SensingInput(
+                monitor_input = MonitorInput(
                     step_key=f"round_{round_num}_candidate_{i}",
                     primitive="robot.dispense",
                     params=candidate_params,
                     step_result=step_result,
                     policy_snapshot=input_data.policy_snapshot,
                     step_history=step_history,
+                    round_number=round_num,
+                    emit=lambda event: self._emit(campaign_id, event),
                 )
-                self._emit(campaign_id, {
-                    "type": "agent_thinking",
-                    "agent": "sensing",
-                    "round": round_num,
-                    "candidate": i,
-                    "message": f"Quality checking candidate {i} results...",
-                })
 
-                sensing_result = await sensing.run(sensing_input)
+                monitor_result = await monitor.run(monitor_input)
 
                 self._emit(campaign_id, {
                     "type": "agent_result",
-                    "agent": "sensing",
+                    "agent": "monitor",
                     "round": round_num,
                     "candidate": i,
-                    "quality": sensing_result.output.overall_quality if sensing_result.success else "unknown",
-                    "recommendation": sensing_result.output.recommendation if sensing_result.success else "unknown",
-                    "message": f"QC: {sensing_result.output.overall_quality} — {sensing_result.output.recommendation}" if sensing_result.success else "QC check failed",
+                    "quality": monitor_result.output.overall_quality if monitor_result.success else "unknown",
+                    "recommendation": monitor_result.output.recommendation if monitor_result.success else "unknown",
+                    "message": f"QC: {monitor_result.output.overall_quality} — {monitor_result.output.recommendation}" if monitor_result.success else "QC check failed",
                 })
 
                 agent_trace.append({
-                    "agent": "sensing_agent",
+                    "agent": "monitor_agent",
                     "round": round_num,
                     "candidate": i,
                     "quality": (
-                        sensing_result.output.overall_quality
-                        if sensing_result.success
+                        monitor_result.output.overall_quality
+                        if monitor_result.success
                         else "unknown"
                     ),
                     "recommendation": (
-                        sensing_result.output.recommendation
-                        if sensing_result.success
+                        monitor_result.output.recommendation
+                        if monitor_result.success
                         else "unknown"
                     ),
                 })
@@ -1107,11 +1104,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 # Track QC outcomes for v3 qc_fail_rate
                 total_qc_checks += 1
 
-                # If sensing recommends abort, skip this candidate's KPI
-                qc_quality = sensing_result.output.overall_quality if sensing_result.success else "unknown"
+                # If monitor recommends abort, skip this candidate's KPI
+                qc_quality = monitor_result.output.overall_quality if monitor_result.success else "unknown"
                 if (
-                    sensing_result.success
-                    and sensing_result.output.recommendation == "abort"
+                    monitor_result.success
+                    and monitor_result.output.recommendation == "abort"
                 ):
                     total_qc_fails += 1
                     logger.warning(
@@ -1204,7 +1201,55 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 except Exception:
                     logger.debug("RL post-round hook failed", exc_info=True)
 
-            # 2f. Stop decision
+            # 2f. AnalyzerAgent — per-round analysis and narrative
+            _round_qc_fail_rate = (
+                total_qc_fails / total_qc_checks if total_qc_checks > 0 else 0.0
+            )
+            analyzer_input = AnalyzerInput(
+                round_number=round_num,
+                direction=input_data.direction,
+                kpi_name=input_data.objective_kpi,
+                round_kpis=list(round_batch_kpis),
+                round_params=list(round_batch_params),
+                all_kpis=list(all_kpis),
+                all_params=list(all_params),
+                all_rounds=list(all_rounds),
+                qc_fail_rate=_round_qc_fail_rate,
+                max_rounds=input_data.max_rounds,
+                n_dimensions=len(input_data.dimensions),
+                has_categorical=any(
+                    d.get("choices") is not None for d in input_data.dimensions
+                ),
+                has_log_scale=any(
+                    d.get("log_scale", False) for d in input_data.dimensions
+                ),
+                step_history=list(step_history),
+                emit=lambda event: self._emit(campaign_id, event),
+            )
+            analyzer_result = await analyzer.run(analyzer_input)
+            if analyzer_result.success:
+                self._emit(campaign_id, {
+                    "type": "agent_result",
+                    "agent": "analyzer",
+                    "round": round_num,
+                    "narrative": analyzer_result.output.narrative,
+                    "convergence": analyzer_result.output.convergence_status,
+                    "best_kpi": analyzer_result.output.round_best_kpi,
+                    "message": analyzer_result.output.narrative,
+                })
+                agent_trace.append({
+                    "agent": "analyzer_agent",
+                    "round": round_num,
+                    "narrative": analyzer_result.output.narrative,
+                    "convergence": analyzer_result.output.convergence_status,
+                })
+            else:
+                logger.warning(
+                    "AnalyzerAgent failed for round %d: %s",
+                    round_num, analyzer_result.errors,
+                )
+
+            # 2g. Stop decision
             stop_input = StopInput(
                 kpi_history=kpi_history,
                 current_round=round_num,

@@ -46,6 +46,12 @@ let state = {
 
     // Context panel
     contextPanelOpen: true,
+
+    // Plan confirmation
+    planCountdownInterval: null,
+
+    // Instrument status (keyed by instrument name)
+    instrumentStatus: {},    // { name: { status, message, timestamp } }
 };
 
 // ---------------------------------------------------------------------------
@@ -55,8 +61,8 @@ let state = {
 function createStep(id, type, agent, label, opts = {}) {
     return {
         id,
-        type,           // parse | planner | round | strategy | design | compile | safety | execute | sensing | stop | complete
-        agent,          // agent name (for color: planner, design, compiler, safety, executor, sensing, stop, parse, system)
+        type,           // parse | planner | round | strategy | design | compile | safety | execute | monitor | analyzer | stop | complete
+        agent,          // agent name (for color: planner, design, compiler, safety, executor, monitor, analyzer, stop, parse, system)
         label,
         status: 'pending',  // pending | thinking | success | failure | warning
         detail: '',
@@ -68,6 +74,7 @@ function createStep(id, type, agent, label, opts = {}) {
         timestamp: null,
         isChild: opts.isChild || false,
         isRound: opts.isRound || false,
+        thinkingLog: [],    // accumulated thinking messages for this step
     };
 }
 
@@ -91,7 +98,9 @@ function mapAgentToStepId(roundId, agent) {
         compiler: `${roundId}-compile`,
         safety: `${roundId}-safety`,
         executor: `${roundId}-execute`,
-        sensing: `${roundId}-sensing`,
+        sensing: `${roundId}-monitor`,
+        monitor: `${roundId}-monitor`,
+        analyzer: `${roundId}-analyzer`,
         stop: `${roundId}-stop`,
     };
     return map[agent] || `${roundId}-${agent}`;
@@ -231,9 +240,8 @@ async function parseAndLaunch(text) {
         // Show parsed preview in left panel
         showParsedPreview(parsed);
 
-        // Build and launch campaign
-        const orchInput = buildOrchestratorInput(parsed);
-        await launchCampaign(orchInput);
+        // Show plan confirmation modal — auto-launches after 60 s
+        showPlanModal(parsed);
 
     } catch (err) {
         state.phase = 'error';
@@ -272,6 +280,148 @@ function buildOrchestratorInput(parsed) {
         dry_run: true,
         plan_only: false,
     };
+}
+
+// ---------------------------------------------------------------------------
+// Plan Confirmation Modal
+// ---------------------------------------------------------------------------
+
+function showPlanModal(parsed) {
+    const body = document.getElementById('planModalBody');
+    body.innerHTML = buildPlanSummaryHtml(parsed);
+
+    const modal = document.getElementById('planModal');
+    modal.style.display = 'flex';
+
+    let secsLeft = 60;
+    const countdownEl = document.getElementById('planCountdown');
+    countdownEl.textContent = secsLeft;
+    countdownEl.className = 'modal-countdown';
+
+    state.planCountdownInterval = setInterval(() => {
+        secsLeft--;
+        countdownEl.textContent = secsLeft;
+        if (secsLeft <= 10) countdownEl.className = 'modal-countdown urgent';
+        if (secsLeft <= 0) {
+            clearInterval(state.planCountdownInterval);
+            state.planCountdownInterval = null;
+            hidePlanModal();
+            launchCampaign(buildOrchestratorInput(parsed));
+        }
+    }, 1000);
+
+    document.getElementById('planApproveBtn').onclick = () => {
+        clearInterval(state.planCountdownInterval);
+        state.planCountdownInterval = null;
+        hidePlanModal();
+        launchCampaign(buildOrchestratorInput(parsed));
+    };
+
+    function resetToEdit() {
+        clearInterval(state.planCountdownInterval);
+        state.planCountdownInterval = null;
+        hidePlanModal();
+        parsedPreview.style.display = 'none';
+        welcomeSection.style.display = '';
+        mainInput.focus();
+        state.phase = 'idle';
+        sendBtn.disabled = false;
+        // Reset pipeline to empty
+        state.pipeline.steps = [];
+        renderPipeline();
+    }
+
+    document.getElementById('planEditBtn').onclick = resetToEdit;
+    document.getElementById('planCancelBtn').onclick = resetToEdit;
+}
+
+function hidePlanModal() {
+    const modal = document.getElementById('planModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function buildPlanSummaryHtml(parsed) {
+    let html = '<div class="plan-summary">';
+
+    // Goal row
+    const dir = parsed.direction === 'maximize' ? 'Maximize' : 'Minimize';
+    const kpi = parsed.objective_kpi ? parsed.objective_kpi.toUpperCase() : '(unknown KPI)';
+    html += '<div class="plan-goal">';
+    html += `<span class="plan-goal-label">${escapeHtml(dir)}</span>`;
+    html += `<span class="plan-goal-kpi">${escapeHtml(kpi)}</span>`;
+    if (parsed.target_value != null) {
+        html += `<span class="plan-goal-target">target: ${parsed.target_value}</span>`;
+    }
+    html += '</div>';
+
+    // Parameter space
+    if (parsed.dimensions && parsed.dimensions.length > 0) {
+        html += '<div class="plan-section-title">Parameter Space</div>';
+        html += '<div class="plan-dims">';
+        parsed.dimensions.forEach(d => {
+            const unit = d.unit ? ' ' + escapeHtml(d.unit) : '';
+            html += `<div class="plan-dim-chip">
+                <span class="plan-dim-name">${escapeHtml(d.name)}</span>
+                <span class="plan-dim-range">[${d.low}–${d.high}${unit}]</span>
+            </div>`;
+        });
+        html += '</div>';
+    }
+
+    // Campaign settings
+    html += '<div class="plan-section-title">Campaign Settings</div>';
+    html += '<div class="plan-settings-grid">';
+    const settings = [
+        ['Strategy', parsed.strategy || 'lhs'],
+        ['Max Rounds', String(parsed.max_rounds || 5)],
+        ['Batch Size', String(parsed.batch_size || 4)],
+    ];
+    if (parsed.protocol_pattern_id) settings.push(['Protocol', parsed.protocol_pattern_id]);
+    settings.forEach(([k, v]) => {
+        html += `<div class="plan-setting-item">
+            <div class="plan-setting-label">${escapeHtml(k)}</div>
+            <div class="plan-setting-value">${escapeHtml(v)}</div>
+        </div>`;
+    });
+    html += '</div>';
+
+    // Missing fields warning
+    if (parsed.missing_fields && parsed.missing_fields.length > 0) {
+        html += `<div class="plan-warning">
+            <span class="plan-warning-icon">&#x26A0;</span>
+            <span>Missing — will use defaults: <strong>${escapeHtml(parsed.missing_fields.join(', '))}</strong></span>
+        </div>`;
+    }
+
+    html += '</div>';
+    return html;
+}
+
+// ---------------------------------------------------------------------------
+// Instrument Status Bar
+// ---------------------------------------------------------------------------
+
+function updateInstrumentBar() {
+    const bar = document.getElementById('instrumentBar');
+    const items = document.getElementById('instrumentBarItems');
+    if (!bar || !items) return;
+
+    const entries = Object.entries(state.instrumentStatus);
+    if (entries.length === 0) {
+        bar.style.display = 'none';
+        return;
+    }
+
+    bar.style.display = 'flex';
+    items.innerHTML = entries.map(([name, info]) => {
+        const cls = ['ready', 'busy', 'error', 'idle'].includes(info.status) ? info.status : 'idle';
+        const title = info.message ? escapeHtml(info.message) : '';
+        return `<div class="instrument-chip ${cls}" title="${title}">
+            <span class="instrument-dot"></span>
+            <span class="instrument-name">${escapeHtml(name)}</span>
+            <span class="instrument-status-label">${escapeHtml(info.status || 'unknown')}</span>
+        </div>`;
+    }).join('');
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +495,8 @@ function connectSSE(campaignId) {
         // Detailed execution events
         'agent_decision', 'tool_call', 'hardware_action',
         'protocol_step', 'safety_check', 'thinking', 'log',
+        // Instrument status
+        'instrument_status',
     ];
 
     eventTypes.forEach((type) => {
@@ -400,12 +552,19 @@ function handleSSEEvent(type, data) {
             break;
 
         case 'agent_thinking': {
+            const thinkMsg = data.message || '';
             if (agent === 'planner') {
-                updateStepStatus('planner', 'thinking', data.message);
+                updateStepStatus('planner', 'thinking', thinkMsg);
+                const plannerStep = findStep('planner');
+                if (plannerStep && thinkMsg) plannerStep.thinkingLog.push(thinkMsg);
             } else if (roundId) {
                 const stepId = mapAgentToStepId(roundId, agent);
-                updateStepStatus(stepId, 'thinking', data.message);
+                updateStepStatus(stepId, 'thinking', thinkMsg);
+                const thinkStep = findStep(stepId);
+                if (thinkStep && thinkMsg) thinkStep.thinkingLog.push(thinkMsg);
             }
+            // If context panel is showing this step, refresh it live
+            if (state.pipeline.selectedStepId) updateContextPanel();
             break;
         }
 
@@ -423,11 +582,13 @@ function handleSSEEvent(type, data) {
                 updateStepData(stepId, data);
                 if (data.duration_ms) updateStepDuration(stepId, data.duration_ms);
 
-                // Track candidate aggregation
-                const step = findStep(stepId);
-                if (step) {
-                    step.candidatesDone++;
-                    updateStepCandidates(stepId);
+                // Track candidate aggregation (skip per-round steps)
+                if (agent !== 'analyzer' && agent !== 'stop') {
+                    const step = findStep(stepId);
+                    if (step) {
+                        step.candidatesDone++;
+                        updateStepCandidates(stepId);
+                    }
                 }
             }
 
@@ -491,7 +652,7 @@ function handleSSEEvent(type, data) {
         case 'recovery_decision': {
             // Recovery agent made a decision after execution failure
             const roundId = data.round ? `round-${data.round}` : findCurrentRoundId();
-            const execStep = state.pipeline.find(s => s.id === `${roundId}-execute`);
+            const execStep = state.pipeline.steps.find(s => s.id === `${roundId}-execute`);
             if (execStep) {
                 const icon = data.decision === 'retry' ? '🔄' :
                             data.decision === 'abort' ? '⛔' :
@@ -520,7 +681,7 @@ function handleSSEEvent(type, data) {
         case 'recovery_success': {
             // Execution succeeded after recovery retries
             const roundId = data.round ? `round-${data.round}` : findCurrentRoundId();
-            const execStep = state.pipeline.find(s => s.id === `${roundId}-execute`);
+            const execStep = state.pipeline.steps.find(s => s.id === `${roundId}-execute`);
             if (execStep) {
                 execStep.detail = `✅ Success after ${data.retries} ${data.retries === 1 ? 'retry' : 'retries'}`;
                 execStep.status = 'success';
@@ -532,7 +693,7 @@ function handleSSEEvent(type, data) {
         case 'recovery_failed': {
             // Max retries exceeded
             const roundId = data.round ? `round-${data.round}` : findCurrentRoundId();
-            const execStep = state.pipeline.find(s => s.id === `${roundId}-execute`);
+            const execStep = state.pipeline.steps.find(s => s.id === `${roundId}-execute`);
             if (execStep) {
                 execStep.detail = `❌ Failed after ${data.retries} retries`;
                 execStep.status = 'failure';
@@ -544,7 +705,7 @@ function handleSSEEvent(type, data) {
         case 'chemical_safety_alert': {
             // Chemical safety event detected - critical alert
             const roundId = data.round ? `round-${data.round}` : findCurrentRoundId();
-            const execStep = state.pipeline.find(s => s.id === `${roundId}-execute`);
+            const execStep = state.pipeline.steps.find(s => s.id === `${roundId}-execute`);
             if (execStep) {
                 execStep.detail = `🚨 CHEMICAL SAFETY EVENT: ${data.error_type}`;
                 execStep.status = 'failure';
@@ -552,11 +713,8 @@ function handleSSEEvent(type, data) {
                 updateStepDOM(`${roundId}-execute`);
             }
             // Show critical alert in status panel
-            updateCampaignStatus({
-                status: 'Chemical safety alert',
-                message: `🚨 ${data.error_type}`,
-                safety_alert: true,
-            });
+            campaignBadge.textContent = '🚨 Safety Alert';
+            campaignBadge.className = 'status-badge error';
             break;
         }
 
@@ -673,6 +831,18 @@ function handleSSEEvent(type, data) {
             break;
         }
 
+        case 'instrument_status': {
+            // Update real-time instrument state
+            const name = data.instrument || data.name || 'unknown';
+            state.instrumentStatus[name] = {
+                status: data.status || 'idle',
+                message: data.message || '',
+                timestamp: Date.now(),
+            };
+            updateInstrumentBar();
+            break;
+        }
+
         default:
             console.log('Unhandled SSE event:', type, data);
     }
@@ -696,7 +866,9 @@ function agentLabel(agent) {
         compiler: 'Compiler',
         safety: 'Safety Check',
         executor: 'Executor',
-        sensing: 'QC / Sensing',
+        sensing: 'Monitor / QC',
+        monitor: 'Monitor / QC',
+        analyzer: 'Analyzer',
         stop: 'Stop Agent',
         parse: 'NL Parser',
         system: 'System',
@@ -777,7 +949,8 @@ function addRoundToPipeline(roundNum, totalRounds) {
         createStep(`${roundId}-compile`, 'compile', 'compiler', 'Compiler', { round: roundNum, isChild: true }),
         createStep(`${roundId}-safety`, 'safety', 'safety', 'Safety Check', { round: roundNum, isChild: true }),
         createStep(`${roundId}-execute`, 'execute', 'executor', 'Executor', { round: roundNum, isChild: true }),
-        createStep(`${roundId}-sensing`, 'sensing', 'sensing', 'QC / Sensing', { round: roundNum, isChild: true }),
+        createStep(`${roundId}-monitor`, 'monitor', 'monitor', 'Monitor / QC', { round: roundNum, isChild: true }),
+        createStep(`${roundId}-analyzer`, 'analyzer', 'analyzer', 'Analyzer', { round: roundNum, isChild: true }),
         createStep(`${roundId}-stop`, 'stop', 'stop', 'Stop Check', { round: roundNum, isChild: true }),
     ];
 
@@ -1288,8 +1461,27 @@ function renderGenericContext(step) {
         html += `</div>`;
     }
 
+    // Thinking log — accumulated agent_thinking messages
+    if (step.thinkingLog && step.thinkingLog.length > 0) {
+        html += `<div class="context-section">`;
+        html += `<div class="context-section-title">Agent Thinking (${step.thinkingLog.length})</div>`;
+        html += `<div class="thinking-log">`;
+        step.thinkingLog.forEach((msg, i) => {
+            const isLast = i === step.thinkingLog.length - 1;
+            html += `<div class="thinking-log-entry${isLast ? ' latest' : ''}">${escapeHtml(msg)}</div>`;
+        });
+        html += `</div>`;
+        html += `</div>`;
+    }
+
     // Show agent-result-specific data
     const d = step.data;
+    if (d.narrative) {
+        html += `<div class="context-section">`;
+        html += `<div class="context-section-title">Analysis Narrative</div>`;
+        html += `<p style="font-size:12px;color:var(--text-primary);line-height:1.6">${escapeHtml(d.narrative)}</p>`;
+        html += `</div>`;
+    }
     if (d.kpi != null) {
         html += `<div class="context-section">`;
         html += `<div class="context-section-title">KPI</div>`;
@@ -1537,6 +1729,30 @@ function showParsedPreview(parsed) {
         item.innerHTML = `
             <div class="label" style="color:var(--accent-warning)">Unknown Instruments</div>
             <div class="value" style="color:var(--accent-warning)">${escapeHtml(parsed.unknown_instruments.join(', '))} — onboarding suggested</div>
+        `;
+        parsedGrid.appendChild(item);
+    }
+
+    // Missing required fields — shown as amber warning rows
+    if (parsed.missing_fields && parsed.missing_fields.length > 0) {
+        parsed.missing_fields.forEach((field) => {
+            const item = document.createElement('div');
+            item.className = 'parsed-item missing';
+            item.innerHTML = `
+                <div class="label">${escapeHtml(field)}</div>
+                <div class="value">not detected — default</div>
+            `;
+            parsedGrid.appendChild(item);
+        });
+    }
+
+    // Unparsed text fragments — shown as pink unmatched row
+    if (parsed.unparsed_fragments && parsed.unparsed_fragments.length > 0) {
+        const item = document.createElement('div');
+        item.className = 'parsed-item wide unmatched';
+        item.innerHTML = `
+            <div class="label">Unmatched text</div>
+            <div class="value">${escapeHtml(parsed.unparsed_fragments.join(' · '))}</div>
         `;
         parsedGrid.appendChild(item);
     }
