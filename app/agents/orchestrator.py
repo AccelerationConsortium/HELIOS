@@ -444,6 +444,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         from app.agents.design_agent import DesignAgent, DesignInput
         from app.agents.compiler_agent import CompilerAgent, CompileInput
         from app.agents.safety_agent import SafetyAgent, SafetyCheckInput
+        from app.agents.simulation_agent import SimulationAgent, SimulationInput
         from app.agents.stop_agent import StopAgent, StopInput
         from app.agents.monitor_agent import MonitorAgent, MonitorInput
         from app.agents.analyzer_agent import AnalyzerAgent, AnalyzerInput
@@ -456,6 +457,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         design_agent = DesignAgent()
         compiler = CompilerAgent()
         safety = SafetyAgent()
+        simulation = SimulationAgent()
         stop_agent = StopAgent()
         monitor = MonitorAgent()
         analyzer = AnalyzerAgent()
@@ -930,6 +932,49 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "allowed": safety_result.output.allowed if safety_result.success else True,
                     "message": "Safety check passed" if (not safety_result.success or safety_result.output.allowed) else f"Safety veto: {safety_result.output.violations}",
                 })
+
+                # 2c-bis. Simulation — dry-run verification before physical execution
+                sim_input = SimulationInput(
+                    compiled_graph=compile_result.output.compiled_graph,
+                    deck_plan=compile_result.output.deck_plan,
+                    policy_snapshot=input_data.policy_snapshot,
+                    candidate_params=candidate_params if isinstance(candidate_params, dict) else {},
+                    round_number=round_num,
+                    candidate_index=i,
+                    emit=lambda ev: self._emit(campaign_id, ev),
+                )
+                sim_result = await simulation.run(sim_input)
+
+                if sim_result.success:
+                    sim_out = sim_result.output
+                    self._emit(campaign_id, {
+                        "type": "agent_result",
+                        "agent": "simulation",
+                        "round": round_num,
+                        "candidate": i,
+                        "success": sim_out.verdict != "fail",
+                        "verdict": sim_out.verdict,
+                        "n_errors": sim_out.n_errors,
+                        "n_warnings": sim_out.n_warnings,
+                        "estimated_duration_s": sim_out.estimated_duration_s,
+                        "summary": sim_out.summary,
+                        "message": sim_out.summary,
+                    })
+                    if sim_out.verdict == "fail":
+                        logger.warning(
+                            "Round %d candidate %d: simulation veto (%d errors)",
+                            round_num, i, sim_out.n_errors,
+                        )
+                        try:
+                            complete_candidate(campaign_id, round_num, i, status="failed", error="simulation_fail")
+                        except Exception:
+                            pass
+                        continue
+                else:
+                    logger.warning(
+                        "Round %d candidate %d: simulation agent failed: %s",
+                        round_num, i, sim_result.errors,
+                    )
 
                 # Enhancement 4: Pre-execution cleaning
                 if input_data.pre_clean_workflow and not input_data.dry_run:

@@ -97,6 +97,7 @@ function mapAgentToStepId(roundId, agent) {
         design: `${roundId}-design`,
         compiler: `${roundId}-compile`,
         safety: `${roundId}-safety`,
+        simulation: `${roundId}-simulate`,
         executor: `${roundId}-execute`,
         sensing: `${roundId}-monitor`,
         monitor: `${roundId}-monitor`,
@@ -623,6 +624,17 @@ function handleSSEEvent(type, data) {
             }
             break;
 
+        case 'simulation_verdict':
+            if (roundId) {
+                const simStepId = `${roundId}-simulate`;
+                const verdictStatus = data.verdict === 'fail' ? 'failure'
+                    : data.verdict === 'warn' ? 'thinking'
+                    : 'success';
+                updateStepStatus(simStepId, verdictStatus, data.message || data.summary || '');
+                updateStepData(simStepId, data);
+            }
+            break;
+
         case 'stabilize_execution':
             if (roundId) {
                 updateStepStatus(`${roundId}-design`, 'success',
@@ -865,6 +877,7 @@ function agentLabel(agent) {
         design: 'Design Agent',
         compiler: 'Compiler',
         safety: 'Safety Check',
+        simulation: 'Simulation',
         executor: 'Executor',
         sensing: 'Monitor / QC',
         monitor: 'Monitor / QC',
@@ -948,6 +961,7 @@ function addRoundToPipeline(roundNum, totalRounds) {
         createStep(`${roundId}-design`, 'design', 'design', 'Design Agent', { round: roundNum, isChild: true }),
         createStep(`${roundId}-compile`, 'compile', 'compiler', 'Compiler', { round: roundNum, isChild: true }),
         createStep(`${roundId}-safety`, 'safety', 'safety', 'Safety Check', { round: roundNum, isChild: true }),
+        createStep(`${roundId}-simulate`, 'simulate', 'simulation', 'Simulation', { round: roundNum, isChild: true }),
         createStep(`${roundId}-execute`, 'execute', 'executor', 'Executor', { round: roundNum, isChild: true }),
         createStep(`${roundId}-monitor`, 'monitor', 'monitor', 'Monitor / QC', { round: roundNum, isChild: true }),
         createStep(`${roundId}-analyzer`, 'analyzer', 'analyzer', 'Analyzer', { round: roundNum, isChild: true }),
@@ -1480,6 +1494,19 @@ function renderGenericContext(step) {
         html += `<div class="context-section">`;
         html += `<div class="context-section-title">Analysis Narrative</div>`;
         html += `<p style="font-size:12px;color:var(--text-primary);line-height:1.6">${escapeHtml(d.narrative)}</p>`;
+        html += `</div>`;
+    }
+    if (d.verdict) {
+        const vColor = d.verdict === 'fail' ? 'var(--danger)' : d.verdict === 'warn' ? 'var(--warning, #f5a623)' : 'var(--success)';
+        html += `<div class="context-section">`;
+        html += `<div class="context-section-title">Simulation Verdict</div>`;
+        html += `<div class="diagnostics-grid">`;
+        html += diagItem('Verdict', `<span style="color:${vColor};font-weight:600">${d.verdict.toUpperCase()}</span>`);
+        if (d.n_errors != null) html += diagItem('Errors', d.n_errors);
+        if (d.n_warnings != null) html += diagItem('Warnings', d.n_warnings);
+        if (d.estimated_duration_s != null) html += diagItem('Est. Duration', `${d.estimated_duration_s.toFixed(0)}s`);
+        html += `</div>`;
+        if (d.summary) html += `<p style="font-size:11px;color:var(--text-secondary);margin-top:4px">${escapeHtml(d.summary)}</p>`;
         html += `</div>`;
     }
     if (d.kpi != null) {
