@@ -22,19 +22,24 @@ data/object_store/
 # All Markdown docs (summaries, guides, READMEs)
 *.md
 
-# BUT keep agent/ .md files — they are runtime dependencies
-# (SOUL.md, IDENTITY.md, TOOLS.md, skills/*.md loaded at startup)
+# BUT keep top-level README and all agent/ .md files
+# (SOUL.md, IDENTITY.md, TOOLS.md, AGENTS.md, skills/*.md are loaded at runtime)
+!README.md
 !agent/*.md
 !agent/**/*.md
 
 # Documentation folders
 docs/
 
-# Planning / paper files
+# Planning / design notes
 plan/
 
-# Demo files
-demo/
+# Demo scripts and screen-recording helpers (local dev only)
+demo_*.py
+demo_*.sh
+auto_*.py
+auto_*.sh
+app/static/auto_*.html
 
 # Test suite
 tests/

@@ -17,6 +17,7 @@ input.
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -32,6 +33,7 @@ from app.services.instrument_onboarding import (
     ParamInput,
     PrimitiveInput,
 )
+from app.services.llm_gateway import get_llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +67,7 @@ class OnboardingInput(BaseModel):
 
     phase: str = Field(
         default="generate",
-        description="Phase: generate | confirm | write",
+        description="Phase: discover | generate | confirm | write",
     )
 
     # --- generate phase ---
@@ -75,6 +77,7 @@ class OnboardingInput(BaseModel):
     communication: str = "usb"
     description: str = ""
     sdk_package: str = ""
+    docs_url: str = ""  # Vendor documentation URL (used in discover phase)
     primitives: list[PrimitiveSpec] = Field(default_factory=list)
 
     # --- confirm phase ---
@@ -164,7 +167,10 @@ class OnboardingAgent(BaseAgent[OnboardingInput, OnboardingOutput]):
 
     def validate_input(self, input_data: OnboardingInput) -> list[str]:
         errors: list[str] = []
-        if input_data.phase == "generate":
+        if input_data.phase == "discover":
+            if not input_data.instrument_name:
+                errors.append("instrument_name is required for discover phase")
+        elif input_data.phase == "generate":
             if not input_data.instrument_name:
                 errors.append("instrument_name is required")
             if not input_data.primitives:
@@ -182,7 +188,9 @@ class OnboardingAgent(BaseAgent[OnboardingInput, OnboardingOutput]):
         return errors
 
     async def process(self, input_data: OnboardingInput) -> OnboardingOutput:
-        if input_data.phase == "generate":
+        if input_data.phase == "discover":
+            return await self._handle_discover(input_data)
+        elif input_data.phase == "generate":
             return self._handle_generate(input_data)
         elif input_data.phase == "confirm":
             return self._handle_confirm(input_data)
@@ -254,6 +262,106 @@ class OnboardingAgent(BaseAgent[OnboardingInput, OnboardingOutput]):
             manual_todo=result.manual_todo,
             warnings=result.warnings,
             serialised_result=self._serialise_result(result),
+        )
+
+    async def _handle_discover(self, input_data: OnboardingInput) -> OnboardingOutput:
+        """Auto-discover device primitives via LLM inference.
+
+        Calls the LLM with a structured prompt describing the instrument and
+        requests a JSON list of hardware control primitives.  Parsing failures
+        are surfaced as warnings rather than hard errors so the user can still
+        add primitives manually.
+        """
+        system_prompt = (
+            "You are a laboratory automation integration specialist.\n"
+            "Given a lab instrument, you propose hardware control primitives for OTbot.\n"
+            "Return ONLY valid JSON (no markdown, no prose):\n"
+            '{"primitives": [{'
+            '"name": "string", '
+            '"description": "string", '
+            '"params": {"param_name": {"type": "number|integer|boolean|string|array", '
+            '"description": "string", "optional": false}}, '
+            '"hazardous": false, '
+            '"generates_data": false, '
+            '"timeout_seconds": 30, '
+            '"retries": 1, '
+            '"preconditions": [], '
+            '"effects": []}]}\n'
+            'param types: "number"|"integer"|"boolean"|"string"|"array"\n'
+            "Propose 3-10 meaningful primitives."
+        )
+
+        name_line = input_data.instrument_name
+        if input_data.manufacturer or input_data.model:
+            name_line += f" ({input_data.manufacturer} {input_data.model})".rstrip()
+
+        user_message = (
+            f"Instrument: {name_line}\n"
+            f"SDK package (if known): {input_data.sdk_package or 'not provided'}\n"
+            f"Documentation: {input_data.docs_url or 'not provided'}\n\n"
+            "List all meaningful hardware control primitives for OTbot integration."
+        )
+
+        discovered: list[dict[str, Any]] = []
+        warnings: list[str] = []
+
+        try:
+            llm = get_llm_provider()
+            response = await llm.complete(
+                messages=[{"role": "user", "content": user_message}],
+                system=system_prompt,
+            )
+            raw = response.content.strip()
+            # Strip markdown code fences if the LLM wraps output anyway
+            if raw.startswith("```"):
+                raw = "\n".join(
+                    line for line in raw.splitlines() if not line.startswith("```")
+                ).strip()
+            data = json.loads(raw)
+            discovered = data.get("primitives", [])
+            if not discovered:
+                warnings.append(
+                    "LLM returned an empty primitives list — "
+                    "try adding more detail to instrument_name / model."
+                )
+        except json.JSONDecodeError as exc:
+            logger.warning("discover: LLM returned non-JSON: %s", exc)
+            warnings.append(f"Could not parse LLM response as JSON: {exc}")
+        except Exception as exc:
+            logger.warning("discover: LLM call failed: %s", exc)
+            warnings.append(f"LLM discovery failed: {exc}")
+
+        primitive_count = len(discovered)
+        display = (
+            f"{input_data.manufacturer} {input_data.model}".strip()
+            or input_data.instrument_name
+        )
+        chat_message = f"Discovered **{primitive_count}** primitive(s) for **{display}**.\n\n"
+        if discovered:
+            chat_message += "Primitives found:\n" + "\n".join(
+                f"- `{p.get('name', '?')}` — {p.get('description', '')}"
+                for p in discovered
+            )
+            chat_message += (
+                "\n\nReview the list above, then proceed to the **generate** phase "
+                "to create full integration code."
+            )
+        else:
+            chat_message += (
+                "No primitives were discovered. "
+                "Please add primitives manually or provide more instrument details."
+            )
+
+        if warnings:
+            chat_message += "\n\n" + "\n".join(f"⚠️ {w}" for w in warnings)
+
+        return OnboardingOutput(
+            status="discovered",
+            instrument_name=input_data.instrument_name,
+            display_name=display,
+            chat_message=chat_message,
+            warnings=warnings,
+            serialised_result={"discovered_primitives": discovered},
         )
 
     # ------------------------------------------------------------------ #

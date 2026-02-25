@@ -27,6 +27,7 @@ from app.contracts.query_contract import (
 )
 from app.core.db import connection, utcnow_iso
 from app.services.llm_gateway import LLMMessage, LLMProvider, get_llm_provider
+from app.services.query_compiler import compile_dsl
 from app.services.query_plan_cache import compute_cache_key, get_cached_plan, store_plan
 from app.services.schema_registry import (
     get_schema,
@@ -117,8 +118,11 @@ class QueryAgent(BaseAgent[QueryRequest, QueryResult]):
 
     def validate_input(self, input_data: QueryRequest) -> list[str]:
         errors: list[str] = []
-        if not input_data.prompt or not input_data.prompt.strip():
-            errors.append("prompt must be non-empty")
+        # At least one of prompt / dsl_query must be provided
+        # (model_validator in QueryRequest already enforces this, but be
+        # explicit here so validate_input() can catch it before process())
+        if not input_data.prompt.strip() and input_data.dsl_query is None:
+            errors.append("Either 'prompt' or 'dsl_query' must be provided")
         if input_data.constraints.max_rows < 1:
             errors.append("max_rows must be >= 1")
         if input_data.constraints.timeout_ms < 100:
@@ -126,8 +130,17 @@ class QueryAgent(BaseAgent[QueryRequest, QueryResult]):
         return errors
 
     async def process(self, input_data: QueryRequest) -> QueryResult:
-        """Main compilation + execution pipeline."""
+        """Main compilation + execution pipeline.
 
+        Fast path  (DSL):  dsl_query → compile_dsl() → execute (no LLM)
+        Slow path  (NL):   prompt → cache → LLM → SqlGuard → execute
+        """
+
+        # ── Fast path: DSL query (deterministic, no LLM) ──────────────────
+        if input_data.dsl_query is not None:
+            return await self._execute_dsl(input_data)
+
+        # ── Slow path: NL → LLM → SQL ─────────────────────────────────────
         # 1. Schema introspection (cached)
         schema = get_schema()
         schema_ver = get_schema_version()
@@ -189,6 +202,39 @@ class QueryAgent(BaseAgent[QueryRequest, QueryResult]):
         if snap_id:
             plan.snapshot_id = snap_id
 
+        return QueryResult(
+            plan=plan,
+            rows=rows,
+            row_count=len(rows),
+            truncated=truncated,
+            execution_ms=exec_ms,
+            cache_hit=False,
+            snapshot_id=snap_id,
+        )
+
+    # -----------------------------------------------------------------------
+    # Internal: DSL fast path
+    # -----------------------------------------------------------------------
+
+    async def _execute_dsl(self, input_data: QueryRequest) -> QueryResult:
+        """Compile DSL → QueryPlan → execute (no LLM, no cache lookup)."""
+        assert input_data.dsl_query is not None
+
+        plan = compile_dsl(input_data.dsl_query, input_data.constraints)
+
+        rows, exec_ms, truncated = self._execute_readonly(
+            plan.sql, plan.params, input_data.constraints,
+        )
+        snap_id = self._maybe_snapshot(
+            input_data, rows, plan.plan_id, plan.prompt_hash,
+        )
+        if snap_id:
+            plan.snapshot_id = snap_id
+
+        logger.info(
+            "DSL query executed: entity=%s rows=%d (%.1fms)",
+            input_data.dsl_query.entity, len(rows), exec_ms,
+        )
         return QueryResult(
             plan=plan,
             rows=rows,

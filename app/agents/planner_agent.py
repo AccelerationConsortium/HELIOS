@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.agents.base import BaseAgent
+from app.agents.base import BaseAgent, DecisionNode
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ class PlannerOutput(BaseModel):
     strategy_schedule: dict[int, str] = Field(default_factory=dict)
     estimated_tip_usage: int = 0
     notes: str = ""
+    decision_nodes: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PlannerAgent(BaseAgent[PlannerInput, PlannerOutput]):
@@ -78,6 +79,17 @@ class PlannerAgent(BaseAgent[PlannerInput, PlannerOutput]):
         plan_id = f"cp-{uuid.uuid4().hex[:12]}"
 
         remaining_rounds = input_data.max_rounds - input_data.completed_rounds
+
+        # Decision node 1: budget check
+        budget_node = DecisionNode(
+            id="budget_check",
+            label="Budget check",
+            options=["Stop (no rounds remaining)", "Proceed with planning"],
+            selected="Stop (no rounds remaining)" if remaining_rounds <= 0 else "Proceed with planning",
+            reason=f"max_rounds={input_data.max_rounds}, completed={input_data.completed_rounds}",
+            outcome=f"{remaining_rounds} round(s) remaining",
+        )
+
         if remaining_rounds <= 0:
             return PlannerOutput(
                 plan_id=plan_id,
@@ -85,6 +97,7 @@ class PlannerAgent(BaseAgent[PlannerInput, PlannerOutput]):
                 planned_rounds=[],
                 total_planned_runs=0,
                 notes="No rounds remaining",
+                decision_nodes=[budget_node.to_dict()],
             )
 
         # Build strategy schedule:
@@ -99,7 +112,20 @@ class PlannerAgent(BaseAgent[PlannerInput, PlannerOutput]):
             dimensions=input_data.dimensions,
         )
 
+        # Decision node 2: strategy mode
+        is_adaptive = input_data.strategy == "adaptive"
+        strategy_node = DecisionNode(
+            id="strategy_mode",
+            label="Strategy schedule mode",
+            options=["Adaptive (intelligent per-round selector)", "Phase-based (20% explore / 60% exploit / 20% refine)"],
+            selected="Adaptive (intelligent per-round selector)" if is_adaptive else "Phase-based (20% explore / 60% exploit / 20% refine)",
+            reason=f"base_strategy='{input_data.strategy}', has_history={len(input_data.kpi_history) > 0}, dims={len(input_data.dimensions)}",
+        )
+
         planned_rounds = []
+        round_strategy_nodes: list[DecisionNode] = []
+        _all_strategies = sorted({input_data.strategy, "lhs", "bayesian", "prior_guided", "random"})
+
         for i in range(remaining_rounds):
             round_num = input_data.completed_rounds + i + 1
             strategy = strategy_schedule.get(round_num, input_data.strategy)
@@ -123,8 +149,33 @@ class PlannerAgent(BaseAgent[PlannerInput, PlannerOutput]):
                 notes=_round_notes(round_num, remaining_rounds, strategy),
             ))
 
+            round_pct = round_num / remaining_rounds * 100
+            if round_pct <= 20:
+                phase = "exploration"
+            elif round_pct <= 80:
+                phase = "exploitation"
+            else:
+                phase = "refinement"
+            round_strategy_nodes.append(DecisionNode(
+                id=f"round_{round_num}_strategy",
+                label=f"Round {round_num} strategy",
+                options=_all_strategies,
+                selected=strategy,
+                reason=f"{phase} phase ({round_pct:.0f}% of campaign), has_history={len(input_data.kpi_history) > 0}",
+            ))
+
         total_runs = sum(r.batch_size for r in planned_rounds)
         total_tips = sum(r.resource_estimate.get("tips_needed", 0) for r in planned_rounds)
+
+        strategy_node_with_children = DecisionNode(
+            id=strategy_node.id,
+            label=strategy_node.label,
+            options=strategy_node.options,
+            selected=strategy_node.selected,
+            reason=strategy_node.reason,
+            outcome=f"{len(planned_rounds)} rounds scheduled",
+            children=tuple(round_strategy_nodes),
+        )
 
         return PlannerOutput(
             plan_id=plan_id,
@@ -134,6 +185,7 @@ class PlannerAgent(BaseAgent[PlannerInput, PlannerOutput]):
             strategy_schedule=strategy_schedule,
             estimated_tip_usage=total_tips,
             notes=f"Planned {len(planned_rounds)} rounds, {total_runs} total runs",
+            decision_nodes=[budget_node.to_dict(), strategy_node_with_children.to_dict()],
         )
 
 

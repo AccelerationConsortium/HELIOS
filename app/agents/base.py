@@ -20,6 +20,35 @@ InputT = TypeVar("InputT", bound=BaseModel)
 OutputT = TypeVar("OutputT", bound=BaseModel)
 
 
+@dataclass(frozen=True)
+class DecisionNode:
+    """A single node in an agent's decision tree.
+
+    Captures one decision point: what options were considered, which was
+    selected, and why.  Nodes can be nested via ``children`` to represent
+    dependent sub-decisions (e.g. a violation breakdown under a verdict node).
+    """
+
+    id: str                                    # unique within tree, e.g. "strategy_mode"
+    label: str                                 # human label, e.g. "Choose exploration strategy"
+    options: list[str]                         # all options considered
+    selected: str                              # the option that was taken
+    reason: str                                # why this option was chosen
+    outcome: str = ""                          # observable consequence of this choice
+    children: tuple[DecisionNode, ...] = ()   # dependent sub-decisions
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "label": self.label,
+            "options": self.options,
+            "selected": self.selected,
+            "reason": self.reason,
+            "outcome": self.outcome,
+            "children": [c.to_dict() for c in self.children],
+        }
+
+
 @dataclass
 class AgentResult(Generic[OutputT]):
     """Wrapper for agent execution results."""

@@ -46,6 +46,12 @@ let state = {
 
     // Context panel
     contextPanelOpen: true,
+
+    // Plan confirmation
+    planCountdownInterval: null,
+
+    // Instrument status (keyed by instrument name)
+    instrumentStatus: {},    // { name: { status, message, timestamp } }
 };
 
 // ---------------------------------------------------------------------------
@@ -55,8 +61,8 @@ let state = {
 function createStep(id, type, agent, label, opts = {}) {
     return {
         id,
-        type,           // parse | planner | round | strategy | design | compile | safety | execute | sensing | stop | complete
-        agent,          // agent name (for color: planner, design, compiler, safety, executor, sensing, stop, parse, system)
+        type,           // parse | planner | round | strategy | design | compile | safety | execute | monitor | analyzer | stop | complete
+        agent,          // agent name (for color: planner, design, compiler, safety, executor, monitor, analyzer, stop, parse, system)
         label,
         status: 'pending',  // pending | thinking | success | failure | warning
         detail: '',
@@ -68,6 +74,8 @@ function createStep(id, type, agent, label, opts = {}) {
         timestamp: null,
         isChild: opts.isChild || false,
         isRound: opts.isRound || false,
+        thinkingLog: [],    // accumulated thinking messages for this step
+        decisionTree: null, // agent decision tree nodes (set by agent_decision_tree event)
     };
 }
 
@@ -90,8 +98,11 @@ function mapAgentToStepId(roundId, agent) {
         design: `${roundId}-design`,
         compiler: `${roundId}-compile`,
         safety: `${roundId}-safety`,
+        simulation: `${roundId}-simulate`,
         executor: `${roundId}-execute`,
-        sensing: `${roundId}-sensing`,
+        sensing: `${roundId}-monitor`,
+        monitor: `${roundId}-monitor`,
+        analyzer: `${roundId}-analyzer`,
         stop: `${roundId}-stop`,
     };
     return map[agent] || `${roundId}-${agent}`;
@@ -121,6 +132,13 @@ const contextBody     = $('#contextBody');
 const panelRight      = $('#panelRight');
 const toggleContextBtn = $('#toggleContextBtn');
 const closeContextBtn = $('#closeContextBtn');
+
+// Status bar elements
+const statusDot       = $('#statusDot');
+const statusBarText   = $('#statusBarText');
+const statusBarCenter = $('#statusBarCenter');
+const statusBudget    = $('#statusBudget');
+const statusBestKpi   = $('#statusBestKpi');
 
 // ---------------------------------------------------------------------------
 // Event Listeners
@@ -200,6 +218,7 @@ async function handleSend() {
 
 async function parseAndLaunch(text) {
     state.phase = 'parsing';
+    updateStatusBar();
     sendBtn.disabled = true;
 
     // Initialize the pipeline
@@ -224,6 +243,7 @@ async function parseAndLaunch(text) {
         state.parsedResult = parsed;
         state.phase = 'parsed';
         state.direction = parsed.direction || 'minimize';
+        updateStatusBar();
 
         const extractedCount = parsed.extracted ? parsed.extracted.length : 0;
         updateStepStatus('parse', 'success', `Extracted ${extractedCount} parameters`);
@@ -231,12 +251,12 @@ async function parseAndLaunch(text) {
         // Show parsed preview in left panel
         showParsedPreview(parsed);
 
-        // Build and launch campaign
-        const orchInput = buildOrchestratorInput(parsed);
-        await launchCampaign(orchInput);
+        // Show plan confirmation modal — auto-launches after 60 s
+        showPlanModal(parsed);
 
     } catch (err) {
         state.phase = 'error';
+        updateStatusBar();
         updateStepStatus('parse', 'failure', `Failed: ${err.message}`);
         sendBtn.disabled = false;
     }
@@ -275,6 +295,149 @@ function buildOrchestratorInput(parsed) {
 }
 
 // ---------------------------------------------------------------------------
+// Plan Confirmation Modal
+// ---------------------------------------------------------------------------
+
+function showPlanModal(parsed) {
+    const body = document.getElementById('planModalBody');
+    body.innerHTML = buildPlanSummaryHtml(parsed);
+
+    const modal = document.getElementById('planModal');
+    modal.style.display = 'flex';
+
+    let secsLeft = 60;
+    const countdownEl = document.getElementById('planCountdown');
+    countdownEl.textContent = secsLeft;
+    countdownEl.className = 'modal-countdown';
+
+    state.planCountdownInterval = setInterval(() => {
+        secsLeft--;
+        countdownEl.textContent = secsLeft;
+        if (secsLeft <= 10) countdownEl.className = 'modal-countdown urgent';
+        if (secsLeft <= 0) {
+            clearInterval(state.planCountdownInterval);
+            state.planCountdownInterval = null;
+            hidePlanModal();
+            launchCampaign(buildOrchestratorInput(parsed));
+        }
+    }, 1000);
+
+    document.getElementById('planApproveBtn').onclick = () => {
+        clearInterval(state.planCountdownInterval);
+        state.planCountdownInterval = null;
+        hidePlanModal();
+        launchCampaign(buildOrchestratorInput(parsed));
+    };
+
+    function resetToEdit() {
+        clearInterval(state.planCountdownInterval);
+        state.planCountdownInterval = null;
+        hidePlanModal();
+        parsedPreview.style.display = 'none';
+        welcomeSection.style.display = '';
+        mainInput.focus();
+        state.phase = 'idle';
+        updateStatusBar();
+        sendBtn.disabled = false;
+        // Reset pipeline to empty
+        state.pipeline.steps = [];
+        renderPipeline();
+    }
+
+    document.getElementById('planEditBtn').onclick = resetToEdit;
+    document.getElementById('planCancelBtn').onclick = resetToEdit;
+}
+
+function hidePlanModal() {
+    const modal = document.getElementById('planModal');
+    if (modal) modal.style.display = 'none';
+}
+
+function buildPlanSummaryHtml(parsed) {
+    let html = '<div class="plan-summary">';
+
+    // Goal row
+    const dir = parsed.direction === 'maximize' ? 'Maximize' : 'Minimize';
+    const kpi = parsed.objective_kpi ? parsed.objective_kpi.toUpperCase() : '(unknown KPI)';
+    html += '<div class="plan-goal">';
+    html += `<span class="plan-goal-label">${escapeHtml(dir)}</span>`;
+    html += `<span class="plan-goal-kpi">${escapeHtml(kpi)}</span>`;
+    if (parsed.target_value != null) {
+        html += `<span class="plan-goal-target">target: ${parsed.target_value}</span>`;
+    }
+    html += '</div>';
+
+    // Parameter space
+    if (parsed.dimensions && parsed.dimensions.length > 0) {
+        html += '<div class="plan-section-title">Parameter Space</div>';
+        html += '<div class="plan-dims">';
+        parsed.dimensions.forEach(d => {
+            const unit = d.unit ? ' ' + escapeHtml(d.unit) : '';
+            html += `<div class="plan-dim-chip">
+                <span class="plan-dim-name">${escapeHtml(d.name)}</span>
+                <span class="plan-dim-range">[${d.low}–${d.high}${unit}]</span>
+            </div>`;
+        });
+        html += '</div>';
+    }
+
+    // Campaign settings
+    html += '<div class="plan-section-title">Campaign Settings</div>';
+    html += '<div class="plan-settings-grid">';
+    const settings = [
+        ['Strategy', parsed.strategy || 'lhs'],
+        ['Max Rounds', String(parsed.max_rounds || 5)],
+        ['Batch Size', String(parsed.batch_size || 4)],
+    ];
+    if (parsed.protocol_pattern_id) settings.push(['Protocol', parsed.protocol_pattern_id]);
+    settings.forEach(([k, v]) => {
+        html += `<div class="plan-setting-item">
+            <div class="plan-setting-label">${escapeHtml(k)}</div>
+            <div class="plan-setting-value">${escapeHtml(v)}</div>
+        </div>`;
+    });
+    html += '</div>';
+
+    // Missing fields warning
+    if (parsed.missing_fields && parsed.missing_fields.length > 0) {
+        html += `<div class="plan-warning">
+            <span class="plan-warning-icon">&#x26A0;</span>
+            <span>Missing — will use defaults: <strong>${escapeHtml(parsed.missing_fields.join(', '))}</strong></span>
+        </div>`;
+    }
+
+    html += '</div>';
+    return html;
+}
+
+// ---------------------------------------------------------------------------
+// Instrument Status Bar
+// ---------------------------------------------------------------------------
+
+function updateInstrumentBar() {
+    const bar = document.getElementById('instrumentBar');
+    const items = document.getElementById('instrumentBarItems');
+    if (!bar || !items) return;
+
+    const entries = Object.entries(state.instrumentStatus);
+    if (entries.length === 0) {
+        bar.style.display = 'none';
+        return;
+    }
+
+    bar.style.display = 'flex';
+    items.innerHTML = entries.map(([name, info]) => {
+        const cls = ['ready', 'busy', 'error', 'idle'].includes(info.status) ? info.status : 'idle';
+        const title = info.message ? escapeHtml(info.message) : '';
+        return `<div class="instrument-chip ${cls}" title="${title}">
+            <span class="instrument-dot"></span>
+            <span class="instrument-name">${escapeHtml(name)}</span>
+            <span class="instrument-status-label">${escapeHtml(info.status || 'unknown')}</span>
+        </div>`;
+    }).join('');
+}
+
+// ---------------------------------------------------------------------------
 // Campaign Lifecycle
 // ---------------------------------------------------------------------------
 
@@ -296,6 +459,7 @@ async function launchCampaign(input) {
         const data = await resp.json();
         state.campaignId = data.campaign_id;
         state.phase = 'running';
+        updateStatusBar();
 
         // Show campaign status in left panel
         showCampaignStatus();
@@ -306,6 +470,7 @@ async function launchCampaign(input) {
 
     } catch (err) {
         state.phase = 'error';
+        updateStatusBar();
         updateStepStatus('planner', 'failure', `Launch failed: ${err.message}`);
         sendBtn.disabled = false;
     }
@@ -345,6 +510,10 @@ function connectSSE(campaignId) {
         // Detailed execution events
         'agent_decision', 'tool_call', 'hardware_action',
         'protocol_step', 'safety_check', 'thinking', 'log',
+        // Instrument status
+        'instrument_status',
+        // Agent decision trees
+        'agent_decision_tree',
     ];
 
     eventTypes.forEach((type) => {
@@ -400,12 +569,19 @@ function handleSSEEvent(type, data) {
             break;
 
         case 'agent_thinking': {
+            const thinkMsg = data.message || '';
             if (agent === 'planner') {
-                updateStepStatus('planner', 'thinking', data.message);
+                updateStepStatus('planner', 'thinking', thinkMsg);
+                const plannerStep = findStep('planner');
+                if (plannerStep && thinkMsg) plannerStep.thinkingLog.push(thinkMsg);
             } else if (roundId) {
                 const stepId = mapAgentToStepId(roundId, agent);
-                updateStepStatus(stepId, 'thinking', data.message);
+                updateStepStatus(stepId, 'thinking', thinkMsg);
+                const thinkStep = findStep(stepId);
+                if (thinkStep && thinkMsg) thinkStep.thinkingLog.push(thinkMsg);
             }
+            // If context panel is showing this step, refresh it live
+            if (state.pipeline.selectedStepId) updateContextPanel();
             break;
         }
 
@@ -423,11 +599,13 @@ function handleSSEEvent(type, data) {
                 updateStepData(stepId, data);
                 if (data.duration_ms) updateStepDuration(stepId, data.duration_ms);
 
-                // Track candidate aggregation
-                const step = findStep(stepId);
-                if (step) {
-                    step.candidatesDone++;
-                    updateStepCandidates(stepId);
+                // Track candidate aggregation (skip per-round steps)
+                if (agent !== 'analyzer' && agent !== 'stop') {
+                    const step = findStep(stepId);
+                    if (step) {
+                        step.candidatesDone++;
+                        updateStepCandidates(stepId);
+                    }
                 }
             }
 
@@ -462,6 +640,34 @@ function handleSSEEvent(type, data) {
             }
             break;
 
+        case 'simulation_verdict':
+            if (roundId) {
+                const simStepId = `${roundId}-simulate`;
+                const verdictStatus = data.verdict === 'fail' ? 'failure'
+                    : data.verdict === 'warn' ? 'thinking'
+                    : 'success';
+                updateStepStatus(simStepId, verdictStatus, data.message || data.summary || '');
+                updateStepData(simStepId, data);
+            }
+            break;
+
+        case 'agent_decision_tree': {
+            // Store decision tree nodes on the relevant step
+            let dtStep = null;
+            if (agent === 'planner') {
+                dtStep = findStep('planner');
+            } else if (roundId) {
+                const dtStepId = mapAgentToStepId(roundId, agent);
+                dtStep = findStep(dtStepId);
+            }
+            if (dtStep && data.nodes && data.nodes.length > 0) {
+                dtStep.decisionTree = data.nodes;
+                // Refresh context panel if this step is currently selected
+                if (state.pipeline.selectedStepId === dtStep.id) updateContextPanel();
+            }
+            break;
+        }
+
         case 'stabilize_execution':
             if (roundId) {
                 updateStepStatus(`${roundId}-design`, 'success',
@@ -491,7 +697,7 @@ function handleSSEEvent(type, data) {
         case 'recovery_decision': {
             // Recovery agent made a decision after execution failure
             const roundId = data.round ? `round-${data.round}` : findCurrentRoundId();
-            const execStep = state.pipeline.find(s => s.id === `${roundId}-execute`);
+            const execStep = state.pipeline.steps.find(s => s.id === `${roundId}-execute`);
             if (execStep) {
                 const icon = data.decision === 'retry' ? '🔄' :
                             data.decision === 'abort' ? '⛔' :
@@ -520,7 +726,7 @@ function handleSSEEvent(type, data) {
         case 'recovery_success': {
             // Execution succeeded after recovery retries
             const roundId = data.round ? `round-${data.round}` : findCurrentRoundId();
-            const execStep = state.pipeline.find(s => s.id === `${roundId}-execute`);
+            const execStep = state.pipeline.steps.find(s => s.id === `${roundId}-execute`);
             if (execStep) {
                 execStep.detail = `✅ Success after ${data.retries} ${data.retries === 1 ? 'retry' : 'retries'}`;
                 execStep.status = 'success';
@@ -532,7 +738,7 @@ function handleSSEEvent(type, data) {
         case 'recovery_failed': {
             // Max retries exceeded
             const roundId = data.round ? `round-${data.round}` : findCurrentRoundId();
-            const execStep = state.pipeline.find(s => s.id === `${roundId}-execute`);
+            const execStep = state.pipeline.steps.find(s => s.id === `${roundId}-execute`);
             if (execStep) {
                 execStep.detail = `❌ Failed after ${data.retries} retries`;
                 execStep.status = 'failure';
@@ -544,7 +750,7 @@ function handleSSEEvent(type, data) {
         case 'chemical_safety_alert': {
             // Chemical safety event detected - critical alert
             const roundId = data.round ? `round-${data.round}` : findCurrentRoundId();
-            const execStep = state.pipeline.find(s => s.id === `${roundId}-execute`);
+            const execStep = state.pipeline.steps.find(s => s.id === `${roundId}-execute`);
             if (execStep) {
                 execStep.detail = `🚨 CHEMICAL SAFETY EVENT: ${data.error_type}`;
                 execStep.status = 'failure';
@@ -552,11 +758,8 @@ function handleSSEEvent(type, data) {
                 updateStepDOM(`${roundId}-execute`);
             }
             // Show critical alert in status panel
-            updateCampaignStatus({
-                status: 'Chemical safety alert',
-                message: `🚨 ${data.error_type}`,
-                safety_alert: true,
-            });
+            campaignBadge.textContent = '🚨 Safety Alert';
+            campaignBadge.className = 'status-badge error';
             break;
         }
 
@@ -673,6 +876,18 @@ function handleSSEEvent(type, data) {
             break;
         }
 
+        case 'instrument_status': {
+            // Update real-time instrument state
+            const name = data.instrument || data.name || 'unknown';
+            state.instrumentStatus[name] = {
+                status: data.status || 'idle',
+                message: data.message || '',
+                timestamp: Date.now(),
+            };
+            updateInstrumentBar();
+            break;
+        }
+
         default:
             console.log('Unhandled SSE event:', type, data);
     }
@@ -695,8 +910,11 @@ function agentLabel(agent) {
         design: 'Design Agent',
         compiler: 'Compiler',
         safety: 'Safety Check',
+        simulation: 'Simulation',
         executor: 'Executor',
-        sensing: 'QC / Sensing',
+        sensing: 'Monitor / QC',
+        monitor: 'Monitor / QC',
+        analyzer: 'Analyzer',
         stop: 'Stop Agent',
         parse: 'NL Parser',
         system: 'System',
@@ -776,8 +994,10 @@ function addRoundToPipeline(roundNum, totalRounds) {
         createStep(`${roundId}-design`, 'design', 'design', 'Design Agent', { round: roundNum, isChild: true }),
         createStep(`${roundId}-compile`, 'compile', 'compiler', 'Compiler', { round: roundNum, isChild: true }),
         createStep(`${roundId}-safety`, 'safety', 'safety', 'Safety Check', { round: roundNum, isChild: true }),
+        createStep(`${roundId}-simulate`, 'simulate', 'simulation', 'Simulation', { round: roundNum, isChild: true }),
         createStep(`${roundId}-execute`, 'execute', 'executor', 'Executor', { round: roundNum, isChild: true }),
-        createStep(`${roundId}-sensing`, 'sensing', 'sensing', 'QC / Sensing', { round: roundNum, isChild: true }),
+        createStep(`${roundId}-monitor`, 'monitor', 'monitor', 'Monitor / QC', { round: roundNum, isChild: true }),
+        createStep(`${roundId}-analyzer`, 'analyzer', 'analyzer', 'Analyzer', { round: roundNum, isChild: true }),
         createStep(`${roundId}-stop`, 'stop', 'stop', 'Stop Check', { round: roundNum, isChild: true }),
     ];
 
@@ -1288,8 +1508,50 @@ function renderGenericContext(step) {
         html += `</div>`;
     }
 
+    // Thinking log — accumulated agent_thinking messages
+    if (step.thinkingLog && step.thinkingLog.length > 0) {
+        html += `<div class="context-section">`;
+        html += `<div class="context-section-title">Agent Thinking (${step.thinkingLog.length})</div>`;
+        html += `<div class="thinking-log">`;
+        step.thinkingLog.forEach((msg, i) => {
+            const isLast = i === step.thinkingLog.length - 1;
+            html += `<div class="thinking-log-entry${isLast ? ' latest' : ''}">${escapeHtml(msg)}</div>`;
+        });
+        html += `</div>`;
+        html += `</div>`;
+    }
+
+    // Decision tree — structured reasoning nodes from agent
+    if (step.decisionTree && step.decisionTree.length > 0) {
+        html += `<div class="context-section">`;
+        html += `<div class="context-section-title">Decision Tree</div>`;
+        html += `<div class="decision-tree">`;
+        step.decisionTree.forEach(node => { html += renderDtNode(node, 0); });
+        html += `</div>`;
+        html += `</div>`;
+    }
+
     // Show agent-result-specific data
     const d = step.data;
+    if (d.narrative) {
+        html += `<div class="context-section">`;
+        html += `<div class="context-section-title">Analysis Narrative</div>`;
+        html += `<p style="font-size:12px;color:var(--text-primary);line-height:1.6">${escapeHtml(d.narrative)}</p>`;
+        html += `</div>`;
+    }
+    if (d.verdict) {
+        const vColor = d.verdict === 'fail' ? 'var(--danger)' : d.verdict === 'warn' ? 'var(--warning, #f5a623)' : 'var(--success)';
+        html += `<div class="context-section">`;
+        html += `<div class="context-section-title">Simulation Verdict</div>`;
+        html += `<div class="diagnostics-grid">`;
+        html += diagItem('Verdict', `<span style="color:${vColor};font-weight:600">${d.verdict.toUpperCase()}</span>`);
+        if (d.n_errors != null) html += diagItem('Errors', d.n_errors);
+        if (d.n_warnings != null) html += diagItem('Warnings', d.n_warnings);
+        if (d.estimated_duration_s != null) html += diagItem('Est. Duration', `${d.estimated_duration_s.toFixed(0)}s`);
+        html += `</div>`;
+        if (d.summary) html += `<p style="font-size:11px;color:var(--text-secondary);margin-top:4px">${escapeHtml(d.summary)}</p>`;
+        html += `</div>`;
+    }
     if (d.kpi != null) {
         html += `<div class="context-section">`;
         html += `<div class="context-section-title">KPI</div>`;
@@ -1301,6 +1563,59 @@ function renderGenericContext(step) {
 
     html += renderRawData(d);
     return html;
+}
+
+// ---------------------------------------------------------------------------
+// Decision Tree Renderer
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a decision tree node (and its children) as HTML.
+ * The node header is clickable to collapse/expand children + options.
+ *
+ * @param {Object} node   - DecisionNode.to_dict() payload
+ * @param {number} depth  - nesting depth (0 = root)
+ * @returns {string} HTML string
+ */
+function renderDtNode(node, depth) {
+    const nodeId = `dt-${node.id}-${depth}-${Math.random().toString(36).slice(2, 7)}`;
+    let h = `<div class="dt-node" id="${nodeId}">`;
+
+    // Header — click to toggle collapsed
+    h += `<div class="dt-node-header" onclick="document.getElementById('${nodeId}').classList.toggle('collapsed')">`;
+    h += `<span class="dt-toggle">▾</span>`;
+    h += `<span class="dt-label">${escapeHtml(node.label)}</span>`;
+    h += `</div>`;
+
+    // Options list
+    if (node.options && node.options.length > 0) {
+        h += `<div class="dt-options">`;
+        node.options.forEach(opt => {
+            const isSel = opt === node.selected;
+            h += `<div class="dt-option ${isSel ? 'selected' : 'not-selected'}">`;
+            h += isSel ? `✓ ${escapeHtml(opt)}` : `○ ${escapeHtml(opt)}`;
+            h += `</div>`;
+        });
+        h += `</div>`;
+    }
+
+    // Reason + outcome
+    if (node.reason) {
+        h += `<div class="dt-reason">${escapeHtml(node.reason)}</div>`;
+    }
+    if (node.outcome) {
+        h += `<div class="dt-outcome">${escapeHtml(node.outcome)}</div>`;
+    }
+
+    // Children (recursive)
+    if (node.children && node.children.length > 0) {
+        h += `<div class="dt-children">`;
+        node.children.forEach(child => { h += renderDtNode(child, depth + 1); });
+        h += `</div>`;
+    }
+
+    h += `</div>`;
+    return h;
 }
 
 // ---------------------------------------------------------------------------
@@ -1369,6 +1684,7 @@ function updateBestKpi(kpi) {
     } else {
         state.bestKpi = Math.max(state.bestKpi, kpi);
     }
+    updateStatusBar();
 }
 
 // ---------------------------------------------------------------------------
@@ -1456,6 +1772,7 @@ function onCampaignDone() {
     campaignBadge.textContent = state.phase;
     campaignBadge.className = `status-badge ${state.phase}`;
     progressBar.style.width = '100%';
+    updateStatusBar();
 
     console.log('Campaign finished, all connections closed');
 }
@@ -1529,14 +1846,39 @@ function showParsedPreview(parsed) {
         parsedGrid.appendChild(item);
     }
 
-    // Unknown instruments (onboarding suggestion)
-    if (parsed.onboarding_suggested && parsed.unknown_instruments && parsed.unknown_instruments.length > 0) {
+    // Unknown instruments (onboarding suggestion) — only show if plausible count
+    const unknowns = parsed.unknown_instruments || [];
+    if (parsed.onboarding_suggested && unknowns.length > 0 && unknowns.length <= 5) {
         const item = document.createElement('div');
         item.className = 'parsed-item wide';
         item.style.borderColor = 'var(--accent-warning)';
         item.innerHTML = `
             <div class="label" style="color:var(--accent-warning)">Unknown Instruments</div>
-            <div class="value" style="color:var(--accent-warning)">${escapeHtml(parsed.unknown_instruments.join(', '))} — onboarding suggested</div>
+            <div class="value" style="color:var(--accent-warning)">${escapeHtml(unknowns.join(', '))} — onboarding suggested</div>
+        `;
+        parsedGrid.appendChild(item);
+    }
+
+    // Missing required fields — shown as amber warning rows
+    if (parsed.missing_fields && parsed.missing_fields.length > 0) {
+        parsed.missing_fields.forEach((field) => {
+            const item = document.createElement('div');
+            item.className = 'parsed-item missing';
+            item.innerHTML = `
+                <div class="label">${escapeHtml(field)}</div>
+                <div class="value">not detected — default</div>
+            `;
+            parsedGrid.appendChild(item);
+        });
+    }
+
+    // Unparsed text fragments — shown as pink unmatched row
+    if (parsed.unparsed_fragments && parsed.unparsed_fragments.length > 0) {
+        const item = document.createElement('div');
+        item.className = 'parsed-item wide unmatched';
+        item.innerHTML = `
+            <div class="label">Unmatched text</div>
+            <div class="value">${escapeHtml(parsed.unparsed_fragments.join(' · '))}</div>
         `;
         parsedGrid.appendChild(item);
     }
@@ -1569,6 +1911,64 @@ function updateProgress() {
             <div class="stat-label">Campaign</div>
         </div>
     `;
+    updateStatusBar();
+}
+
+function updateStatusBar() {
+    if (!statusDot) return; // guard if elements not in DOM
+
+    const phase = state.phase;
+
+    // Dot indicator
+    const dotClass = phase === 'running'   ? 'running'   :
+                     phase === 'completed' ? 'completed' :
+                     phase === 'failed'    ? 'failed'    :
+                     phase === 'error'     ? 'failed'    : '';
+    statusDot.className = 'status-dot' + (dotClass ? ' ' + dotClass : '');
+
+    // Status text
+    const currentRound = state.roundsDone + (phase === 'running' ? 1 : 0);
+    const total        = state.roundsTotal || '?';
+    const textMap = {
+        idle:      'Ready',
+        parsing:   'Parsing experiment…',
+        parsed:    'Ready to launch',
+        running:   `Round ${currentRound} / ${total}  ·  Running`,
+        completed: 'Campaign complete',
+        failed:    'Campaign failed',
+        error:     'Error',
+    };
+    if (statusBarText) statusBarText.textContent = textMap[phase] || phase;
+
+    // Round pip indicators (center)
+    if (statusBarCenter) {
+        if (state.roundsTotal > 0) {
+            let html = '<div class="sb-round-progress"><span class="sb-round-label">Rounds</span><div class="sb-pip-row">';
+            for (let i = 0; i < state.roundsTotal; i++) {
+                let pipClass = '';
+                if (i < state.roundsDone) {
+                    pipClass = 'done';
+                } else if (i === state.roundsDone && phase === 'running') {
+                    pipClass = 'current';
+                }
+                html += `<span class="sb-pip ${pipClass}" title="Round ${i + 1}"></span>`;
+            }
+            html += '</div></div>';
+            statusBarCenter.innerHTML = html;
+        } else {
+            statusBarCenter.innerHTML = '';
+        }
+    }
+
+    // Right side items
+    if (statusBudget) {
+        statusBudget.innerHTML = state.roundsTotal > 0
+            ? `Budget <strong>${state.roundsDone}/${state.roundsTotal}</strong>` : '';
+    }
+    if (statusBestKpi) {
+        statusBestKpi.innerHTML = state.bestKpi != null
+            ? `Best η₁₀ <strong>${state.bestKpi.toFixed(2)} mV</strong>` : '';
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1580,3 +1980,594 @@ function escapeHtml(str) {
     div.textContent = str;
     return div.innerHTML;
 }
+
+// ===========================================================================
+// Query Panel
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Middle-panel tab switching (Workflow / Query)
+// ---------------------------------------------------------------------------
+
+const tabWorkflow   = $('#tabWorkflow');
+const tabQuery      = $('#tabQuery');
+const queryPanel    = $('#queryPanel');
+const instrumentBar = $('#instrumentBar');
+
+/** Switch between Workflow and Query tabs in the middle panel. */
+function switchMiddleTab(tab) {
+    const isQuery = tab === 'query';
+
+    // Tab button active state
+    tabWorkflow.classList.toggle('active', !isQuery);
+    tabQuery.classList.toggle('active', isQuery);
+
+    // Content visibility
+    pipelineContainer.style.display = isQuery ? 'none' : '';
+    queryPanel.style.display        = isQuery ? '' : 'none';
+    if (instrumentBar) {
+        instrumentBar.style.display = isQuery ? 'none' : (Object.keys(state.instrumentStatus).length ? '' : 'none');
+    }
+
+    // Lazy-load entity list on first open
+    if (isQuery && !queryState.entitiesLoaded) {
+        loadQueryEntities();
+    }
+}
+
+if (tabWorkflow) tabWorkflow.addEventListener('click', () => switchMiddleTab('workflow'));
+if (tabQuery)    tabQuery.addEventListener('click',    () => switchMiddleTab('query'));
+
+// ---------------------------------------------------------------------------
+// Query panel state
+// ---------------------------------------------------------------------------
+
+const queryState = {
+    entitiesLoaded: false,
+    /** entity → sorted list of column names */
+    entityColumns: {},
+    /** last successful QueryResult */
+    lastResult: null,
+    /** current view: 'table' | 'json' */
+    view: 'table',
+    /** current mode: 'builder' | 'nl' */
+    mode: 'builder',
+};
+
+// ---------------------------------------------------------------------------
+// DOM refs for query panel
+// ---------------------------------------------------------------------------
+
+const builderTabBtn  = $('#builderTabBtn');
+const nlTabBtn       = $('#nlTabBtn');
+const builderForm    = $('#builderForm');
+const nlForm         = $('#nlForm');
+const runQueryBtn    = $('#runQueryBtn');
+const queryResults   = $('#queryResults');
+const queryResultsBody = $('#queryResultsBody');
+const queryRowCount  = $('#queryRowCount');
+const queryMsEl      = $('#queryMs');
+const tableViewBtn   = $('#tableViewBtn');
+const jsonViewBtn    = $('#jsonViewBtn');
+
+const qEntitySelect  = $('#qEntitySelect');
+const qCampaignId    = $('#qCampaignId');
+const qRunId         = $('#qRunId');
+const qRoundNumber   = $('#qRoundNumber');
+const qRoundMin      = $('#qRoundMin');
+const qRoundMax      = $('#qRoundMax');
+const qKpiName       = $('#qKpiName');
+const qKpiMin        = $('#qKpiMin');
+const qKpiMax        = $('#qKpiMax');
+const qStatus        = $('#qStatus');
+const qQcPassed      = $('#qQcPassed');
+const qOrderBy       = $('#qOrderBy');
+const qOrderDir      = $('#qOrderDir');
+const qLimit         = $('#qLimit');
+const qNlPrompt      = $('#qNlPrompt');
+const qNlCampaignId  = $('#qNlCampaignId');
+
+// ---------------------------------------------------------------------------
+// Load entity column lists from /api/v1/query/entities
+// ---------------------------------------------------------------------------
+
+async function loadQueryEntities() {
+    try {
+        const resp = await fetch(`${API}/query/entities`);
+        if (!resp.ok) return;
+        const data = await resp.json();
+        queryState.entityColumns = {};
+        for (const info of data.entities) {
+            queryState.entityColumns[info.entity] = info.columns;
+        }
+        queryState.entitiesLoaded = true;
+        updateOrderByOptions();
+    } catch (_) {
+        // Non-critical: silently ignore — defaults still work
+    }
+}
+
+/** Repopulate the Order By dropdown when entity changes. */
+function updateOrderByOptions() {
+    if (!qOrderBy) return;
+    const entity = qEntitySelect ? qEntitySelect.value : 'runs';
+    const cols   = queryState.entityColumns[entity] || [];
+    qOrderBy.innerHTML = '<option value="">default</option>';
+    for (const col of cols) {
+        const opt = document.createElement('option');
+        opt.value = col;
+        opt.textContent = col;
+        qOrderBy.appendChild(opt);
+    }
+}
+
+if (qEntitySelect) {
+    qEntitySelect.addEventListener('change', updateOrderByOptions);
+}
+
+// ---------------------------------------------------------------------------
+// Mode switching: Builder / NL
+// ---------------------------------------------------------------------------
+
+function switchQueryMode(mode) {
+    queryState.mode = mode;
+    const isNl = mode === 'nl';
+    builderTabBtn.classList.toggle('active', !isNl);
+    nlTabBtn.classList.toggle('active', isNl);
+    builderForm.style.display = isNl ? 'none' : '';
+    nlForm.style.display      = isNl ? '' : 'none';
+}
+
+if (builderTabBtn) builderTabBtn.addEventListener('click', () => switchQueryMode('builder'));
+if (nlTabBtn)      nlTabBtn.addEventListener('click',      () => switchQueryMode('nl'));
+
+// ---------------------------------------------------------------------------
+// View switching: Table / JSON
+// ---------------------------------------------------------------------------
+
+function switchResultsView(view) {
+    queryState.view = view;
+    tableViewBtn.classList.toggle('active', view === 'table');
+    jsonViewBtn.classList.toggle('active',  view === 'json');
+    if (queryState.lastResult) {
+        renderQueryResults(queryState.lastResult);
+    }
+}
+
+if (tableViewBtn) tableViewBtn.addEventListener('click', () => switchResultsView('table'));
+if (jsonViewBtn)  jsonViewBtn.addEventListener('click',  () => switchResultsView('json'));
+
+// ---------------------------------------------------------------------------
+// Build request payload from form
+// ---------------------------------------------------------------------------
+
+/** Parse a numeric input — returns null if empty or NaN. */
+function numOrNull(el) {
+    if (!el || el.value.trim() === '') return null;
+    const n = parseFloat(el.value);
+    return isNaN(n) ? null : n;
+}
+
+/** Parse an integer input — returns null if empty or NaN. */
+function intOrNull(el) {
+    if (!el || el.value.trim() === '') return null;
+    const n = parseInt(el.value, 10);
+    return isNaN(n) ? null : n;
+}
+
+/** Parse a string input — returns null if empty. */
+function strOrNull(el) {
+    if (!el) return null;
+    const s = el.value.trim();
+    return s === '' ? null : s;
+}
+
+function buildDslPayload() {
+    const entity = qEntitySelect ? qEntitySelect.value : 'runs';
+    const query = { entity };
+
+    const campaignId = strOrNull(qCampaignId);
+    if (campaignId)            query.campaign_id   = campaignId;
+    const runId = strOrNull(qRunId);
+    if (runId)                 query.run_id        = runId;
+    const roundNum = intOrNull(qRoundNumber);
+    if (roundNum != null)      query.round_number  = roundNum;
+    const roundMin = intOrNull(qRoundMin);
+    if (roundMin != null)      query.round_min     = roundMin;
+    const roundMax = intOrNull(qRoundMax);
+    if (roundMax != null)      query.round_max     = roundMax;
+    const kpiName = strOrNull(qKpiName);
+    if (kpiName)               query.kpi_name      = kpiName;
+    const kpiMin = numOrNull(qKpiMin);
+    if (kpiMin != null)        query.kpi_min       = kpiMin;
+    const kpiMax = numOrNull(qKpiMax);
+    if (kpiMax != null)        query.kpi_max       = kpiMax;
+    const status = strOrNull(qStatus);
+    if (status)                query.status        = status;
+    if (qQcPassed && qQcPassed.checked) query.qc_passed_only = true;
+    const orderBy = strOrNull(qOrderBy);
+    if (orderBy)               query.order_by      = orderBy;
+    if (qOrderDir)             query.order_dir     = qOrderDir.value;
+    const limit = intOrNull(qLimit);
+    if (limit != null)         query.limit         = limit;
+
+    return {
+        method: 'POST',
+        url: `${API}/query/dsl`,
+        body: { query },
+    };
+}
+
+function buildNlPayload() {
+    const prompt = qNlPrompt ? qNlPrompt.value.trim() : '';
+    if (!prompt) throw new Error('Please enter a query in the text area.');
+    const body = { prompt };
+    const campaignId = strOrNull(qNlCampaignId);
+    if (campaignId) body.campaign_id = campaignId;
+    return {
+        method: 'POST',
+        url: `${API}/query`,
+        body,
+    };
+}
+
+// ---------------------------------------------------------------------------
+// Run Query
+// ---------------------------------------------------------------------------
+
+if (runQueryBtn) {
+    runQueryBtn.addEventListener('click', handleRunQuery);
+}
+
+async function handleRunQuery() {
+    let payload;
+    try {
+        payload = queryState.mode === 'builder' ? buildDslPayload() : buildNlPayload();
+    } catch (err) {
+        showQueryError(err.message);
+        return;
+    }
+
+    runQueryBtn.disabled = true;
+    runQueryBtn.textContent = 'Running…';
+    queryResults.style.display = 'none';
+
+    try {
+        const resp = await fetch(payload.url, {
+            method: payload.method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload.body),
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
+            throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+
+        const result = await resp.json();
+        queryState.lastResult = result;
+        renderQueryResults(result);
+    } catch (err) {
+        showQueryError(err.message);
+    } finally {
+        runQueryBtn.disabled = false;
+        runQueryBtn.innerHTML = '&#x25B6; Run Query';
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Render results
+// ---------------------------------------------------------------------------
+
+function renderQueryResults(result) {
+    queryResults.style.display = '';
+
+    const rowCount = result.row_count ?? (result.rows ? result.rows.length : 0);
+    const truncated = result.truncated ? ' (truncated)' : '';
+    queryRowCount.textContent = `${rowCount} row${rowCount === 1 ? '' : 's'}${truncated}`;
+
+    const ms = result.execution_ms != null ? `${result.execution_ms.toFixed(1)} ms` : '';
+    const cacheHit = result.cache_hit ? ' · cache hit' : '';
+    queryMsEl.textContent = ms + cacheHit;
+
+    queryResultsBody.innerHTML = '';
+
+    const rows = result.rows || [];
+
+    if (rows.length === 0) {
+        queryResultsBody.innerHTML = '<div class="query-empty-msg">No rows returned.</div>';
+        return;
+    }
+
+    if (queryState.view === 'json') {
+        const pre = document.createElement('pre');
+        pre.className = 'query-json';
+        pre.textContent = JSON.stringify(rows, null, 2);
+        queryResultsBody.appendChild(pre);
+        return;
+    }
+
+    // Table view
+    const cols = Object.keys(rows[0]);
+    const table = document.createElement('table');
+    table.className = 'query-table';
+
+    const thead = table.createTHead();
+    const hrow  = thead.insertRow();
+    for (const col of cols) {
+        const th = document.createElement('th');
+        th.textContent = col;
+        hrow.appendChild(th);
+    }
+
+    const tbody = table.createTBody();
+    for (const row of rows) {
+        const tr = tbody.insertRow();
+        for (const col of cols) {
+            const td = tr.insertCell();
+            const val = row[col];
+            td.textContent = val == null ? '' : String(val);
+            td.title = val == null ? '' : String(val);
+        }
+    }
+
+    queryResultsBody.appendChild(table);
+}
+
+function showQueryError(msg) {
+    queryResults.style.display = '';
+    queryRowCount.textContent = 'Error';
+    queryMsEl.textContent = '';
+    queryResultsBody.innerHTML = `<div class="query-error-msg">${escapeHtml(msg)}</div>`;
+}
+
+// =============================================================================
+// Onboard Device Wizard
+// =============================================================================
+
+const onboardModal      = document.getElementById('onboardModal');
+const onboardDeviceBtn  = document.getElementById('onboardDeviceBtn');
+const onboardCancelBtn  = document.getElementById('onboardCancelBtn');
+const onboardNextBtn    = document.getElementById('onboardNextBtn');
+const onboardBackBtn    = document.getElementById('onboardBackBtn');
+const onboardSteps      = Array.from(document.querySelectorAll('.onboard-step'));
+const ostepLabels       = Array.from(document.querySelectorAll('.ostep'));
+
+// Wizard state
+let _obStep = 1;          // 1 | 2 | 3
+let _obSessionId = '';    // onboarding_id from API
+let _obDiscovered = [];   // list of discovered primitive objects
+
+function openOnboardModal() {
+    _obStep = 1;
+    _obSessionId = '';
+    _obDiscovered = [];
+    // Reset inputs
+    ['obInstrumentName','obManufacturer','obModel','obSdkPackage','obDocsUrl',
+     'obDescription'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('obCommunication').value = 'usb';
+    document.getElementById('obPrimitiveList').innerHTML = '';
+    document.getElementById('obConfirmList').innerHTML = '';
+    document.getElementById('obConfirmHint').textContent = '';
+    _obSetStep(1);
+    onboardModal.style.display = 'flex';
+}
+
+function closeOnboardModal() {
+    onboardModal.style.display = 'none';
+}
+
+function _obSetStep(step) {
+    _obStep = step;
+    onboardSteps.forEach((el, i) => {
+        el.style.display = (i + 1 === step) ? '' : 'none';
+    });
+    ostepLabels.forEach((el, i) => {
+        el.classList.toggle('active', i + 1 === step);
+        el.classList.toggle('done', i + 1 < step);
+    });
+    onboardBackBtn.style.display = (step > 1) ? '' : 'none';
+    // Update next button label
+    const labels = { 1: '&#x25B6; Auto-discover', 2: '&#x25B6; Generate Code', 3: '&#x2714; Confirm & Write' };
+    onboardNextBtn.innerHTML = labels[step] || 'Next';
+}
+
+function _obSetBusy(busy, msg = 'Working…') {
+    onboardNextBtn.disabled = busy;
+    onboardBackBtn.disabled = busy;
+    if (busy) {
+        onboardNextBtn.textContent = msg;
+    } else {
+        _obSetStep(_obStep); // restore label
+    }
+}
+
+// Step 1 → call /discover
+async function _obDiscover() {
+    const name = document.getElementById('obInstrumentName').value.trim();
+    if (!name) {
+        alert('Device name is required.');
+        return;
+    }
+    _obSetBusy(true, 'Discovering…');
+    try {
+        const resp = await fetch('/api/v1/onboarding/discover', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                instrument_name: name,
+                manufacturer: document.getElementById('obManufacturer').value.trim(),
+                model: document.getElementById('obModel').value.trim(),
+                sdk_package: document.getElementById('obSdkPackage').value.trim(),
+                docs_url: document.getElementById('obDocsUrl').value.trim(),
+            }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || 'Discovery failed');
+
+        _obSessionId = data.onboarding_id;
+        _obDiscovered = (data.serialised_result || {}).discovered_primitives || [];
+
+        // Render discovered primitives
+        const list = document.getElementById('obPrimitiveList');
+        list.innerHTML = '';
+        if (_obDiscovered.length === 0) {
+            list.innerHTML = '<p class="onboard-status-msg">No primitives discovered — you can add them manually after generation.</p>';
+        } else {
+            _obDiscovered.forEach(p => {
+                const item = document.createElement('div');
+                item.className = 'onboard-primitive-item';
+                item.innerHTML =
+                    `<span class="onboard-primitive-name">${escapeHtml(p.name || '')}</span>` +
+                    `<span class="onboard-primitive-desc">${escapeHtml(p.description || '')}</span>`;
+                list.appendChild(item);
+            });
+        }
+        document.getElementById('obDiscoveredLabel').textContent =
+            `Discovered ${_obDiscovered.length} primitive(s) — review before generating code:`;
+        _obSetStep(2);
+    } catch (err) {
+        alert('Discovery error: ' + err.message);
+    } finally {
+        _obSetBusy(false);
+    }
+}
+
+// Step 2 → call /generate
+async function _obGenerate() {
+    _obSetBusy(true, 'Generating…');
+    try {
+        const primitives = _obDiscovered.map(p => ({
+            name: p.name || '',
+            description: p.description || '',
+            params: p.params || {},
+            hazardous: p.hazardous || false,
+            generates_data: p.generates_data || false,
+            timeout_seconds: p.timeout_seconds || 30,
+            retries: p.retries || 1,
+            preconditions: p.preconditions || [],
+            effects: p.effects || [],
+        }));
+
+        const resp = await fetch('/api/v1/onboarding/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                instrument_name: document.getElementById('obInstrumentName').value.trim(),
+                manufacturer: document.getElementById('obManufacturer').value.trim(),
+                model: document.getElementById('obModel').value.trim(),
+                communication: document.getElementById('obCommunication').value,
+                description: document.getElementById('obDescription').value.trim(),
+                sdk_package: document.getElementById('obSdkPackage').value.trim(),
+                primitives,
+            }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || 'Generation failed');
+
+        _obSessionId = data.onboarding_id;
+        _obRenderConfirmations(data.pending_confirmations || []);
+        document.getElementById('obConfirmHint').textContent =
+            data.status === 'ready_to_write'
+                ? 'All checks passed. Ready to write files to disk.'
+                : `Review ${data.pending_confirmations?.length || 0} safety/config item(s) below.`;
+        _obSetStep(3);
+    } catch (err) {
+        alert('Generation error: ' + err.message);
+    } finally {
+        _obSetBusy(false);
+    }
+}
+
+function _obRenderConfirmations(confirmations) {
+    const container = document.getElementById('obConfirmList');
+    container.innerHTML = '';
+    if (confirmations.length === 0) {
+        container.innerHTML = '<p class="onboard-status-msg">No confirmations needed — all defaults are safe.</p>';
+        return;
+    }
+    confirmations.forEach(c => {
+        const item = document.createElement('div');
+        item.className = 'onboard-confirm-item';
+        item.dataset.cid = c.id;
+        const optHtml = c.options
+            ? `<select class="onboard-confirm-input" data-cid="${escapeHtml(c.id)}">` +
+              c.options.map(o => `<option value="${escapeHtml(o)}"${o === c.current_value ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('') +
+              `</select>`
+            : `<input class="onboard-confirm-input" type="text" data-cid="${escapeHtml(c.id)}"
+               value="${escapeHtml(String(c.current_value || ''))}"/>`;
+        item.innerHTML =
+            `<div class="onboard-confirm-question">${escapeHtml(c.question)}</div>${optHtml}`;
+        container.appendChild(item);
+    });
+}
+
+// Step 3 → call /confirm then /write
+async function _obConfirmAndWrite() {
+    _obSetBusy(true, 'Writing…');
+    try {
+        // Gather confirmation values
+        const confirmations = {};
+        document.querySelectorAll('#obConfirmList [data-cid]').forEach(el => {
+            confirmations[el.dataset.cid] = el.value;
+        });
+
+        // POST /confirm (skip if no confirmations to submit)
+        if (Object.keys(confirmations).length > 0) {
+            const cResp = await fetch('/api/v1/onboarding/confirm', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ onboarding_id: _obSessionId, confirmations }),
+            });
+            const cData = await cResp.json();
+            if (!cResp.ok) throw new Error(cData.detail || 'Confirm failed');
+        }
+
+        // POST /write
+        const wResp = await fetch('/api/v1/onboarding/write', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ onboarding_id: _obSessionId, force: false }),
+        });
+        const wData = await wResp.json();
+        if (!wResp.ok) throw new Error(wData.detail || 'Write failed');
+
+        closeOnboardModal();
+        // Surface result as a pipeline message
+        _obShowSuccess(wData);
+    } catch (err) {
+        alert('Write error: ' + err.message);
+    } finally {
+        _obSetBusy(false);
+    }
+}
+
+function _obShowSuccess(data) {
+    // Show a brief success notification in the pipeline area
+    const empty = document.getElementById('pipelineEmpty');
+    if (empty) empty.style.display = 'none';
+    const container = document.getElementById('pipelineContainer');
+    const card = document.createElement('div');
+    card.className = 'pipeline-step step-done';
+    card.innerHTML =
+        `<div class="step-header"><span class="step-icon">&#x2705;</span>` +
+        `<span class="step-label">Device Onboarded: ${escapeHtml(data.display_name || data.instrument_name)}</span></div>` +
+        `<div class="step-body"><p>${escapeHtml(data.chat_message || 'Files written successfully.')}</p></div>`;
+    container.appendChild(card);
+    card.scrollIntoView({ behavior: 'smooth' });
+}
+
+// Wire up events
+if (onboardDeviceBtn) onboardDeviceBtn.addEventListener('click', openOnboardModal);
+if (onboardCancelBtn) onboardCancelBtn.addEventListener('click', closeOnboardModal);
+onboardModal.addEventListener('click', e => { if (e.target === onboardModal) closeOnboardModal(); });
+
+onboardNextBtn.addEventListener('click', () => {
+    if (_obStep === 1) _obDiscover();
+    else if (_obStep === 2) _obGenerate();
+    else if (_obStep === 3) _obConfirmAndWrite();
+});
+
+onboardBackBtn.addEventListener('click', () => {
+    if (_obStep > 1) _obSetStep(_obStep - 1);
+});

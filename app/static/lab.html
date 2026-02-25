@@ -7,9 +7,100 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/lab.css" />
+    <link rel="stylesheet" href="/static/lab.css?v=3" />
 </head>
 <body>
+    <!-- ===== Onboard Device Modal ===== -->
+    <div class="modal-overlay" id="onboardModal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="onboardModalTitle">
+        <div class="modal-card onboard-modal-card">
+            <div class="modal-header">
+                <h2 id="onboardModalTitle">Onboard New Device</h2>
+                <div class="onboard-step-indicator" id="onboardStepIndicator">
+                    <span class="ostep active" data-step="1">1&nbsp;Discover</span>
+                    <span class="ostep-sep">&rsaquo;</span>
+                    <span class="ostep" data-step="2">2&nbsp;Review</span>
+                    <span class="ostep-sep">&rsaquo;</span>
+                    <span class="ostep" data-step="3">3&nbsp;Confirm</span>
+                </div>
+            </div>
+
+            <!-- Step 1: Discover -->
+            <div class="modal-body onboard-step" id="onboardStep1">
+                <div class="qf-row">
+                    <label class="qf-label">Device Name *</label>
+                    <input class="qf-input" type="text" id="obInstrumentName" placeholder="e.g. UV-Vis Spectrometer" />
+                </div>
+                <div class="qf-row qf-row-split">
+                    <input class="qf-input" type="text" id="obManufacturer" placeholder="Manufacturer" />
+                    <input class="qf-input" type="text" id="obModel" placeholder="Model" />
+                </div>
+                <div class="qf-row">
+                    <label class="qf-label">SDK Package</label>
+                    <input class="qf-input" type="text" id="obSdkPackage" placeholder="e.g. oceaninsight-api (optional)" />
+                </div>
+                <div class="qf-row">
+                    <label class="qf-label">Docs URL</label>
+                    <input class="qf-input" type="text" id="obDocsUrl" placeholder="https://… (optional)" />
+                </div>
+                <p class="onboard-hint">The AI will propose hardware control primitives based on the device info.</p>
+            </div>
+
+            <!-- Step 2: Review discovered primitives -->
+            <div class="modal-body onboard-step" id="onboardStep2" style="display:none;">
+                <p class="onboard-section-label" id="obDiscoveredLabel">Discovered primitives:</p>
+                <div class="onboard-primitive-list" id="obPrimitiveList"></div>
+                <div class="qf-row" style="margin-top:12px;">
+                    <label class="qf-label">Communication</label>
+                    <select class="qf-input" id="obCommunication">
+                        <option value="usb">USB</option>
+                        <option value="serial">Serial</option>
+                        <option value="ethernet">Ethernet</option>
+                        <option value="gpib">GPIB</option>
+                        <option value="mock">Mock / Simulation</option>
+                    </select>
+                </div>
+                <div class="qf-row">
+                    <label class="qf-label">Description</label>
+                    <input class="qf-input" type="text" id="obDescription" placeholder="Optional device description" />
+                </div>
+            </div>
+
+            <!-- Step 3: Confirm safety + write -->
+            <div class="modal-body onboard-step" id="onboardStep3" style="display:none;">
+                <div class="onboard-confirm-list" id="obConfirmList"></div>
+                <p class="onboard-hint" id="obConfirmHint"></p>
+            </div>
+
+            <div class="modal-footer" id="onboardFooter">
+                <button class="btn btn-primary" id="onboardNextBtn">&#x25B6; Auto-discover</button>
+                <button class="btn btn-ghost" id="onboardBackBtn" style="display:none;">&#x2190; Back</button>
+                <button class="btn btn-ghost" id="onboardCancelBtn">&#x2715; Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Plan Confirmation Modal ===== -->
+    <div class="modal-overlay" id="planModal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="planModalTitle">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h2 id="planModalTitle">Confirm Experiment Plan</h2>
+                <div class="modal-countdown-wrap">
+                    <span class="modal-countdown-label">Auto-start in</span>
+                    <span class="modal-countdown" id="planCountdown">60</span>
+                    <span class="modal-countdown-label">s</span>
+                </div>
+            </div>
+            <div class="modal-body" id="planModalBody">
+                <!-- Filled dynamically by lab.js -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="planApproveBtn">&#x25B6; Start Experiment</button>
+                <button class="btn btn-ghost" id="planEditBtn">&#x270F; Edit Parameters</button>
+                <button class="btn btn-danger" id="planCancelBtn">&#x2715; Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <div class="app-shell">
         <!-- ===== Left: Chat / Input Panel (280px) ===== -->
         <aside class="panel panel-left" id="panelLeft">
@@ -39,6 +130,12 @@
                         <button class="example-chip" data-example="Mixing experiment: slot 1 tip rack, slot 2 reservoir, slot 5 plate. mixing_speed 100-500 rpm, mixing_time 5-30 seconds. Maximize absorbance, 5 rounds, 3 candidates per round.">
                             Mixing experiment
                         </button>
+                    </div>
+                    <div class="onboard-entry">
+                        <button class="btn btn-sm btn-ghost onboard-entry-btn" id="onboardDeviceBtn">
+                            &#x2B; Onboard New Device
+                        </button>
+                        <span class="onboard-entry-hint">Register an unrecognised instrument</span>
                     </div>
                 </div>
 
@@ -93,7 +190,10 @@
         <!-- ===== Middle: Agent Workflow Pipeline (flex-1) ===== -->
         <main class="panel panel-middle" id="panelMiddle">
             <div class="panel-header">
-                <h2>Agent Workflow</h2>
+                <div class="middle-tabs">
+                    <button class="middle-tab active" id="tabWorkflow" data-tab="workflow">Workflow</button>
+                    <button class="middle-tab" id="tabQuery" data-tab="query">Query</button>
+                </div>
                 <div class="header-actions">
                     <button class="btn btn-sm btn-ghost" id="toggleContextBtn" title="Toggle context panel">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -108,6 +208,12 @@
                 </div>
             </div>
 
+            <!-- Instrument status bar (hidden until instruments report status) -->
+            <div class="instrument-bar" id="instrumentBar" style="display:none;">
+                <span class="instrument-bar-title">Instruments</span>
+                <div class="instrument-bar-items" id="instrumentBarItems"></div>
+            </div>
+
             <div class="pipeline-container" id="pipelineContainer">
                 <!-- Empty state -->
                 <div class="pipeline-empty" id="pipelineEmpty">
@@ -116,6 +222,105 @@
                     <p class="text-muted">Each step &mdash; parsing, planning, designing, compiling, executing, QC &mdash; is shown in real time.</p>
                 </div>
                 <!-- Pipeline steps injected dynamically by lab.js -->
+            </div>
+
+            <!-- ===== Query Panel (hidden until Query tab selected) ===== -->
+            <div class="query-panel" id="queryPanel" style="display:none;">
+                <!-- Mode tabs: Builder | NL -->
+                <div class="query-mode-bar">
+                    <button class="mode-tab active" id="builderTabBtn" data-mode="builder">Builder</button>
+                    <button class="mode-tab" id="nlTabBtn" data-mode="nl">Natural Language</button>
+                </div>
+
+                <!-- Builder form -->
+                <div class="query-form" id="builderForm">
+                    <div class="qf-row">
+                        <label class="qf-label">Entity</label>
+                        <select class="qf-input" id="qEntitySelect">
+                            <option value="runs">runs</option>
+                            <option value="candidates">candidates</option>
+                            <option value="kpis">kpis</option>
+                            <option value="artifacts">artifacts</option>
+                            <option value="rounds">rounds</option>
+                        </select>
+                    </div>
+                    <div class="qf-row">
+                        <label class="qf-label">Campaign ID</label>
+                        <input class="qf-input" type="text" id="qCampaignId" placeholder="C-…" />
+                    </div>
+                    <div class="qf-row">
+                        <label class="qf-label">Run ID</label>
+                        <input class="qf-input" type="text" id="qRunId" placeholder="R-…" />
+                    </div>
+                    <div class="qf-row">
+                        <label class="qf-label">Round #</label>
+                        <input class="qf-input" type="number" id="qRoundNumber" placeholder="exact" min="0" />
+                    </div>
+                    <div class="qf-row qf-row-split">
+                        <input class="qf-input" type="number" id="qRoundMin" placeholder="round min" min="0" />
+                        <input class="qf-input" type="number" id="qRoundMax" placeholder="round max" min="0" />
+                    </div>
+                    <div class="qf-row">
+                        <label class="qf-label">KPI Name</label>
+                        <input class="qf-input" type="text" id="qKpiName" placeholder="e.g. cv" />
+                    </div>
+                    <div class="qf-row qf-row-split">
+                        <input class="qf-input" type="number" id="qKpiMin" step="any" placeholder="kpi min" />
+                        <input class="qf-input" type="number" id="qKpiMax" step="any" placeholder="kpi max" />
+                    </div>
+                    <div class="qf-row">
+                        <label class="qf-label">Status</label>
+                        <input class="qf-input" type="text" id="qStatus" placeholder="completed / failed" />
+                    </div>
+                    <div class="qf-row qf-check-row">
+                        <input type="checkbox" id="qQcPassed" />
+                        <label class="qf-check-label" for="qQcPassed">QC passed only</label>
+                    </div>
+                    <div class="qf-row qf-row-split">
+                        <div class="qf-sub">
+                            <label class="qf-label">Order by</label>
+                            <select class="qf-input" id="qOrderBy">
+                                <option value="">default</option>
+                            </select>
+                        </div>
+                        <div class="qf-sub">
+                            <label class="qf-label">Direction</label>
+                            <select class="qf-input" id="qOrderDir">
+                                <option value="DESC">DESC</option>
+                                <option value="ASC">ASC</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="qf-row">
+                        <label class="qf-label">Limit</label>
+                        <input class="qf-input" type="number" id="qLimit" value="100" min="1" max="10000" />
+                    </div>
+                </div>
+
+                <!-- NL form -->
+                <div class="query-nl-form" id="nlForm" style="display:none;">
+                    <textarea class="qf-textarea" id="qNlPrompt" placeholder="e.g. Show all runs from campaign C-001 where kpi_value &lt; 0.5 ordered by round" rows="5"></textarea>
+                    <div class="qf-row" style="margin-top:8px;">
+                        <label class="qf-label">Campaign ID</label>
+                        <input class="qf-input" type="text" id="qNlCampaignId" placeholder="C-… (optional)" />
+                    </div>
+                </div>
+
+                <!-- Run button -->
+                <button class="btn btn-primary qf-run-btn" id="runQueryBtn">&#x25B6; Run Query</button>
+
+                <!-- Results area -->
+                <div class="query-results" id="queryResults" style="display:none;">
+                    <div class="query-results-header">
+                        <span class="query-row-count" id="queryRowCount">0 rows</span>
+                        <span class="query-ms" id="queryMs"></span>
+                        <div class="query-view-toggle">
+                            <button class="mode-tab active" id="tableViewBtn">Table</button>
+                            <button class="mode-tab" id="jsonViewBtn">JSON</button>
+                        </div>
+                    </div>
+                    <div class="query-results-body" id="queryResultsBody"></div>
+                </div>
             </div>
         </main>
 
@@ -148,6 +353,20 @@
         </aside>
     </div>
 
-    <script src="/static/lab.js"></script>
+    <!-- ===== Global Bottom Status Bar ===== -->
+    <footer class="status-bar" id="statusBar">
+        <div class="status-bar-left">
+            <span class="status-dot" id="statusDot"></span>
+            <span class="status-bar-text" id="statusBarText">Ready</span>
+        </div>
+        <div class="status-bar-center" id="statusBarCenter"></div>
+        <div class="status-bar-right">
+            <span class="status-bar-item" id="statusBudget"></span>
+            <span class="status-bar-item" id="statusBestKpi"></span>
+            <span class="status-bar-version">OTbot Lab Agent v2</span>
+        </div>
+    </footer>
+
+    <script src="/static/lab.js?v=3"></script>
 </body>
 </html>
