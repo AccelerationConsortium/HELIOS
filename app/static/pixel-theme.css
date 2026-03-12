@@ -1,0 +1,820 @@
+/* ==========================================================================
+   OTbot Pixel Theme — 古早像素风格 / Retro CRT Terminal
+   Overrides lab.css + init.css
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+/* --------------------------------------------------------------------------
+   1. CSS Variable Override — Pixel Palette
+   -------------------------------------------------------------------------- */
+:root {
+    /* Backgrounds — CRT black */
+    --bg-primary:    #000000;
+    --bg-secondary:  #080808;
+    --bg-tertiary:   #101010;
+    --bg-hover:      #001a00;
+    --bg-input:      #000a00;
+    --bg-card:       #050505;
+
+    /* Text — phosphor green */
+    --text-primary:   #00ff41;
+    --text-secondary: #00bb30;
+    --text-muted:     #006618;
+    --text-bright:    #88ff88;
+    --text-tertiary:  #004a12;
+
+    /* Agent colors — CGA/EGA palette */
+    --agent-planner:  #ff55ff;   /* magenta */
+    --agent-design:   #55ffff;   /* cyan */
+    --agent-compiler: #ffff55;   /* yellow */
+    --agent-safety:   #ff5555;   /* red */
+    --agent-executor: #55ff55;   /* bright green */
+    --agent-sensing:  #aaaaff;   /* blue-purple */
+    --agent-stop:     #ff8800;   /* orange */
+    --agent-parse:    #ff55aa;   /* pink */
+    --agent-system:   #aaaaaa;   /* gray */
+    --agent-strategy: #bb77ff;   /* purple */
+
+    /* Accent colors */
+    --accent-primary:   #ff55ff;
+    --accent-secondary: #55ffff;
+    --accent-success:   #00ff41;
+    --accent-warning:   #ffff00;
+    --accent-danger:    #ff5555;
+    --accent-purple:    #bb77ff;
+    --accent-orange:    #ff8800;
+
+    /* Borders — pixel-sharp */
+    --border-default:  #003300;
+    --border-subtle:   #001a00;
+    --border-active:   #00ff41;
+    --border-error:    #ff5555;
+
+    /* Dashboard compat variables */
+    --color-navy:         #00ff41;
+    --color-steel:        #00bb30;
+    --color-accent:       #ff55ff;
+    --color-accent-glow:  rgba(255,85,255,0.35);
+    --color-accent-dim:   rgba(255,85,255,0.10);
+    --color-accent-bright:#ff77ff;
+    --color-success:      #00ff41;
+    --color-success-dim:  rgba(0,255,65,0.10);
+    --color-warning:      #ffff00;
+    --color-warning-dim:  rgba(255,255,0,0.10);
+    --color-error:        #ff5555;
+    --color-error-dim:    rgba(255,85,85,0.10);
+    --color-pink:         #ff55aa;
+    --color-highlight:    #55ffff;
+
+    /* Safety */
+    --safety-info:       #55ffff;
+    --safety-reversible: #55ff55;
+    --safety-careful:    #ffff55;
+    --safety-hazardous:  #ff5555;
+
+    /* Glassmorphism → flat pixel */
+    --glass-bg:     #080808;
+    --glass-border: #003300;
+    --glass-blur:   0px;
+
+    /* Shadows → hard pixel offset */
+    --shadow-sm:  3px 3px 0 #000000;
+    --shadow-md:  4px 4px 0 #000000;
+
+    /* Radii → square */
+    --radius-sm: 0px;
+    --radius-md: 0px;
+    --radius-lg: 0px;
+
+    /* Font */
+    --font-mono: 'Press Start 2P', monospace;
+
+    /* No smooth transitions */
+    --transition-fast:   0ms;
+    --transition-normal: 0ms;
+}
+
+/* --------------------------------------------------------------------------
+   2. Global Reset Overrides
+   -------------------------------------------------------------------------- */
+*, *::before, *::after {
+    border-radius: 0 !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    transition: none !important;
+    animation-timing-function: step-start !important;
+}
+
+html, body {
+    font-family: 'Press Start 2P', monospace !important;
+    font-size: 10px !important;
+    line-height: 1.8 !important;
+    background: #000000 !important;
+    color: #00ff41 !important;
+    -webkit-font-smoothing: none !important;
+    -moz-osx-font-smoothing: unset !important;
+    image-rendering: pixelated;
+}
+
+/* CRT scanline overlay */
+body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 99999;
+    background: repeating-linear-gradient(
+        0deg,
+        rgba(0,0,0,0.10) 0px,
+        rgba(0,0,0,0.10) 1px,
+        transparent 1px,
+        transparent 3px
+    );
+}
+
+/* CRT flicker + glow (very subtle) */
+@keyframes crt-flicker {
+    0%, 97%, 100% { opacity: 1; }
+    98%           { opacity: 0.97; }
+    99%           { opacity: 1; }
+}
+
+body {
+    animation: crt-flicker 8s step-start infinite !important;
+}
+
+/* --------------------------------------------------------------------------
+   3. Backgrounds — Remove all gradients and blur
+   -------------------------------------------------------------------------- */
+body,
+.app-shell,
+.panel,
+.panel-left,
+.panel-middle,
+.panel-right,
+.panel-header,
+.chat-panel,
+.pack-panel,
+.pack-footer,
+.chat-footer,
+.modal-card,
+.confirmation-dialog,
+.sidebar,
+.main-content,
+.main-header,
+.dashboard-container,
+.metric-card,
+.section-card,
+.query-panel,
+.query-form,
+.context-body {
+    background: var(--bg-primary) !important;
+    background-image: none !important;
+    box-shadow: none !important;
+}
+
+.panel-header,
+.main-header,
+.pack-footer,
+.chat-footer,
+.status-bar,
+.modal-header,
+.modal-footer {
+    background: var(--bg-secondary) !important;
+    border-color: var(--border-default) !important;
+    border-width: 2px !important;
+}
+
+.panel-middle,
+.panel-right,
+.context-body,
+.query-results-body,
+.pipeline-container {
+    background: var(--bg-primary) !important;
+}
+
+.panel-left {
+    background: var(--bg-secondary) !important;
+    border-right: 2px solid var(--border-active) !important;
+}
+
+/* --------------------------------------------------------------------------
+   4. Borders — Sharp pixel borders
+   -------------------------------------------------------------------------- */
+.panel,
+.modal-card,
+.section-card,
+.metric-card,
+.pack-card,
+.proposal-card,
+.slot-group,
+.param-editor,
+.query-results,
+.instrument-bar,
+.pipeline-step,
+.step-card,
+.context-overview,
+.parsed-preview,
+.campaign-status,
+.welcome-section {
+    border: 2px solid var(--border-default) !important;
+    box-shadow: 3px 3px 0 #000000 !important;
+}
+
+.panel-left { border: 2px solid var(--border-active) !important; }
+
+.slot-group:focus-within,
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: var(--border-active) !important;
+    box-shadow: 0 0 0 0 transparent,
+                3px 3px 0 var(--border-active) !important;
+    outline: none !important;
+}
+
+/* --------------------------------------------------------------------------
+   5. Typography
+   -------------------------------------------------------------------------- */
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Press Start 2P', monospace !important;
+    color: var(--text-bright) !important;
+    text-shadow: 0 0 6px rgba(0, 255, 65, 0.6);
+    letter-spacing: 0.05em;
+}
+
+.logo h1,
+.logo-text,
+.main-title,
+.section-title {
+    font-size: 12px !important;
+    color: var(--accent-success) !important;
+    text-shadow: 0 0 8px rgba(0, 255, 65, 0.7) !important;
+}
+
+.version-tag,
+.panel-header .subtitle,
+.nav-section-title,
+.metric-label,
+.qf-label,
+.timeline-time {
+    font-size: 7px !important;
+    color: var(--text-muted) !important;
+    letter-spacing: 0.1em;
+    text-transform: uppercase !important;
+}
+
+p, span, div, td, th, label {
+    font-family: 'Press Start 2P', monospace !important;
+}
+
+/* Make most body text slightly smaller for readability */
+.help-text,
+.onboard-hint,
+.qf-label,
+.text-muted,
+.timeline-detail,
+.metric-sublabel,
+.input-hints,
+.hint-key,
+.hint-sep {
+    font-size: 7px !important;
+    line-height: 2 !important;
+}
+
+/* --------------------------------------------------------------------------
+   6. Buttons — Pixel style
+   -------------------------------------------------------------------------- */
+.btn,
+button {
+    font-family: 'Press Start 2P', monospace !important;
+    font-size: 7px !important;
+    border: 2px solid var(--border-active) !important;
+    border-radius: 0 !important;
+    box-shadow: 3px 3px 0 var(--border-active) !important;
+    cursor: pointer !important;
+    padding: 8px 14px !important;
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.btn:hover:not(:disabled),
+button:hover:not(:disabled) {
+    transform: translate(2px, 2px) !important;
+    box-shadow: 1px 1px 0 var(--border-active) !important;
+    background: var(--bg-hover) !important;
+}
+
+.btn:active:not(:disabled),
+button:active:not(:disabled) {
+    transform: translate(3px, 3px) !important;
+    box-shadow: none !important;
+}
+
+.btn-primary {
+    background: var(--accent-primary) !important;
+    color: #000000 !important;
+    border-color: var(--accent-primary) !important;
+    box-shadow: 3px 3px 0 #880055 !important;
+    font-weight: bold;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: #cc44cc !important;
+    box-shadow: 1px 1px 0 #880055 !important;
+}
+
+.btn-danger {
+    background: var(--bg-secondary) !important;
+    color: var(--accent-danger) !important;
+    border-color: var(--accent-danger) !important;
+    box-shadow: 3px 3px 0 #880000 !important;
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: rgba(255,85,85,0.15) !important;
+    box-shadow: 1px 1px 0 #880000 !important;
+}
+
+.btn-ghost {
+    background: transparent !important;
+    border-color: var(--border-default) !important;
+    box-shadow: 2px 2px 0 #001100 !important;
+    color: var(--text-secondary) !important;
+}
+
+.btn-ghost:hover:not(:disabled) {
+    border-color: var(--border-active) !important;
+    color: var(--text-primary) !important;
+}
+
+.btn-success,
+.btn-sm { font-size: 6px !important; }
+
+.example-chip {
+    font-family: 'Press Start 2P', monospace !important;
+    font-size: 6px !important;
+    border: 2px solid var(--border-default) !important;
+    background: var(--bg-tertiary) !important;
+    color: var(--text-secondary) !important;
+    box-shadow: 2px 2px 0 #000000 !important;
+}
+
+.example-chip:hover {
+    border-color: var(--accent-secondary) !important;
+    color: var(--accent-secondary) !important;
+    box-shadow: 1px 1px 0 #000000 !important;
+}
+
+/* --------------------------------------------------------------------------
+   7. Form Inputs
+   -------------------------------------------------------------------------- */
+input, select, textarea,
+.qf-input {
+    font-family: 'Press Start 2P', monospace !important;
+    font-size: 8px !important;
+    background: var(--bg-input) !important;
+    color: var(--text-primary) !important;
+    border: 2px solid var(--border-default) !important;
+    box-shadow: inset 2px 2px 0 #000000 !important;
+    padding: 8px 10px !important;
+    line-height: 1.8 !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+    color: var(--text-muted) !important;
+    opacity: 0.7;
+}
+
+select {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2300ff41' stroke-linecap='square' stroke-linejoin='miter' stroke-width='2' d='M6 8l4 4 4-4'/%3e%3c/svg%3e") !important;
+    background-color: var(--bg-input) !important;
+}
+
+textarea {
+    resize: none !important;
+}
+
+/* Checkbox */
+input[type="checkbox"] {
+    width: 14px !important;
+    height: 14px !important;
+    accent-color: var(--accent-primary) !important;
+    cursor: pointer;
+}
+
+/* --------------------------------------------------------------------------
+   8. Status Badges — Pixel blink
+   -------------------------------------------------------------------------- */
+@keyframes pixel-blink {
+    0%, 49%  { opacity: 1; }
+    50%, 100% { opacity: 0; }
+}
+
+.status-badge {
+    font-family: 'Press Start 2P', monospace !important;
+    font-size: 6px !important;
+    border: 1px solid currentColor !important;
+    border-radius: 0 !important;
+    padding: 3px 6px !important;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.status-badge.active,
+.status-badge[class*="running"] {
+    background: rgba(0,255,65,0.10) !important;
+    color: var(--accent-success) !important;
+    border-color: var(--accent-success) !important;
+    animation: pixel-blink 1s step-start infinite !important;
+}
+
+.status-badge.completed {
+    background: rgba(85,255,255,0.10) !important;
+    color: var(--accent-secondary) !important;
+    border-color: var(--accent-secondary) !important;
+    animation: none !important;
+}
+
+.status-badge.error {
+    background: rgba(255,85,85,0.10) !important;
+    color: var(--accent-danger) !important;
+    border-color: var(--accent-danger) !important;
+}
+
+/* --------------------------------------------------------------------------
+   9. Pipeline Steps
+   -------------------------------------------------------------------------- */
+.pipeline-step,
+.step-card {
+    border: 2px solid var(--border-default) !important;
+    background: var(--bg-secondary) !important;
+    box-shadow: 3px 3px 0 #000000 !important;
+}
+
+.pipeline-step.active,
+.step-card.active {
+    border-color: var(--accent-success) !important;
+    box-shadow: 3px 3px 0 #004400, 0 0 10px rgba(0,255,65,0.2) !important;
+}
+
+.pipeline-step.completed,
+.step-card.completed {
+    border-color: var(--accent-secondary) !important;
+    box-shadow: 3px 3px 0 #003344 !important;
+}
+
+.pipeline-step.error,
+.step-card.error {
+    border-color: var(--accent-danger) !important;
+    box-shadow: 3px 3px 0 #440000 !important;
+}
+
+/* Agent icon dots */
+.agent-dot,
+.step-icon {
+    border-radius: 0 !important;
+    image-rendering: pixelated;
+}
+
+/* --------------------------------------------------------------------------
+   10. Progress Bar — Pixel blocks
+   -------------------------------------------------------------------------- */
+.progress-bar-wrapper,
+.progress-bar {
+    background: var(--bg-tertiary) !important;
+    border: 2px solid var(--border-default) !important;
+    border-radius: 0 !important;
+    height: 12px !important;
+}
+
+.progress-bar > div,
+.progress-fill {
+    background: repeating-linear-gradient(
+        90deg,
+        var(--accent-success) 0px,
+        var(--accent-success) 10px,
+        #003300 10px,
+        #003300 12px
+    ) !important;
+    height: 100% !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+}
+
+/* --------------------------------------------------------------------------
+   11. Logo
+   -------------------------------------------------------------------------- */
+.logo,
+.logo-icon {
+    font-family: 'Press Start 2P', monospace !important;
+    background: none !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    border: 2px solid var(--accent-success) !important;
+    color: var(--accent-success) !important;
+    text-shadow: 0 0 8px rgba(0,255,65,0.8) !important;
+}
+
+.logo h1 {
+    font-size: 14px !important;
+    text-shadow: 0 0 10px rgba(0,255,65,0.9) !important;
+}
+
+/* --------------------------------------------------------------------------
+   12. Modal
+   -------------------------------------------------------------------------- */
+.modal-overlay {
+    background: rgba(0,0,0,0.85) !important;
+}
+
+.modal-card {
+    background: var(--bg-primary) !important;
+    border: 3px solid var(--accent-success) !important;
+    box-shadow: 6px 6px 0 #004400 !important;
+}
+
+.modal-header {
+    border-bottom: 2px solid var(--border-active) !important;
+}
+
+.modal-footer {
+    border-top: 2px solid var(--border-default) !important;
+}
+
+.modal-countdown {
+    font-family: 'Press Start 2P', monospace !important;
+    font-size: 20px !important;
+    color: var(--accent-warning) !important;
+    text-shadow: 0 0 8px rgba(255,255,0,0.7) !important;
+}
+
+/* --------------------------------------------------------------------------
+   13. Tables
+   -------------------------------------------------------------------------- */
+.data-table th {
+    background: var(--bg-tertiary) !important;
+    border-bottom: 2px solid var(--border-default) !important;
+    color: var(--text-secondary) !important;
+    font-size: 7px !important;
+    font-family: 'Press Start 2P', monospace !important;
+    letter-spacing: 0.08em;
+}
+
+.data-table td {
+    font-size: 7px !important;
+    font-family: 'Press Start 2P', monospace !important;
+    border-bottom: 1px solid var(--border-subtle) !important;
+    color: var(--text-secondary) !important;
+    line-height: 2 !important;
+}
+
+.data-table tr:hover td {
+    background: var(--bg-hover) !important;
+    color: var(--text-primary) !important;
+}
+
+.run-id {
+    color: var(--accent-secondary) !important;
+    text-shadow: 0 0 4px rgba(85,255,255,0.4) !important;
+}
+
+/* --------------------------------------------------------------------------
+   14. Tabs
+   -------------------------------------------------------------------------- */
+.middle-tab,
+.mode-tab {
+    font-family: 'Press Start 2P', monospace !important;
+    font-size: 7px !important;
+    border: 2px solid transparent !important;
+    background: transparent !important;
+    color: var(--text-muted) !important;
+    box-shadow: none !important;
+    padding: 6px 10px !important;
+}
+
+.middle-tab.active,
+.mode-tab.active {
+    border-bottom: 2px solid var(--accent-success) !important;
+    color: var(--accent-success) !important;
+    box-shadow: none !important;
+    transform: none !important;
+    background: rgba(0,255,65,0.05) !important;
+}
+
+.middle-tab:hover,
+.mode-tab:hover {
+    color: var(--text-primary) !important;
+    background: var(--bg-hover) !important;
+    transform: none !important;
+}
+
+/* --------------------------------------------------------------------------
+   15. Status Bar (bottom)
+   -------------------------------------------------------------------------- */
+.status-bar {
+    background: var(--bg-secondary) !important;
+    border-top: 2px solid var(--border-active) !important;
+    font-family: 'Press Start 2P', monospace !important;
+    font-size: 7px !important;
+    color: var(--text-secondary) !important;
+}
+
+.status-dot {
+    width: 8px !important;
+    height: 8px !important;
+    border-radius: 0 !important;
+    border: 1px solid var(--accent-success) !important;
+    display: inline-block !important;
+}
+
+.status-dot.active {
+    background: var(--accent-success) !important;
+    box-shadow: 0 0 6px rgba(0,255,65,0.8) !important;
+    animation: pixel-blink 1s step-start infinite !important;
+}
+
+.status-bar-version {
+    color: var(--text-muted) !important;
+    font-size: 6px !important;
+}
+
+/* --------------------------------------------------------------------------
+   16. Timeline (dashboard)
+   -------------------------------------------------------------------------- */
+.timeline::before {
+    background: var(--border-default) !important;
+    width: 2px !important;
+}
+
+.timeline-item::before {
+    width: 8px !important;
+    height: 8px !important;
+    border-radius: 0 !important;
+    background: var(--border-default) !important;
+    border: 2px solid var(--bg-primary) !important;
+}
+
+.timeline-item.success::before {
+    background: var(--accent-success) !important;
+    box-shadow: 0 0 6px rgba(0,255,65,0.6) !important;
+}
+
+.timeline-content {
+    font-family: 'Press Start 2P', monospace !important;
+    font-size: 8px !important;
+    color: var(--text-primary) !important;
+}
+
+/* --------------------------------------------------------------------------
+   17. Metric Cards (dashboard)
+   -------------------------------------------------------------------------- */
+.metric-card::before {
+    height: 4px !important;
+    background: var(--border-active) !important;
+}
+
+.metric-card.accent::before { background: var(--accent-primary) !important; }
+.metric-card.success::before { background: var(--accent-success) !important; }
+.metric-card.warning::before { background: var(--accent-warning) !important; }
+.metric-card.pink::before    { background: var(--color-pink) !important; }
+
+.metric-value {
+    font-family: 'Press Start 2P', monospace !important;
+    font-size: 24px !important;
+    color: var(--text-bright) !important;
+    text-shadow: 0 0 10px rgba(0,255,65,0.5) !important;
+}
+
+.metric-trend.up {
+    color: var(--accent-success) !important;
+    background: rgba(0,255,65,0.10) !important;
+}
+
+.metric-trend.down {
+    color: var(--accent-danger) !important;
+    background: rgba(255,85,85,0.10) !important;
+}
+
+/* --------------------------------------------------------------------------
+   18. Nav (dashboard sidebar)
+   -------------------------------------------------------------------------- */
+.nav-item {
+    font-family: 'Press Start 2P', monospace !important;
+    font-size: 7px !important;
+    color: var(--text-secondary) !important;
+    border: 1px solid transparent !important;
+    line-height: 2 !important;
+    box-shadow: none !important;
+}
+
+.nav-item:hover {
+    background: var(--bg-hover) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-default) !important;
+    box-shadow: 2px 2px 0 #000000 !important;
+}
+
+.nav-item.active {
+    background: rgba(0,255,65,0.08) !important;
+    color: var(--accent-success) !important;
+    border-color: var(--accent-success) !important;
+    box-shadow: 2px 2px 0 #004400 !important;
+}
+
+.nav-item .count {
+    background: var(--bg-tertiary) !important;
+    border: 1px solid var(--border-default) !important;
+    border-radius: 0 !important;
+    font-size: 6px !important;
+    padding: 2px 5px !important;
+}
+
+/* --------------------------------------------------------------------------
+   19. Scrollbar — Retro style
+   -------------------------------------------------------------------------- */
+::-webkit-scrollbar { width: 8px !important; height: 8px !important; }
+::-webkit-scrollbar-track { background: var(--bg-primary) !important; }
+::-webkit-scrollbar-thumb {
+    background: var(--border-default) !important;
+    border: 1px solid var(--bg-primary) !important;
+    border-radius: 0 !important;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--border-active) !important; }
+
+/* --------------------------------------------------------------------------
+   20. Step Indicators / Onboard Steps
+   -------------------------------------------------------------------------- */
+.ostep {
+    font-family: 'Press Start 2P', monospace !important;
+    font-size: 7px !important;
+    padding: 4px 8px !important;
+    border: 2px solid var(--border-default) !important;
+    color: var(--text-muted) !important;
+    box-shadow: none !important;
+}
+
+.ostep.active {
+    border-color: var(--accent-success) !important;
+    color: var(--accent-success) !important;
+    background: rgba(0,255,65,0.08) !important;
+    box-shadow: 2px 2px 0 #004400 !important;
+    animation: pixel-blink 2s step-start infinite !important;
+}
+
+/* --------------------------------------------------------------------------
+   21. Instrument Bar
+   -------------------------------------------------------------------------- */
+.instrument-bar {
+    background: var(--bg-secondary) !important;
+    border-bottom: 2px solid var(--border-default) !important;
+    font-size: 7px !important;
+}
+
+/* --------------------------------------------------------------------------
+   22. Parsed Parameters Grid
+   -------------------------------------------------------------------------- */
+.parsed-grid > * {
+    border: 1px solid var(--border-default) !important;
+    background: var(--bg-input) !important;
+    font-size: 7px !important;
+}
+
+/* --------------------------------------------------------------------------
+   23. Text Selection
+   -------------------------------------------------------------------------- */
+::selection {
+    background: var(--accent-primary) !important;
+    color: #000000 !important;
+}
+
+/* --------------------------------------------------------------------------
+   24. Refresh Indicator Dot (dashboard)
+   -------------------------------------------------------------------------- */
+.refresh-dot {
+    width: 8px !important;
+    height: 8px !important;
+    border-radius: 0 !important;
+    background: var(--accent-success) !important;
+    box-shadow: 0 0 6px rgba(0,255,65,0.7) !important;
+    animation: pixel-blink 1s step-start infinite !important;
+}
+
+/* --------------------------------------------------------------------------
+   25. Empty States
+   -------------------------------------------------------------------------- */
+.pipeline-empty,
+.empty-state,
+.context-empty {
+    color: var(--text-muted) !important;
+}
+
+.empty-icon,
+.empty-state-icon {
+    filter: grayscale(1) brightness(0.4) sepia(1) hue-rotate(90deg) !important;
+    font-size: 32px !important;
+}
