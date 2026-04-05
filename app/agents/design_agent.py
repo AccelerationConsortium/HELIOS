@@ -2,14 +2,23 @@
 
 Wraps existing candidate_gen.py and bayesian_opt.py.
 Responsible for "what parameters to try next".
+
+v3: Memory-enriched confidence calibration.
+- After generating candidates, checks similarity to past experiments.
+- Annotates each candidate with a confidence_hint and similar_kpi_estimate.
+- Emits DecisionNode tracking the similarity assessment.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.agents.base import BaseAgent
+from app.agents.base import BaseAgent, DecisionNode
+from app.agents.pause import Granularity, PauseRequest
+
+logger = logging.getLogger(__name__)
 
 
 class DesignInput(BaseModel):
@@ -30,12 +39,22 @@ class DesignOutput(BaseModel):
     candidates: list[dict[str, Any]]
     strategy_used: str
     n_candidates: int
+    # v3: similarity-based confidence annotations
+    candidate_confidence: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Per-candidate confidence hints from similar experiment retrieval",
+    )
+    decision_nodes: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class DesignAgent(BaseAgent[DesignInput, DesignOutput]):
     name = "design_agent"
     description = "Parameter space exploration (BO/LHS/random)"
     layer = "L2"
+
+    # v3: confidence thresholds
+    LOW_CONFIDENCE_THRESHOLD = 0.3
+    PAUSE_ON_ALL_LOW_CONFIDENCE = True
 
     def validate_input(self, input_data: DesignInput) -> list[str]:
         errors: list[str] = []
@@ -44,6 +63,14 @@ class DesignAgent(BaseAgent[DesignInput, DesignOutput]):
         if input_data.batch_size < 1:
             errors.append("batch_size must be >= 1")
         return errors
+
+    async def assess_granularity(
+        self,
+        input_data: DesignInput,
+        context: dict[str, Any] | None = None,
+    ) -> Granularity:
+        """Design agent uses ADAPTIVE — fine for novel regions, coarse for explored."""
+        return Granularity.ADAPTIVE
 
     async def process(self, input_data: DesignInput) -> DesignOutput:
         from app.services.candidate_gen import (
@@ -83,9 +110,92 @@ class DesignAgent(BaseAgent[DesignInput, DesignOutput]):
             store=input_data.store,
         )
 
+        candidates = [c.params for c in batch.candidates]
+
+        # ── v3: Similarity-based confidence calibration ───────────────
+        candidate_confidence: list[dict[str, Any]] = []
+        decision_nodes: list[dict[str, Any]] = []
+        all_low_confidence = True
+
+        try:
+            from app.services.experiment_similarity import build_similarity_report
+
+            for i, params in enumerate(candidates):
+                report = build_similarity_report(
+                    query_params=params,
+                    campaign_id=input_data.campaign_id,
+                    top_k=3,
+                )
+                conf_entry = {
+                    "candidate_index": i,
+                    "confidence": report.confidence_estimate,
+                    "n_similar": len(report.matches),
+                    "best_similarity": (
+                        report.matches[0].similarity if report.matches else 0.0
+                    ),
+                    "expected_kpi": report.avg_kpi,
+                    "kpi_uncertainty": report.kpi_stddev,
+                    "explanation": report.explanation,
+                }
+                candidate_confidence.append(conf_entry)
+
+                if report.confidence_estimate >= self.LOW_CONFIDENCE_THRESHOLD:
+                    all_low_confidence = False
+
+            # Emit decision node for similarity assessment
+            high_conf = sum(
+                1 for c in candidate_confidence
+                if c["confidence"] >= self.LOW_CONFIDENCE_THRESHOLD
+            )
+            decision_nodes.append(DecisionNode(
+                id="similarity_assessment",
+                label="Similar experiment retrieval",
+                options=["high_confidence", "mixed", "all_low_confidence", "no_data"],
+                selected=(
+                    "all_low_confidence" if all_low_confidence and candidate_confidence
+                    else "no_data" if not candidate_confidence
+                    else "high_confidence" if high_conf == len(candidate_confidence)
+                    else "mixed"
+                ),
+                reason=(
+                    f"{high_conf}/{len(candidate_confidence)} candidates have "
+                    f"confidence >= {self.LOW_CONFIDENCE_THRESHOLD}"
+                ),
+            ).to_dict())
+
+            # v3: If ALL candidates are in unexplored territory, pause
+            if (
+                self.PAUSE_ON_ALL_LOW_CONFIDENCE
+                and all_low_confidence
+                and candidate_confidence
+            ):
+                pause_result = await self.request_pause(PauseRequest(
+                    reason=(
+                        f"All {len(candidates)} candidates are in unexplored "
+                        f"parameter territory — no similar past experiments found"
+                    ),
+                    risk_factors={
+                        "all_low_confidence": 1.0,
+                        "max_confidence": max(
+                            (c["confidence"] for c in candidate_confidence),
+                            default=0.0,
+                        ),
+                    },
+                    suggested_action="approve",
+                    checkpoint={"batch_id": batch.batch_id},
+                ))
+                # Don't block on rejection — just proceed with the batch.
+                # The pause is informational, letting the operator know
+                # these are novel experiments.
+
+        except Exception:
+            logger.debug("Similarity calibration failed (advisory)", exc_info=True)
+
         return DesignOutput(
             batch_id=batch.batch_id,
-            candidates=[c.params for c in batch.candidates],
+            candidates=candidates,
             strategy_used=batch.strategy,
             n_candidates=len(batch.candidates),
+            candidate_confidence=candidate_confidence,
+            decision_nodes=decision_nodes,
         )

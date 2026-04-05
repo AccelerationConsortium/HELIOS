@@ -2,6 +2,7 @@
 
 L3 -> L2: TaskContract      (Intake/Clarifier output)
 L2 -> L1: CampaignPlan      (Campaign Planner output)
+         WorkflowGraph      (Planner → Execution IR, new agentic architecture)
 L1 -> L0: RunBundle          (Protocol Compiler + Deck/Layout output)
 L0 out:   ResultPacket       (Data/Feature agent output)
 """
@@ -42,6 +43,14 @@ from app.contracts.result_packet import (
     ResultPacket,
     new_result_packet_id,
 )
+from app.contracts.workflow_ir import (
+    AbstractPrimitive,
+    ExecutionBackend,
+    WorkflowGraph,
+    WorkflowStatus,
+    WorkflowStep,
+    new_workflow_graph_id,
+)
 
 __all__ = [
     # L3 -> L2
@@ -67,6 +76,13 @@ __all__ = [
     "QualityLabel",
     "ResultPacket",
     "new_result_packet_id",
+    # Workflow IR (L2 -> L1 new agentic path)
+    "AbstractPrimitive",
+    "ExecutionBackend",
+    "WorkflowGraph",
+    "WorkflowStatus",
+    "WorkflowStep",
+    "new_workflow_graph_id",
     # Query agent
     "ColumnSpec",
     "QueryConstraints",

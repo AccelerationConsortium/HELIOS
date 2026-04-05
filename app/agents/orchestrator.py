@@ -141,7 +141,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
     layer = "top"
 
     def __init__(self):
-        """Initialize orchestrator with recovery agent and strategy router."""
+        """Initialize orchestrator with recovery agent, strategy router, and control plane."""
         super().__init__()
         # Import here to avoid circular dependency
         from app.agents.recovery_agent import RecoveryAgent
@@ -154,6 +154,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         except Exception:
             self._strategy_router = None
             logger.debug("Strategy router not available, using rule-based only", exc_info=True)
+
+        # v2: ControlPlane for cross-agent routing and audit
+        from app.agents.control_plane import ControlPlane
+        self._control_plane = ControlPlane()
+        self._control_plane.set_pause_handler(self._handle_pause)
 
     def _emit(self, campaign_id: str, event: dict[str, Any]) -> None:
         """Persist event to DB, then publish to SSE subscribers (best-effort)."""
@@ -170,6 +175,92 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             publish_campaign_event(campaign_id, event)
         except Exception:
             pass  # SSE is best-effort; don't break orchestrator on publish failure
+
+    # ------------------------------------------------------------------
+    # v2: Pause handler — persists to DB, emits SSE, polls for decision
+    # ------------------------------------------------------------------
+
+    async def _handle_pause(self, agent_name: str, request: "PauseRequest") -> "PauseResult":
+        """Unified pause handler for all agents routed through ControlPlane.
+
+        1. Persist to pause_requests table (survives restart)
+        2. Emit SSE event for operator UI
+        3. Poll DB until operator responds or timeout
+        4. Return PauseResult to the requesting agent
+        """
+        from app.agents.pause import PauseRequest, PauseResult
+        from app.services.pause_store import save_pause, get_pause_status
+
+        campaign_id = getattr(self, "_current_campaign_id", "")
+        pause_id = request.pause_id
+
+        # 1. Persist
+        try:
+            save_pause(
+                campaign_id=campaign_id,
+                agent_name=agent_name,
+                pause_id=pause_id,
+                reason=request.reason,
+                risk_factors=request.risk_factors,
+                suggested_action=request.suggested_action,
+                checkpoint=request.checkpoint,
+                metadata=request.metadata,
+                expires_in_s=request.expires_in_s,
+            )
+        except Exception:
+            logger.debug("Failed to persist pause request", exc_info=True)
+
+        # 2. Emit SSE
+        self._emit(campaign_id, {
+            "type": "agent_pause_requested",
+            "pause_id": pause_id,
+            "agent": agent_name,
+            "reason": request.reason,
+            "risk_factors": request.risk_factors,
+            "suggested_action": request.suggested_action,
+            "expires_in_s": request.expires_in_s,
+            "message": (
+                f"⏸ {agent_name} requests human review: {request.reason} "
+                f"— resolve via POST /api/v1/pauses/{pause_id}/resolve"
+            ),
+        })
+
+        # 3. Poll for decision
+        _POLL_INTERVAL = 2.0
+        _elapsed = 0.0
+
+        while _elapsed < request.expires_in_s:
+            await asyncio.sleep(_POLL_INTERVAL)
+            _elapsed += _POLL_INTERVAL
+
+            status = get_pause_status(pause_id)
+            if status and status["status"] == "resolved":
+                decision = status["decision"] or "approved"
+                self._emit(campaign_id, {
+                    "type": "agent_pause_resolved",
+                    "pause_id": pause_id,
+                    "agent": agent_name,
+                    "decision": decision,
+                    "decided_by": status.get("decided_by", ""),
+                    "message": f"{'✅' if decision == 'approved' else '❌'} "
+                               f"{agent_name} pause {decision}",
+                })
+                return PauseResult(
+                    decision=decision,
+                    modifications=status.get("modifications", {}),
+                    decided_by=status.get("decided_by", ""),
+                    decided_at=status.get("decided_at", ""),
+                )
+
+        # 4. Timeout
+        self._emit(campaign_id, {
+            "type": "agent_pause_resolved",
+            "pause_id": pause_id,
+            "agent": agent_name,
+            "decision": "timeout",
+            "message": f"⏰ {agent_name} pause timed out after {request.expires_in_s}s",
+        })
+        return PauseResult(decision="timeout")
 
     def validate_input(self, input_data: OrchestratorInput) -> list[str]:
         errors = []
@@ -194,6 +285,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         agent_trace: list[dict[str, Any]] = []
         # Store manual confirmation flag for _execute_real_run and cleaning hooks
         self._require_manual_confirmation = input_data.require_manual_confirmation
+        # v2: Track campaign_id for pause handler
+        self._current_campaign_id = campaign_id
 
         # --- Checkpoint: create campaign in DB ---
         from app.services.campaign_state import (
@@ -469,6 +562,14 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         stop_agent = StopAgent()
         monitor = MonitorAgent()
         analyzer = AnalyzerAgent()
+
+        # v2: Register all agents with the ControlPlane
+        self._control_plane.set_campaign_id(campaign_id)
+        for _agent in [
+            design_agent, compiler, safety, simulation,
+            stop_agent, monitor, analyzer, self.recovery,
+        ]:
+            self._control_plane.register(_agent)
 
         # --- Restore or init in-memory state ---
         if restored_state is not None:

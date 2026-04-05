@@ -23,6 +23,7 @@ from app.api.v1.endpoints.orchestrate_demo import router as orchestrate_demo_rou
 from app.api.v1.endpoints.confirmations import router as confirmations_router
 from app.api.v1.endpoints.swarms import router as swarms_router
 from app.api.v1.endpoints.query import router as query_router
+from app.api.v1.endpoints.pauses import router as pauses_router
 
 api_router = APIRouter()
 api_router.include_router(agent_router)
@@ -46,3 +47,4 @@ api_router.include_router(onboarding_router)
 api_router.include_router(confirmations_router)
 api_router.include_router(swarms_router)
 api_router.include_router(query_router)
+api_router.include_router(pauses_router)

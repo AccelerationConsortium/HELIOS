@@ -12,6 +12,8 @@ from fastapi.staticfiles import StaticFiles
 from app.api.v1.router import api_router
 from app.core.db import init_db
 from app.core.startup import run_startup_checks
+from app.governance.claim_tracker import init_governance_schema
+from app.governance.middleware import start_governance_listener, stop_governance_listener
 from app.services.audit import set_event_bus
 from app.services.event_bus import EventBus
 from app.services.memory import seed_initial_recipes, start_memory_listener, stop_memory_listener
@@ -40,6 +42,7 @@ async def lifespan(_: FastAPI):
     # ---- Phase 2: Database ----
     try:
         init_db()
+        init_governance_schema()
         logger.info("Database initialised")
     except Exception:
         logger.exception("Database initialisation failed")
@@ -63,6 +66,7 @@ async def lifespan(_: FastAPI):
     reviewer_sub = await start_reviewer_listener(event_bus)
     evolution_sub = await start_evolution_listener(event_bus)
     campaign_metrics_sub = await start_campaign_metrics_listener(event_bus)
+    governance_sub = await start_governance_listener(event_bus)
     logger.info("All event listeners registered")
 
     # ---- Phase 5: Scheduler ----
@@ -77,6 +81,7 @@ async def lifespan(_: FastAPI):
         logger.info("OTbot shutting down …")
         await scheduler.stop()
         set_event_bus(None)
+        await stop_governance_listener(governance_sub, event_bus)
         await stop_campaign_metrics_listener(campaign_metrics_sub, event_bus)
         await stop_evolution_listener(evolution_sub, event_bus)
         await stop_reviewer_listener(reviewer_sub, event_bus)

@@ -707,6 +707,31 @@ def init_db() -> None:
         extractor_version   TEXT NOT NULL DEFAULT '1',
         created_at          TEXT NOT NULL
     );
+
+    -- ===================================================================
+    -- Agent Pause Requests (v2: agent-initiated human-in-the-loop)
+    -- ===================================================================
+
+    CREATE TABLE IF NOT EXISTS pause_requests (
+        id TEXT PRIMARY KEY,
+        campaign_id TEXT NOT NULL,
+        agent_name TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        risk_factors_json TEXT NOT NULL,
+        suggested_action TEXT NOT NULL,
+        checkpoint_json TEXT NOT NULL,
+        metadata_json TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        decision TEXT,
+        decided_by TEXT,
+        decided_at TEXT,
+        modifications_json TEXT,
+        created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pause_campaign ON pause_requests(campaign_id);
+    CREATE INDEX IF NOT EXISTS idx_pause_status ON pause_requests(status);
     """
 
     with connection() as conn:

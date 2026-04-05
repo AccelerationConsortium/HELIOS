@@ -34,6 +34,34 @@ from app.agents.swarm import (
     list_swarms,
 )
 from app.agents.tool_holder_dialog_agent import ToolHolderDialogAgent, ToolHolderDialogInput, ToolHolderDialogOutput
+from app.agents.capability_agent import (
+    CapabilityAgent,
+    CapabilityQueryInput,
+    CapabilitySnapshot,
+    PipetteInfo,
+    SlotInfo,
+)
+from app.agents.execution_agent import (
+    ExecutionAgent,
+    ExecutionInput,
+    ExecutionOutput,
+)
+from app.agents.validation_agent import (
+    ValidationAgent,
+    ValidationInput,
+    ValidationOutput,
+)
+from app.agents.observation_agent import (
+    ObservationAgent,
+    ObservationInput,
+    ObservationPacket,
+)
+from app.agents.optimization_agent import (
+    OptimizationAgent,
+    OptimizationInput,
+    OptimizationOutput,
+    CandidatePoint,
+)
 
 __all__ = [
     # Base
@@ -59,6 +87,14 @@ __all__ = [
     "QueryAgent", "QueryRequest", "QueryResult",
     "StopAgent", "StopInput", "StopOutput",
     "ToolHolderDialogAgent", "ToolHolderDialogInput", "ToolHolderDialogOutput",
+    # Capability agent (new agentic architecture)
+    "CapabilityAgent", "CapabilityQueryInput", "CapabilitySnapshot",
+    "PipetteInfo", "SlotInfo",
+    # Phase 2-5 agents
+    "ExecutionAgent", "ExecutionInput", "ExecutionOutput",
+    "ValidationAgent", "ValidationInput", "ValidationOutput",
+    "ObservationAgent", "ObservationInput", "ObservationPacket",
+    "OptimizationAgent", "OptimizationInput", "OptimizationOutput", "CandidatePoint",
     # Swarm system (paper-aligned 4 specialist groups)
     "BaseSwarm",
     "SwarmContext",
