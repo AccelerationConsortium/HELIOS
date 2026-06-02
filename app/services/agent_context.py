@@ -30,6 +30,22 @@ class AgentRuntimeContext:
     knowledge_events: list[dict[str, Any]] = field(default_factory=list)
     blackboard_entries: dict[str, dict[str, Any]] = field(default_factory=dict)
 
+    def snapshot(self) -> dict[str, Any]:
+        """Return a compact, serializable snapshot for replay/debug."""
+        return {
+            "campaign_id": self.campaign_id,
+            "agent_name": self.agent_name,
+            "caller": self.caller,
+            "trace_id": self.trace_id,
+            "round_number": self.round_number,
+            "candidate_index": self.candidate_index,
+            "knowledge_event_count": len(self.knowledge_events),
+            "blackboard_entry_count": len(self.blackboard_entries),
+            "knowledge_events": self.knowledge_events,
+            "blackboard_entries": self.blackboard_entries,
+            "prompt_preview": self.prompt_block[:2000],
+        }
+
 
 _current_context: contextvars.ContextVar[AgentRuntimeContext | None] = (
     contextvars.ContextVar("helios_agent_runtime_context", default=None)
@@ -112,8 +128,8 @@ async def build_agent_context(
         try:
             from app.agents.blackboard import manager
 
-            board = manager.get_or_create(str(round_number), campaign_id)
-            entries = board.read_all()
+            board = manager.get_existing(str(round_number), campaign_id)
+            entries = board.read_all() if board is not None else {}
             if entries:
                 lines = ["## Round Blackboard (latest peer observations)\n"]
                 for key, entry in sorted(entries.items()):
@@ -143,6 +159,25 @@ async def build_agent_context(
         knowledge_events=knowledge_events,
         blackboard_entries=blackboard_entries,
     )
+
+
+def persist_agent_context_snapshot(context: AgentRuntimeContext | None) -> None:
+    """Persist an advisory context snapshot through the campaign event log."""
+    if context is None:
+        return
+    try:
+        from app.services.campaign_events import log_event
+
+        log_event(
+            context.campaign_id,
+            "agent_context_snapshot",
+            {
+                "type": "agent_context_snapshot",
+                **context.snapshot(),
+            },
+        )
+    except Exception:
+        logger.debug("Agent context snapshot persistence failed", exc_info=True)
 
 
 def harvest_agent_result(

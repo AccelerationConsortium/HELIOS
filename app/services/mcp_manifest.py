@@ -24,9 +24,34 @@ def build_mcp_manifest() -> dict[str, Any]:
     agent_resources = [_agent_to_resource(agent) for agent in _agent_instances()]
     return {
         "protocol": "mcp-style-manifest",
-        "version": "0.1",
+        "version": "0.2",
+        "transports": [
+            {
+                "type": "http",
+                "status": "manifest_only",
+                "base_path": "/api/v1/capabilities/mcp",
+            },
+            {
+                "type": "stdio",
+                "status": "planned",
+            },
+        ],
         "tools": primitive_tools,
         "resources": agent_resources,
+        "resourceTemplates": [
+            {
+                "uriTemplate": "helios://campaigns/{campaign_id}/context",
+                "name": "campaign_context",
+                "description": "Runtime context snapshots and peer knowledge for a campaign.",
+                "mimeType": "application/json",
+            },
+            {
+                "uriTemplate": "helios://campaigns/{campaign_id}/durable-events",
+                "name": "durable_events",
+                "description": "Workflow backend lifecycle events for a campaign.",
+                "mimeType": "application/json",
+            },
+        ],
         "prompts": [
             {
                 "name": "campaign_context",
@@ -36,6 +61,13 @@ def build_mcp_manifest() -> dict[str, Any]:
                 ),
             }
         ],
+        "toolCallBridge": {
+            "status": "planned",
+            "description": (
+                "Primitive tools already expose JSON schemas. A future MCP server "
+                "can route calls to the primitives registry using this manifest."
+            ),
+        },
     }
 
 

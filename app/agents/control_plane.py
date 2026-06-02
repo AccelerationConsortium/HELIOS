@@ -52,6 +52,7 @@ from app.agents.pause import (
 from app.services.agent_context import (
     build_agent_context,
     harvest_agent_result,
+    persist_agent_context_snapshot,
     reset_current_agent_context,
     set_current_agent_context,
 )
@@ -472,6 +473,7 @@ class ControlPlane:
             trace_id=trace_id,
             input_data=input_data,
         )
+        persist_agent_context_snapshot(runtime_context)
         context_token = set_current_agent_context(runtime_context)
         try:
             async with self.get_agent_lease(
@@ -526,6 +528,14 @@ class ControlPlane:
         # ── Update reputation from the obtained result ───────────
         self._update_reputation(agent_name, result)
         harvest_agent_result(context=runtime_context, result=result)
+        self._emit_trace_span(
+            call_id=call_id,
+            caller=caller,
+            agent_name=agent_name,
+            trace_id=trace_id,
+            result=result,
+            runtime_context=runtime_context,
+        )
 
         # ── Audit: call end ─────────────────────────────────────
         call_record["success"] = result.success
@@ -660,3 +670,38 @@ class ControlPlane:
                 ))
             except Exception:
                 pass
+
+    def _emit_trace_span(
+        self,
+        *,
+        call_id: str,
+        caller: str,
+        agent_name: str,
+        trace_id: str,
+        result: AgentResult,
+        runtime_context: Any,
+    ) -> None:
+        """Persist a structured trace event for agent-native observability."""
+        if not self._campaign_id:
+            return
+        context_snapshot = runtime_context.snapshot() if runtime_context else {}
+        payload = {
+            "type": "agent_trace_span",
+            "call_id": call_id,
+            "caller": caller,
+            "agent": agent_name,
+            "trace_id": trace_id,
+            "success": result.success,
+            "duration_ms": result.duration_ms,
+            "errors": result.errors[:3],
+            "round_number": context_snapshot.get("round_number"),
+            "candidate_index": context_snapshot.get("candidate_index"),
+            "knowledge_event_count": context_snapshot.get("knowledge_event_count", 0),
+            "blackboard_entry_count": context_snapshot.get("blackboard_entry_count", 0),
+        }
+        try:
+            from app.services.campaign_events import log_event
+
+            log_event(self._campaign_id, "agent_trace_span", payload)
+        except Exception:
+            logger.debug("ControlPlane trace persistence failed", exc_info=True)

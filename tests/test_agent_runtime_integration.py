@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import ClassVar
 
 from pydantic import BaseModel
@@ -49,9 +50,14 @@ class RuntimeAgent:
 
 async def test_control_plane_injects_runtime_context_from_knowledge_bus():
     from app.agents.control_plane import ControlPlane
+    from app.core.db import init_db
+    from app.services.campaign_events import replay_events
+    from app.services.campaign_state import create_campaign
     from app.services.knowledge_bus import KnowledgeEvent, get_bus
 
-    campaign_id = "camp-runtime-test"
+    init_db()
+    campaign_id = f"camp-runtime-test-{uuid.uuid4().hex[:8]}"
+    create_campaign(campaign_id, {"contract_id": "contract"}, direction="maximize")
     bus = get_bus(campaign_id)
     bus.publish(
         KnowledgeEvent(
@@ -77,6 +83,25 @@ async def test_control_plane_injects_runtime_context_from_knowledge_bus():
     assert result.output is not None
     assert result.output.saw_context is True
     assert "Tip failure rate increased" in result.output.prompt_block
+    events = replay_events(campaign_id)
+    assert any(ev["event_type"] == "agent_context_snapshot" for ev in events)
+    assert any(ev["event_type"] == "agent_trace_span" for ev in events)
+
+
+async def test_context_read_does_not_create_empty_blackboard():
+    from app.agents.blackboard import manager
+    from app.services.agent_context import build_agent_context
+
+    campaign_id = "camp-no-empty-blackboard"
+    await build_agent_context(
+        campaign_id=campaign_id,
+        agent_name="runtime_agent",
+        caller="test",
+        trace_id="trace",
+        input_data=RuntimeInput(round_number=99),
+    )
+
+    assert manager.get_existing("99", campaign_id) is None
 
 
 async def test_llm_gateway_appends_current_agent_context_to_system_prompt():
@@ -135,7 +160,131 @@ def test_mcp_manifest_exposes_tools_resources_and_prompts():
     manifest = build_mcp_manifest()
 
     assert manifest["protocol"] == "mcp-style-manifest"
+    assert manifest["version"] == "0.2"
     assert isinstance(manifest["tools"], list)
     assert isinstance(manifest["resources"], list)
+    assert manifest["transports"][0]["type"] == "http"
+    assert manifest["resourceTemplates"][0]["uriTemplate"].startswith("helios://campaigns/")
     assert manifest["prompts"][0]["name"] == "campaign_context"
     assert any(resource["uri"].startswith("helios://agents/") for resource in manifest["resources"])
+
+
+async def test_stage_runner_executes_control_plane_calls_as_stage():
+    from app.agents.control_plane import ControlPlane
+    from app.agents.stage import AgentStageCall, AgentStageRunner
+
+    cp = ControlPlane()
+    cp.set_campaign_id("camp-stage-test")
+    cp.register(RuntimeAgent().agent)
+
+    runner = AgentStageRunner(cp)
+    result = await runner.run_parallel(
+        "runtime",
+        [AgentStageCall("runtime_agent", RuntimeInput(round_number=1))],
+    )
+
+    assert result.success
+    assert result.outputs["runtime_agent"]["saw_context"] is True
+
+
+async def test_durable_backend_status_cancel_and_events():
+    from app.agents.orchestrator import OrchestratorInput
+    from app.services.durable_execution import InProcessDurableBackend
+
+    backend = InProcessDurableBackend()
+    campaign_id = "camp-durable-cancel"
+    orch_input = OrchestratorInput(
+        contract_id="contract",
+        objective_kpi="yield",
+        direction="maximize",
+        max_rounds=1,
+        batch_size=1,
+        dimensions=[],
+        protocol_template={"steps": []},
+        campaign_id=campaign_id,
+    )
+
+    await backend.start_campaign(orch_input)
+    status = await backend.get_status(campaign_id)
+    assert status is not None
+    assert status.status == "running"
+
+    cancelled = await backend.cancel_campaign(campaign_id)
+    assert cancelled is not None
+    assert cancelled.status in {"cancelling", "cancelled"}
+    events = await backend.list_events(campaign_id)
+    event_types = [event.type for event in events]
+    assert event_types[0] == "durable_run_started"
+    assert "durable_run_cancel_requested" in event_types
+
+
+async def test_orchestrate_api_uses_durable_backend_contract():
+    from app.api.v1.endpoints import orchestrate
+    from app.services.durable_execution import (
+        DurableRunEvent,
+        DurableRunHandle,
+        DurableRunStatus,
+        get_durable_backend,
+        set_durable_backend,
+    )
+
+    class FakeBackend:
+        name = "fake"
+
+        def __init__(self) -> None:
+            self.campaign_id = ""
+            self.cancelled = False
+
+        async def start_campaign(self, input_data, **kwargs):
+            self.campaign_id = input_data.campaign_id
+            return DurableRunHandle(self.campaign_id, self.name, "running")
+
+        async def get_status(self, campaign_id):
+            if campaign_id != self.campaign_id:
+                return None
+            return DurableRunStatus(
+                campaign_id=campaign_id,
+                backend=self.name,
+                status="cancelled" if self.cancelled else "running",
+            )
+
+        async def get_result(self, campaign_id):
+            return None
+
+        async def cancel_campaign(self, campaign_id):
+            if campaign_id != self.campaign_id:
+                return None
+            self.cancelled = True
+            return await self.get_status(campaign_id)
+
+        async def list_events(self, campaign_id):
+            return [
+                DurableRunEvent(
+                    campaign_id=campaign_id,
+                    type="durable_run_started",
+                    payload={"backend": self.name},
+                    created_at="2026-01-01T00:00:00+00:00",
+                )
+            ]
+
+    previous = get_durable_backend()
+    fake = FakeBackend()
+    set_durable_backend(fake)
+    try:
+        response = await orchestrate.orchestrate_start(
+            orchestrate.OrchestrateRequest(
+                contract_id="contract",
+                objective_kpi="yield",
+                direction="maximize",
+            )
+        )
+        status = await orchestrate.orchestrate_status(response.campaign_id)
+        stopped = await orchestrate.orchestrate_stop(response.campaign_id)
+        events = await orchestrate.orchestrate_durable_events(response.campaign_id)
+
+        assert status.status == "running"
+        assert stopped["status"] == "cancelled"
+        assert events["backend"] == "fake"
+        assert events["events"][0]["type"] == "durable_run_started"
+    finally:
+        set_durable_backend(previous)

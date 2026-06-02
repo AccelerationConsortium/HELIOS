@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.agents.orchestrator import OrchestratorAgent, OrchestratorInput, OrchestratorOutput
+from app.agents.orchestrator import OrchestratorInput, OrchestratorOutput
 from app.services.contract_bridge import (
     injection_pack_to_task_contract,
     task_contract_to_orchestrator_input,
@@ -83,20 +83,6 @@ class OrchestrateStatusResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-async def _run_orchestrator(campaign_id: str, orch_input: OrchestratorInput) -> None:
-    """Run the orchestrator agent and store results."""
-    agent = OrchestratorAgent()
-    try:
-        result = await agent.run(orch_input)
-        if result.success and result.output is not None:
-            _campaign_results[campaign_id] = result.output
-        else:
-            _campaign_errors[campaign_id] = "; ".join(result.errors) if result.errors else "Unknown error"
-    except Exception as exc:
-        logger.exception("Orchestrator campaign %s failed", campaign_id)
-        _campaign_errors[campaign_id] = str(exc)
-
-
 def _track_orchestrator_task(campaign_id: str, task: asyncio.Task) -> None:
     """Populate legacy in-memory result stores from a durable backend task."""
 
@@ -124,7 +110,7 @@ async def _start_durable_campaign(
     restored_state: dict[str, Any] | None = None,
 ) -> None:
     backend = get_durable_backend()
-    await backend.start_campaign(
+    handle = await backend.start_campaign(
         orch_input,
         resume_from_round=resume_from_round,
         restored_state=restored_state,
@@ -135,6 +121,14 @@ async def _start_durable_campaign(
         if task is not None:
             _running_campaigns[campaign_id] = task
             _track_orchestrator_task(campaign_id, task)
+    logger.info(
+        "orchestrate.durable_started",
+        extra={
+            "campaign_id": handle.campaign_id,
+            "backend": handle.backend,
+            "status": handle.status,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -238,81 +232,13 @@ async def orchestrate_status(campaign_id: str) -> OrchestrateStatusResponse:
     Checks in-memory state first, then falls back to the DB for campaigns
     that survived a server restart.
     """
-    # Check if we have a result in memory
-    if campaign_id in _campaign_results:
-        output = _campaign_results[campaign_id]
+    status = await get_durable_backend().get_status(campaign_id)
+    if status is not None:
         return OrchestrateStatusResponse(
             campaign_id=campaign_id,
-            status="completed",
-            result=output.model_dump(),
-        )
-
-    # Check if there was an error in memory
-    if campaign_id in _campaign_errors:
-        return OrchestrateStatusResponse(
-            campaign_id=campaign_id,
-            status="failed",
-            error=_campaign_errors[campaign_id],
-        )
-
-    # Check if it's still running in memory
-    task = _running_campaigns.get(campaign_id)
-    if task is not None:
-        if task.done():
-            # Task finished but no result/error stored -- check for exception
-            try:
-                task.result()
-            except asyncio.CancelledError:
-                return OrchestrateStatusResponse(
-                    campaign_id=campaign_id,
-                    status="cancelled",
-                )
-            except Exception as exc:
-                _campaign_errors[campaign_id] = str(exc)
-                return OrchestrateStatusResponse(
-                    campaign_id=campaign_id,
-                    status="failed",
-                    error=str(exc),
-                )
-
-            # If done with no exception but no stored result, treat as completed
-            return OrchestrateStatusResponse(
-                campaign_id=campaign_id,
-                status="completed",
-            )
-
-        return OrchestrateStatusResponse(
-            campaign_id=campaign_id,
-            status="running",
-        )
-
-    # --- Fallback to DB (campaign survived a restart) ---
-    from app.services.campaign_state import load_campaign
-    db_state = load_campaign(campaign_id)
-    if db_state is not None:
-        db_status = db_state["status"]
-        if db_status in ("completed", "failed", "cancelled"):
-            return OrchestrateStatusResponse(
-                campaign_id=campaign_id,
-                status=db_status,
-                result={
-                    "best_kpi": db_state.get("best_kpi"),
-                    "current_round": db_state.get("current_round"),
-                    "total_rounds": db_state.get("total_rounds"),
-                    "stop_reason": db_state.get("stop_reason"),
-                },
-                error=db_state.get("error"),
-            )
-        # Still running/planning in DB but not in memory → resumable
-        return OrchestrateStatusResponse(
-            campaign_id=campaign_id,
-            status="resumable",
-            result={
-                "current_round": db_state.get("current_round"),
-                "total_rounds": db_state.get("total_rounds"),
-                "best_kpi": db_state.get("best_kpi"),
-                "total_runs": db_state.get("total_runs"),
-            },
+            status=status.status,
+            result=status.result,
+            error=status.error,
         )
 
     raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
@@ -321,15 +247,36 @@ async def orchestrate_status(campaign_id: str) -> OrchestrateStatusResponse:
 @router.post("/{campaign_id}/stop")
 async def orchestrate_stop(campaign_id: str) -> dict:
     """Cancel a running orchestrator campaign."""
-    task = _running_campaigns.get(campaign_id)
-    if task is None:
+    status = await get_durable_backend().cancel_campaign(campaign_id)
+    if status is None:
         raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
 
-    if task.done():
+    if status.status in {"completed", "failed"}:
         return {"campaign_id": campaign_id, "status": "already_finished"}
 
-    task.cancel()
-    return {"campaign_id": campaign_id, "status": "cancelled"}
+    public_status = "cancelled" if status.status == "cancelling" else status.status
+    return {"campaign_id": campaign_id, "status": public_status}
+
+
+@router.get("/{campaign_id}/durable-events")
+async def orchestrate_durable_events(campaign_id: str) -> dict:
+    """Return backend-level lifecycle events for debugging and replay."""
+    status = await get_durable_backend().get_status(campaign_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail=f"Campaign '{campaign_id}' not found")
+    events = await get_durable_backend().list_events(campaign_id)
+    return {
+        "campaign_id": campaign_id,
+        "backend": status.backend,
+        "events": [
+            {
+                "type": event.type,
+                "payload": event.payload,
+                "created_at": event.created_at,
+            }
+            for event in events
+        ],
+    }
 
 
 @router.post("/{campaign_id}/resume", response_model=OrchestrateStartResponse)
@@ -338,8 +285,8 @@ async def orchestrate_resume(campaign_id: str) -> OrchestrateStartResponse:
     from app.services.campaign_state import load_campaign, load_completed_candidates
 
     # Reject if already running in memory
-    task = _running_campaigns.get(campaign_id)
-    if task is not None and not task.done():
+    durable_status = await get_durable_backend().get_status(campaign_id)
+    if durable_status is not None and durable_status.status == "running":
         raise HTTPException(status_code=409, detail="Campaign is already running")
 
     db_state = load_campaign(campaign_id)

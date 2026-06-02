@@ -355,6 +355,21 @@ class BlackboardManager:
             )
         return board
 
+    def get_existing(
+        self, round_id: str, campaign_id: str | None = None
+    ) -> RoundBlackboard | None:
+        """Return an active board without creating a new one.
+
+        Context injection uses this read-only path so observing a round does
+        not create empty boards that must later be cleaned up.
+        """
+        board = self._boards.get(round_id)
+        if board is None:
+            return None
+        if campaign_id is not None and board.campaign_id != campaign_id:
+            return None
+        return board
+
     def discard(self, round_id: str) -> RoundBlackboard | None:
         """Drop the blackboard for ``round_id`` (called when a round completes).
 

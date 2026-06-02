@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import logging
+import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -52,6 +53,7 @@ class KnowledgeEvent:
     confidence: float
     round_id: str
     ttl_rounds: int = 3
+    event_id: str = field(default_factory=lambda: f"ke-{uuid.uuid4().hex[:12]}")
 
     def is_expired(self, current_round: int) -> bool:
         """True if this event should no longer be delivered.
@@ -77,8 +79,8 @@ class KnowledgeBus:
     def __init__(self, campaign_id: str) -> None:
         self._campaign_id = campaign_id
         self._events: list[KnowledgeEvent] = []
-        # agent_name -> set of event ids (id(event)) already delivered
-        self._seen: dict[str, set[int]] = {}
+        # agent_name -> stable event ids already delivered
+        self._seen: dict[str, set[str]] = {}
         # pattern -> list of queues for async notification
         self._pattern_subs: dict[str, list[asyncio.Queue[KnowledgeEvent]]] = {}
         self._lock = asyncio.Lock()
@@ -133,13 +135,38 @@ class KnowledgeBus:
             seen = self._seen.setdefault(agent_name, set())
             result: list[KnowledgeEvent] = []
             for ev in self._events:
-                if id(ev) in seen:
+                if ev.event_id in seen:
                     continue
                 if ev.is_expired(current_round):
                     continue
                 result.append(ev)
-                seen.add(id(ev))
+                seen.add(ev.event_id)
             return result
+
+    def snapshot(self, *, include_seen: bool = False) -> dict[str, Any]:
+        """Return a serializable snapshot for replay/debug surfaces."""
+        payload: dict[str, Any] = {
+            "campaign_id": self._campaign_id,
+            "stats": self.stats(),
+            "events": [
+                {
+                    "event_id": ev.event_id,
+                    "source_agent": ev.source_agent,
+                    "key": ev.key,
+                    "delta_text": ev.delta_text,
+                    "confidence": ev.confidence,
+                    "round_id": ev.round_id,
+                    "ttl_rounds": ev.ttl_rounds,
+                }
+                for ev in self._events
+            ],
+        }
+        if include_seen:
+            payload["seen"] = {
+                agent: sorted(event_ids)
+                for agent, event_ids in self._seen.items()
+            }
+        return payload
 
     # ── Prompt formatting ─────────────────────────────────────────────────────
 
