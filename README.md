@@ -1,6 +1,21 @@
-# OTbot — Autonomous Laboratory Orchestrator
+<p align="center">
+  <img src="docs/logo/helios_dark.svg" alt="HELIOS" width="620"/>
+</p>
 
-OTbot is a multi-agent system for self-driving laboratories (SDLs). Scientists describe experiments in plain language; OTbot plans, validates, executes, and iterates autonomously — closing the loop between hypothesis and hardware.
+<p align="center">
+  <sub>
+    <code>H</code> electrochem cell &nbsp;·&nbsp;
+    <code>E</code> spectrometer &nbsp;·&nbsp;
+    <code>L</code> pipette &nbsp;·&nbsp;
+    <code>I</code> UR5 arm &nbsp;·&nbsp;
+    <code>O</code> OT-2 deck &nbsp;·&nbsp;
+    <code>S</code> pump
+  </sub>
+</p>
+
+# HELIOS — Holistic Experiment Learning Intelligent Orchestration System
+
+HELIOS is a multi-agent system for self-driving laboratories (SDLs). Scientists describe experiments in plain language; HELIOS plans, validates, executes, and iterates autonomously — closing the loop between hypothesis and hardware.
 
 ```
 Scientist (natural language) → NL Parser → Campaign Planner → Safety Gate

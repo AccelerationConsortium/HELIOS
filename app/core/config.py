@@ -15,6 +15,12 @@ class Settings:
             os.getenv("OBJECT_STORE_DIR", str(self.data_dir / "object_store"))
         )
         self.scheduler_poll_seconds = float(os.getenv("SCHEDULER_POLL_SECONDS", "2"))
+        # Upper bound on concurrently-executing worker threads. Defaults to the
+        # CPU count clamped to [2, 8] so a busy queue cannot spawn unbounded
+        # threads and exhaust hardware resources.
+        self.max_concurrent_workers = int(
+            os.getenv("MAX_CONCURRENT_WORKERS", str(max(2, min(8, os.cpu_count() or 4))))
+        )
         self.campaign_poll_seconds = float(os.getenv("CAMPAIGN_POLL_SECONDS", "5"))
         self.lock_ttl_seconds = int(os.getenv("LOCK_TTL_SECONDS", "90"))
         self.default_firmware_version = os.getenv("DEFAULT_FIRMWARE_VERSION", "sim-fw-1.0.0")
@@ -40,7 +46,7 @@ class Settings:
         self.squidstat_port: str = os.getenv("SQUIDSTAT_PORT", "auto")
 
         # ---- LLM settings ----
-        self.llm_provider: str = os.getenv("LLM_PROVIDER", "mock")  # "anthropic" | "mock"
+        self.llm_provider: str = os.getenv("LLM_PROVIDER", "mock")  # "anthropic" | "openai" | "mock"
         self.llm_api_key: str = os.getenv("LLM_API_KEY", "")
         self.llm_model: str = os.getenv("LLM_MODEL", "claude-sonnet-4-20250514")
         self.llm_base_url: str = os.getenv("LLM_BASE_URL", "https://api.anthropic.com")

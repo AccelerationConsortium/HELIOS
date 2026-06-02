@@ -13,11 +13,12 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Callable
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
 from app.agents.base import BaseAgent, DecisionNode
+from app.agents.design_agent import AgentCapability
 from app.services.convergence import ConvergenceStatus, detect_convergence
 from app.services.strategy_diagnostics import compute_diagnostics
 from app.services.strategy_models import CampaignSnapshot, DiagnosticSignals
@@ -205,6 +206,13 @@ class AnalyzerAgent(BaseAgent[AnalyzerInput, AnalyzerOutput]):
     name = "analyzer_agent"
     description = "Per-round KPI diagnostics, convergence, and narrative generation"
     layer = "L2"
+
+    capabilities: ClassVar[list[AgentCapability]] = [
+        AgentCapability("spectral.analysis",   "Spectral data analysis and interpretation"),
+        AgentCapability("spectral.xrd",        "XRD pattern analysis"),
+        AgentCapability("analysis.realtime",   "Real-time data interpretation"),
+        AgentCapability("analysis.anomaly",    "Anomaly detection and flagging"),
+    ]
 
     def validate_input(self, input_data: AnalyzerInput) -> list[str]:
         errors: list[str] = []

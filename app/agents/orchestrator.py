@@ -16,7 +16,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.agents.base import BaseAgent, AgentResult
+from app.agents.base import AgentResult, BaseAgent
+from app.agents.pause import PauseRequest, PauseResult
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
 
         # RL strategy router (optional — defaults to rule-based mode)
         try:
-            from app.services.strategy_router import StrategyRouter, RouterConfig
+            from app.services.strategy_router import StrategyRouter
             self._strategy_router = StrategyRouter()
         except Exception:
             self._strategy_router = None
@@ -176,11 +177,50 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         except Exception:
             pass  # SSE is best-effort; don't break orchestrator on publish failure
 
+    def _register_campaign_agents(self, campaign_id: str) -> None:
+        """Register the campaign's agent runtime with the ControlPlane."""
+        from app.agents.analyzer_agent import AnalyzerAgent
+        from app.agents.cleaning_agent import CleaningAgent
+        from app.agents.code_writer_agent import CodeWriterAgent
+        from app.agents.compiler_agent import CompilerAgent
+        from app.agents.deck_layout_agent import DeckLayoutAgent
+        from app.agents.design_agent import DesignAgent
+        from app.agents.monitor_agent import MonitorAgent
+        from app.agents.nlp_code_agent import NLPCodeAgent
+        from app.agents.planner_agent import PlannerAgent
+        from app.agents.query_agent import QueryAgent
+        from app.agents.safety_agent import SafetyAgent
+        from app.agents.sensing_agent import SensingAgent
+        from app.agents.simulation_agent import SimulationAgent
+        from app.agents.stop_agent import StopAgent
+        from app.agents.validation_agent import ValidationAgent
+
+        self._control_plane.set_campaign_id(campaign_id)
+        for agent in [
+            PlannerAgent(),
+            DeckLayoutAgent(),
+            NLPCodeAgent(),
+            CleaningAgent(),
+            DesignAgent(),
+            QueryAgent(),
+            CompilerAgent(),
+            CodeWriterAgent(),
+            SafetyAgent(),
+            SensingAgent(),
+            ValidationAgent(),
+            SimulationAgent(),
+            StopAgent(),
+            MonitorAgent(),
+            AnalyzerAgent(),
+            self.recovery,
+        ]:
+            self._control_plane.register(agent)
+
     # ------------------------------------------------------------------
     # v2: Pause handler — persists to DB, emits SSE, polls for decision
     # ------------------------------------------------------------------
 
-    async def _handle_pause(self, agent_name: str, request: "PauseRequest") -> "PauseResult":
+    async def _handle_pause(self, agent_name: str, request: PauseRequest) -> PauseResult:
         """Unified pause handler for all agents routed through ControlPlane.
 
         1. Persist to pause_requests table (survives restart)
@@ -188,8 +228,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         3. Poll DB until operator responds or timeout
         4. Return PauseResult to the requesting agent
         """
-        from app.agents.pause import PauseRequest, PauseResult
-        from app.services.pause_store import save_pause, get_pause_status
+        from app.agents.pause import PauseResult
+        from app.services.pause_store import get_pause_status, save_pause
 
         campaign_id = getattr(self, "_current_campaign_id", "")
         pause_id = request.pause_id
@@ -287,20 +327,21 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         self._require_manual_confirmation = input_data.require_manual_confirmation
         # v2: Track campaign_id for pause handler
         self._current_campaign_id = campaign_id
+        self._register_campaign_agents(campaign_id)
 
         # --- Checkpoint: create campaign in DB ---
         from app.services.campaign_state import (
-            create_campaign,
-            save_plan,
-            start_round,
-            complete_round,
-            start_candidate,
-            complete_candidate,
-            update_candidate_graph_hash,
-            is_candidate_done,
             checkpoint_kpi,
-            update_campaign_status,
+            complete_candidate,
+            complete_round,
+            create_campaign,
             get_completed_rounds,
+            is_candidate_done,
+            save_plan,
+            start_candidate,
+            start_round,
+            update_campaign_status,
+            update_candidate_graph_hash,
         )
         if resume_from_round is None:
             # Fresh campaign
@@ -318,7 +359,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         })
 
         # ---- Phase 1: Planning (skip if resuming) ----
-        from app.agents.planner_agent import PlannerAgent, PlannerInput
+        from app.agents.planner_agent import PlannerInput
 
         if resume_from_round is not None:
             # Skip planning on resume — reload plan from DB
@@ -332,7 +373,6 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     agent_trace=agent_trace,
                 )
             # Re-run planner with same input to get CampaignPlan object
-            planner = PlannerAgent()
             plan_input = PlannerInput(
                 contract_id=input_data.contract_id,
                 objective_kpi=input_data.objective_kpi,
@@ -344,7 +384,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 dimensions=input_data.dimensions,
                 protocol_template=input_data.protocol_template,
             )
-            plan_result = await planner.run(plan_input)
+            plan_result = await self._control_plane.call(
+                "planner_agent",
+                plan_input,
+                caller="orchestrator",
+            )
             if not plan_result.success:
                 return OrchestratorOutput(
                     campaign_id=campaign_id,
@@ -367,7 +411,6 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 "message": "Analyzing parameter space and generating campaign plan...",
             })
 
-            planner = PlannerAgent()
             plan_input = PlannerInput(
                 contract_id=input_data.contract_id,
                 objective_kpi=input_data.objective_kpi,
@@ -380,7 +423,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 protocol_template=input_data.protocol_template,
             )
 
-            plan_result = await planner.run(plan_input)
+            plan_result = await self._control_plane.call(
+                "planner_agent",
+                plan_input,
+                caller="orchestrator",
+            )
             agent_trace.append({
                 "agent": "planner_agent",
                 "success": plan_result.success,
@@ -447,14 +494,17 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         # Enhancement 1: Auto deck layout from NL description
         if input_data.deck_description and resume_from_round is None:
             try:
-                from app.agents.deck_layout_agent import DeckLayoutAgent, DeckLayoutInput
-                deck_agent = DeckLayoutAgent()
+                from app.agents.deck_layout_agent import DeckLayoutInput
                 deck_input = DeckLayoutInput(
                     phase="parse",
                     deck_text=input_data.deck_description,
                     protocol_steps=input_data.protocol_template.get("steps", []),
                 )
-                deck_result = await deck_agent.run(deck_input)
+                deck_result = await self._control_plane.call(
+                    "deck_layout",
+                    deck_input,
+                    caller="orchestrator",
+                )
                 if deck_result.success and deck_result.output:
                     agent_trace.append({
                         "agent": "deck_layout",
@@ -471,8 +521,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     # Register custom labware
                     if deck_result.output.custom_labware_definitions:
                         from app.services.custom_labware_registry import (
-                            register_custom_labware,
                             get_custom_labware_definition,
+                            register_custom_labware,
                         )
                         for cld in deck_result.output.custom_labware_definitions:
                             load_name = cld.get("load_name", "")
@@ -485,8 +535,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         # Enhancement 2: NLP code generation (with confirmation)
         if input_data.nl_intent and resume_from_round is None:
             try:
-                from app.agents.nlp_code_agent import NLPCodeAgent, NLPCodeInput
-                nlp_agent = NLPCodeAgent()
+                from app.agents.nlp_code_agent import NLPCodeInput
                 nlp_input = NLPCodeInput(
                     phase="generate",
                     intent=input_data.nl_intent,
@@ -497,7 +546,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     auto_approve=input_data.nl_auto_approve,
                     campaign_id=campaign_id,
                 )
-                nlp_result = await nlp_agent.run(nlp_input)
+                nlp_result = await self._control_plane.call(
+                    "nlp_code",
+                    nlp_input,
+                    caller="orchestrator",
+                )
                 if nlp_result.success and nlp_result.output:
                     agent_trace.append({
                         "agent": "nlp_code",
@@ -542,34 +595,18 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 logger.debug("Tool holder loading failed", exc_info=True)
 
         # ---- Phase 2: Execute rounds ----
-        from app.agents.design_agent import DesignAgent, DesignInput
-        from app.agents.compiler_agent import CompilerAgent, CompileInput
-        from app.agents.safety_agent import SafetyAgent, SafetyCheckInput
-        from app.agents.simulation_agent import SimulationAgent, SimulationInput
-        from app.agents.stop_agent import StopAgent, StopInput
-        from app.agents.monitor_agent import MonitorAgent, MonitorInput
-        from app.agents.analyzer_agent import AnalyzerAgent, AnalyzerInput
+        from app.agents.analyzer_agent import AnalyzerInput
+        from app.agents.compiler_agent import CompileInput
+        from app.agents.design_agent import DesignInput
+        from app.agents.monitor_agent import MonitorInput
+        from app.agents.safety_agent import SafetyCheckInput
+        from app.agents.simulation_agent import SimulationInput
+        from app.agents.stop_agent import StopInput
         from app.services.deck_layout import (
+            WellExhaustedError,
             create_well_allocator_from_deck_plan,
             plan_deck_layout,
-            WellExhaustedError,
         )
-
-        design_agent = DesignAgent()
-        compiler = CompilerAgent()
-        safety = SafetyAgent()
-        simulation = SimulationAgent()
-        stop_agent = StopAgent()
-        monitor = MonitorAgent()
-        analyzer = AnalyzerAgent()
-
-        # v2: Register all agents with the ControlPlane
-        self._control_plane.set_campaign_id(campaign_id)
-        for _agent in [
-            design_agent, compiler, safety, simulation,
-            stop_agent, monitor, analyzer, self.recovery,
-        ]:
-            self._control_plane.register(_agent)
 
         # --- Restore or init in-memory state ---
         if restored_state is not None:
@@ -651,11 +688,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
 
             if round_strategy == "adaptive" and kpi_history:
                 try:
+                    from app.services.optimization_backends import list_backends
                     from app.services.strategy_selector import (
                         CampaignSnapshot,
                         select_strategy,
                     )
-                    from app.services.optimization_backends import list_backends
 
                     qc_fail_rate = (
                         total_qc_fails / total_qc_checks
@@ -889,7 +926,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "message": f"Designing {planned_round.batch_size} candidate parameters (strategy: {round_strategy})...",
                 })
 
-                design_result = await design_agent.run(design_input)
+                design_result = await self._control_plane.call(
+                    "design_agent",
+                    design_input,
+                    caller="orchestrator",
+                )
                 agent_trace.append({
                     "agent": "design_agent",
                     "round": round_num,
@@ -970,7 +1011,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "message": f"Compiling protocol for candidate {i}...",
                 })
 
-                compile_result = await compiler.run(compile_input)
+                compile_result = await self._control_plane.call(
+                    "compiler_agent",
+                    compile_input,
+                    caller="orchestrator",
+                )
                 if not compile_result.success:
                     self._emit(campaign_id, {
                         "type": "agent_result",
@@ -1021,7 +1066,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "message": f"Running safety preflight for candidate {i}...",
                 })
 
-                safety_result = await safety.run(safety_input)
+                safety_result = await self._control_plane.call(
+                    "safety_agent",
+                    safety_input,
+                    caller="orchestrator",
+                )
                 if safety_result.success and not safety_result.output.allowed:
                     logger.warning(
                         "Round %d candidate %d: safety veto: %s",
@@ -1061,7 +1110,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     candidate_index=i,
                     emit=lambda ev: self._emit(campaign_id, ev),
                 )
-                sim_result = await simulation.run(sim_input)
+                sim_result = await self._control_plane.call(
+                    "simulation_agent",
+                    sim_input,
+                    caller="orchestrator",
+                )
 
                 if sim_result.success:
                     sim_out = sim_result.output
@@ -1116,14 +1169,16 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         )
                     if _clean_approved:
                         try:
-                            from app.agents.cleaning_agent import CleaningAgent as _CleanAgent
                             from app.agents.cleaning_agent import CleaningInput as _CleanInput
-                            _clean = _CleanAgent()
                             _clean_in = _CleanInput(
                                 workflow_id=input_data.pre_clean_workflow,
                                 step_prefix=f"round_{round_num}_cand_{i}_pre_",
                             )
-                            _clean_res = await _clean.run(_clean_in)
+                            _clean_res = await self._control_plane.call(
+                                "cleaning",
+                                _clean_in,
+                                caller="orchestrator",
+                            )
                             if _clean_res.success and _clean_res.output:
                                 self._emit(campaign_id, {
                                     "type": "cleaning_complete",
@@ -1200,14 +1255,16 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         )
                     if _clean_approved:
                         try:
-                            from app.agents.cleaning_agent import CleaningAgent as _CleanAgent
                             from app.agents.cleaning_agent import CleaningInput as _CleanInput
-                            _clean = _CleanAgent()
                             _clean_in = _CleanInput(
                                 workflow_id=input_data.post_clean_workflow,
                                 step_prefix=f"round_{round_num}_cand_{i}_post_",
                             )
-                            _clean_res = await _clean.run(_clean_in)
+                            _clean_res = await self._control_plane.call(
+                                "cleaning",
+                                _clean_in,
+                                caller="orchestrator",
+                            )
                             if _clean_res.success and _clean_res.output:
                                 self._emit(campaign_id, {
                                     "type": "cleaning_complete",
@@ -1241,7 +1298,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     emit=lambda event: self._emit(campaign_id, event),
                 )
 
-                monitor_result = await monitor.run(monitor_input)
+                monitor_result = await self._control_plane.call(
+                    "monitor_agent",
+                    monitor_input,
+                    caller="orchestrator",
+                )
 
                 self._emit(campaign_id, {
                     "type": "agent_result",
@@ -1372,6 +1433,28 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 except Exception:
                     logger.debug("RL post-round hook failed", exc_info=True)
 
+            # 2e-ext. Causal model update (async, non-blocking)
+            # After each round, update the causal graph with new observations.
+            # Results are advisory only — failures never stall the campaign loop.
+            if round_num >= 3 and round_num % 3 == 0:
+                try:
+                    from app.services.causal_engine import CausalReasoningService
+                    _causal_svc = CausalReasoningService()
+                    asyncio.create_task(
+                        _causal_svc.update_causal_model(campaign_id, round_num),
+                        name=f"causal-update-{campaign_id}-r{round_num}",
+                    )
+                except Exception:
+                    logger.debug("Causal model update skipped", exc_info=True)
+
+            # 2e-ext2. Knowledge bus: post-round harvest from strategy router
+            try:
+                from app.services.knowledge_bus import get_bus
+                _kbus = get_bus(campaign_id)
+                await _kbus.clear_round(str(round_num - 3))  # GC stale events
+            except Exception:
+                pass
+
             # 2f. AnalyzerAgent — per-round analysis and narrative
             _round_qc_fail_rate = (
                 total_qc_fails / total_qc_checks if total_qc_checks > 0 else 0.0
@@ -1397,7 +1480,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 step_history=list(step_history),
                 emit=lambda event: self._emit(campaign_id, event),
             )
-            analyzer_result = await analyzer.run(analyzer_input)
+            analyzer_result = await self._control_plane.call(
+                "analyzer_agent",
+                analyzer_input,
+                caller="orchestrator",
+            )
             if analyzer_result.success:
                 self._emit(campaign_id, {
                     "type": "agent_result",
@@ -1444,7 +1531,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 "message": f"Evaluating stop condition (best KPI so far: {best_kpi})...",
             })
 
-            stop_result = await stop_agent.run(stop_input)
+            stop_result = await self._control_plane.call(
+                "stop_agent",
+                stop_input,
+                caller="orchestrator",
+            )
             agent_trace.append({
                 "agent": "stop_agent",
                 "round": round_num,
@@ -1559,7 +1650,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         # Group by param fingerprint
         groups: dict[str, list[tuple[float, int]]] = {}
         param_by_key: dict[str, dict[str, Any]] = {}
-        for params, kpi, rnd in zip(all_params, all_kpis, all_rounds):
+        for params, kpi, rnd in zip(all_params, all_kpis, all_rounds, strict=False):
             # Deterministic key from sorted param items
             key = str(sorted(
                 (k, round(v, 8) if isinstance(v, float) else v)
@@ -1868,11 +1959,12 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         Returns True if approved, False if rejected or timed out.
         """
         import asyncio
+
         from app.services.code_confirmation import (
             CodeConfirmationRequest,
-            request_code_confirmation,
-            get_confirmation_status,
             CodeConfirmationStatus,
+            get_confirmation_status,
+            request_code_confirmation,
         )
 
         req = CodeConfirmationRequest(
@@ -1959,10 +2051,9 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         """
         from app.agents.recovery_agent import RecoveryInput
         from app.services.error_mapping import (
-            map_exception_to_error_type,
-            get_error_severity,
             extract_error_context,
-            should_emit_chemical_safety_alert,
+            get_error_severity,
+            map_exception_to_error_type,
         )
 
         max_retries = 3
@@ -2011,7 +2102,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     )
 
                     # Get recovery decision
-                    recovery_result = await self.recovery.run(recovery_input)
+                    recovery_result = await self._call_recovery_agent(recovery_input)
 
                     if not recovery_result.success:
                         logger.error(
@@ -2158,7 +2249,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 )
 
                 # Get recovery decision
-                recovery_result = await self.recovery.run(recovery_input)
+                recovery_result = await self._call_recovery_agent(recovery_input)
 
                 if not recovery_result.success:
                     logger.error(
@@ -2278,3 +2369,12 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             "reason": "max_retries_exceeded",
             "retries": retry_count,
         }
+
+    async def _call_recovery_agent(self, recovery_input: BaseModel) -> AgentResult:
+        """Route recovery decisions through the ControlPlane."""
+        return await self._control_plane.call(
+            "recovery_agent",
+            recovery_input,
+            caller="orchestrator.recovery",
+            timeout_s=120.0,
+        )

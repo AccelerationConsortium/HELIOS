@@ -5,11 +5,12 @@ an executable DAG with graph hash.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
 from app.agents.base import BaseAgent
+from app.agents.design_agent import AgentCapability
 
 
 class CompileInput(BaseModel):
@@ -33,6 +34,12 @@ class CompilerAgent(BaseAgent[CompileInput, CompileOutput]):
     name = "compiler_agent"
     description = "Protocol -> DAG compilation"
     layer = "L1"
+
+    capabilities: ClassVar[list[AgentCapability]] = [
+        AgentCapability("protocol.compile",     "Abstract protocol to OT-2 compilation"),
+        AgentCapability("protocol.opentrons",   "Opentrons OT-2 protocol generation"),
+        AgentCapability("protocol.validate",    "Protocol syntax and safety validation"),
+    ]
 
     def validate_input(self, input_data: CompileInput) -> list[str]:
         errors: list[str] = []
