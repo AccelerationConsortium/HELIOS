@@ -11,7 +11,8 @@ v3: Memory-enriched confidence calibration.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +20,22 @@ from app.agents.base import BaseAgent, DecisionNode
 from app.agents.pause import Granularity, PauseRequest
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AgentCapability:
+    """Declarative capability advertised by an agent.
+
+    ``name`` is a dotted capability identifier (e.g. ``hypothesis.bayesian``);
+    ``description`` is a human-readable summary.
+    ``tag`` is an alias for ``name`` for cross-module compatibility.
+    """
+    name: str
+    description: str = ""
+
+    @property
+    def tag(self) -> str:
+        return self.name
 
 
 class DesignInput(BaseModel):
@@ -31,6 +48,10 @@ class DesignInput(BaseModel):
     campaign_id: str | None = None
     kpi_name: str = "overpotential_mv"
     store: bool = True  # False to skip DB persistence (e.g. dry_run orchestrator)
+    refutations: list[str] = Field(
+        default_factory=list,
+        description="Adversarial refutations from ValidatorSwarm to incorporate",
+    )
 
 
 class DesignOutput(BaseModel):
@@ -51,6 +72,12 @@ class DesignAgent(BaseAgent[DesignInput, DesignOutput]):
     name = "design_agent"
     description = "Parameter space exploration (BO/LHS/random)"
     layer = "L2"
+
+    capabilities: ClassVar[list[AgentCapability]] = [
+        AgentCapability("hypothesis.bayesian",         "Bayesian parameter-space hypothesis generation"),
+        AgentCapability("hypothesis.parameter_space",  "Multi-dimensional design space exploration"),
+        AgentCapability("design.campaign",             "Campaign-level experimental design"),
+    ]
 
     # v3: confidence thresholds
     LOW_CONFIDENCE_THRESHOLD = 0.3
@@ -78,6 +105,18 @@ class DesignAgent(BaseAgent[DesignInput, DesignOutput]):
             SearchDimension,
             generate_batch,
         )
+
+        # Incorporate adversarial refutations from ValidatorSwarm, if any.
+        # There is no LLM prompt in this algorithmic agent, so the system note
+        # is surfaced via the logger to inform the revised design generation.
+        refutation_note: str | None = None
+        if input_data.refutations:
+            refutation_note = (
+                f"Previous hypothesis was refuted: "
+                f"{'; '.join(input_data.refutations)}. "
+                f"Revise to address these concerns."
+            )
+            logger.info("design_agent: %s", refutation_note)
 
         dims = []
         for d in input_data.dimensions:

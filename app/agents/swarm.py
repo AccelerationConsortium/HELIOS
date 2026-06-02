@@ -31,6 +31,8 @@ import threading
 import time
 import uuid
 from abc import ABC, abstractmethod
+from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from logging import Logger
 from typing import Any, ClassVar
@@ -115,8 +117,9 @@ class BaseSwarm(ABC):
     # Agent composition: list of (agent_class_name, role_in_swarm)
     agent_specs: ClassVar[list[tuple[str, str]]] = []
 
-    def __init__(self, context: SwarmContext) -> None:
+    def __init__(self, context: SwarmContext, control_plane: Any | None = None) -> None:
         self.context: SwarmContext = context
+        self.control_plane: Any | None = control_plane or context.extra.get("control_plane")
         self.trace_id: str = uuid.uuid4().hex[:12]
         self.logger: Logger = logging.getLogger(f"swarm.{self.name}")
         self.logger.info(
@@ -131,6 +134,25 @@ class BaseSwarm(ABC):
     async def run(self, **kwargs: Any) -> SwarmResult:
         """Execute the swarm's task. Override in subclasses."""
         ...
+
+    async def _call_agent(
+        self,
+        target: str,
+        input_data: BaseModel,
+        fallback_factory: Callable[[], BaseAgent],
+    ) -> AgentResult[Any]:
+        """Invoke an agent through ControlPlane when available."""
+        if self.control_plane is not None:
+            call = getattr(self.control_plane, "call", None)
+            if callable(call):
+                return await call(
+                    target,
+                    input_data,
+                    caller=f"swarm.{self.name}",
+                    trace_id=self.trace_id,
+                )
+        agent = fallback_factory()
+        return await agent.run(input_data, trace_id=self.trace_id)
 
     def _make_result(
         self,
@@ -266,17 +288,27 @@ class ScientistSwarm(BaseSwarm):
         if design_input is not None:
             from app.agents.design_agent import DesignAgent
 
-            agent = DesignAgent()
             tasks.append(
-                asyncio.create_task(agent.run(design_input, trace_id=self.trace_id))
+                asyncio.create_task(
+                    self._call_agent(
+                        "design_agent",
+                        design_input,
+                        DesignAgent,
+                    )
+                )
             )
 
         if query_request is not None:
             from app.agents.query_agent import QueryAgent
 
-            agent = QueryAgent()
             tasks.append(
-                asyncio.create_task(agent.run(query_request, trace_id=self.trace_id))
+                asyncio.create_task(
+                    self._call_agent(
+                        "query_agent",
+                        query_request,
+                        QueryAgent,
+                    )
+                )
             )
 
         if tasks:
@@ -333,8 +365,11 @@ class EngineerSwarm(BaseSwarm):
         if compile_input is not None:
             from app.agents.compiler_agent import CompilerAgent
 
-            compiler = CompilerAgent()
-            res = await compiler.run(compile_input, trace_id=self.trace_id)
+            res = await self._call_agent(
+                "compiler_agent",
+                compile_input,
+                CompilerAgent,
+            )
             results.append(res)
             if res.success and res.output is not None:
                 aggregated["compiler"] = res.output.model_dump(mode="json")
@@ -344,8 +379,11 @@ class EngineerSwarm(BaseSwarm):
         if code_writer_input is not None:
             from app.agents.code_writer_agent import CodeWriterAgent
 
-            writer = CodeWriterAgent()
-            res = await writer.run(code_writer_input, trace_id=self.trace_id)
+            res = await self._call_agent(
+                "code_writer_agent",
+                code_writer_input,
+                CodeWriterAgent,
+            )
             results.append(res)
             if res.success and res.output is not None:
                 aggregated["code_writer"] = res.output.model_dump(mode="json")
@@ -355,8 +393,11 @@ class EngineerSwarm(BaseSwarm):
         if plan_input is not None:
             from app.agents.planner_agent import PlannerAgent
 
-            planner = PlannerAgent()
-            res = await planner.run(plan_input, trace_id=self.trace_id)
+            res = await self._call_agent(
+                "planner_agent",
+                plan_input,
+                PlannerAgent,
+            )
             results.append(res)
             if res.success and res.output is not None:
                 aggregated["planner"] = res.output.model_dump(mode="json")
@@ -409,18 +450,28 @@ class AnalystSwarm(BaseSwarm):
         if sensing_input is not None:
             from app.agents.sensing_agent import SensingAgent
 
-            agent = SensingAgent()
             tasks.append(
-                asyncio.create_task(agent.run(sensing_input, trace_id=self.trace_id))
+                asyncio.create_task(
+                    self._call_agent(
+                        "sensing_agent",
+                        sensing_input,
+                        SensingAgent,
+                    )
+                )
             )
 
         query_request = kwargs.get("query_request")
         if query_request is not None:
             from app.agents.query_agent import QueryAgent
 
-            agent = QueryAgent()
             tasks.append(
-                asyncio.create_task(agent.run(query_request, trace_id=self.trace_id))
+                asyncio.create_task(
+                    self._call_agent(
+                        "query_agent",
+                        query_request,
+                        QueryAgent,
+                    )
+                )
             )
 
         if tasks:
@@ -479,8 +530,11 @@ class ValidatorSwarm(BaseSwarm):
         if stop_input is not None:
             from app.agents.stop_agent import StopAgent
 
-            agent = StopAgent()
-            res = await agent.run(stop_input, trace_id=self.trace_id)
+            res = await self._call_agent(
+                "stop_agent",
+                stop_input,
+                StopAgent,
+            )
             results.append(res)
             if res.success and res.output is not None:
                 aggregated["stop_agent"] = res.output.model_dump(mode="json")
@@ -522,7 +576,11 @@ class SwarmFactory:
     """
 
     @staticmethod
-    def spawn(swarm_name: str, context: SwarmContext) -> BaseSwarm:
+    def spawn(
+        swarm_name: str,
+        context: SwarmContext,
+        control_plane: Any | None = None,
+    ) -> BaseSwarm:
         """Spawn a new swarm instance by name (thread-safe).
 
         Parameters
@@ -549,7 +607,7 @@ class SwarmFactory:
                 raise ValueError(
                     f"Unknown swarm '{swarm_name}'. Available: {available}"
                 )
-        return cls(context)
+        return cls(context, control_plane=control_plane)
 
     @staticmethod
     def available_swarms() -> list[str]:
@@ -595,3 +653,678 @@ def list_swarms() -> list[dict[str, Any]]:
             ],
         })
     return result
+
+
+# ===========================================================================
+# Advanced multi-agent coordination patterns
+# ===========================================================================
+#
+# The patterns below extend the swarm model with three additional
+# coordination strategies that operate over a ``ControlPlane`` — a runtime
+# registry of live agent instances exposing capability metadata and
+# parallel/serial invocation primitives. Unlike the swarm classes above
+# (which statically wire constituent agents), these patterns assemble or
+# select agents dynamically at invocation time.
+#
+# Expected ControlPlane protocol (duck-typed, ``Any`` for loose coupling):
+#   - ``control_plane.agents``: dict[str, agent] of registered agents
+#   - ``agent.has_capability(tag: str) -> bool``: capability predicate
+#   - ``await control_plane.call(name, input_data, *, caller, trace_id)``
+#         -> AgentResult
+#   - ``await control_plane.call_parallel(names, input_data, *, caller,
+#         trace_id) -> list[AgentResult]``
+#
+# These are additive: existing swarms, the registry, and the factory above
+# remain unchanged.
+# ---------------------------------------------------------------------------
+
+
+# Judge function signature for RacingSwarm: collapse competing results
+# into a single winning AgentResult.
+JudgeFn = Callable[[list[AgentResult]], AgentResult]
+
+
+def _extract_confidence(result: AgentResult, default: float = 0.5) -> float:
+    """Best-effort extraction of a confidence score from an AgentResult.
+
+    Looks for ``output.confidence`` and falls back to ``default`` when the
+    output is missing, has no confidence attribute, or the value is not a
+    finite number.
+    """
+    output = getattr(result, "output", None)
+    if output is None:
+        return default
+    conf = getattr(output, "confidence", None)
+    if conf is None:
+        return default
+    try:
+        return float(conf)
+    except (TypeError, ValueError):
+        return default
+
+
+# ---------------------------------------------------------------------------
+# A. DynamicSwarm — capability-based assembly at spawn time
+# ---------------------------------------------------------------------------
+
+
+class DynamicSwarm:
+    """Capability-based dynamic swarm assembled at spawn time.
+
+    Rather than statically wiring a fixed set of agents, a DynamicSwarm
+    queries a ControlPlane for all live agents advertising any of the
+    requested capability tags, then invokes the matched set in parallel.
+
+    This supports open-ended task routing: a caller specifies *what
+    capabilities the task needs* (e.g. ``["spectral", "anomaly"]``) and the
+    swarm self-assembles from whatever agents currently provide them.
+
+    Usage::
+
+        swarm = DynamicSwarm.for_task(
+            ["spectral", "anomaly"], context, control_plane
+        )
+        result = await swarm.run(input_data=sensing_input)
+    """
+
+    name: ClassVar[str] = "dynamic"
+    description: ClassVar[str] = "Capability-based dynamic swarm"
+
+    def __init__(
+        self,
+        context: SwarmContext,
+        control_plane: Any,
+        required_tags: list[str],
+    ) -> None:
+        self.context: SwarmContext = context
+        self.control_plane: Any = control_plane
+        self.required_tags: list[str] = list(required_tags)
+        self.trace_id: str = uuid.uuid4().hex[:12]
+        self.logger: Logger = logging.getLogger(f"swarm.{self.name}")
+        self.selected_agents: list[str] = self._select_agents()
+        self.logger.info(
+            "Spawned dynamic swarm (trace=%s, campaign=%s, round=%d, "
+            "tags=%s, selected=%s)",
+            self.trace_id,
+            context.campaign_id,
+            context.round_number,
+            self.required_tags,
+            self.selected_agents,
+        )
+
+    def _select_agents(self) -> list[str]:
+        """Resolve agent names whose capabilities match any required tag."""
+        selected: list[str] = []
+        agents = getattr(self.control_plane, "agents", None) or {}
+        for agent_name, agent in agents.items():
+            has_cap = getattr(agent, "has_capability", None)
+            if not callable(has_cap):
+                continue
+            for tag in self.required_tags:
+                try:
+                    if has_cap(tag):
+                        selected.append(agent_name)
+                        break
+                except Exception:  # noqa: BLE001 - defensive: bad predicate
+                    self.logger.warning(
+                        "has_capability(%r) raised for agent %s; skipping tag",
+                        tag,
+                        agent_name,
+                    )
+        return selected
+
+    @classmethod
+    def for_task(
+        cls,
+        required_tags: list[str],
+        context: SwarmContext,
+        control_plane: Any,
+    ) -> DynamicSwarm:
+        """Build a swarm from control_plane agents matching any required_tag.
+
+        Parameters
+        ----------
+        required_tags:
+            Capability tags the task requires. An agent is selected if it
+            advertises *any* one of these via ``has_capability``.
+        context:
+            Campaign state for the swarm.
+        control_plane:
+            Runtime agent registry exposing ``agents`` and
+            ``call_parallel``.
+
+        Returns
+        -------
+        DynamicSwarm
+            A swarm pre-resolved to the matching agent set.
+        """
+        return cls(context, control_plane, required_tags)
+
+    async def run(self, **kwargs: Any) -> SwarmResult:
+        """Invoke all selected agents via ``call_parallel`` and aggregate.
+
+        Keyword Args:
+            input_data: Input payload forwarded to every selected agent.
+
+        Returns:
+            SwarmResult aggregating the matched agents' outputs. If no agents
+            matched, returns a graceful warning result (success=True, no
+            errors) so callers can degrade rather than fail hard.
+        """
+        start = time.monotonic()
+        aggregated: dict[str, Any] = {
+            "required_tags": list(self.required_tags),
+            "selected_agents": list(self.selected_agents),
+        }
+
+        # Graceful fallback: nothing matched the requested capabilities.
+        if not self.selected_agents:
+            msg = (
+                "No agents matched required capability tags "
+                f"{self.required_tags}; dynamic swarm assembled empty."
+            )
+            self.logger.warning(msg)
+            duration = (time.monotonic() - start) * 1000
+            return SwarmResult(
+                swarm_name=self.name,
+                success=True,
+                agent_results=[],
+                aggregated_output=aggregated,
+                errors=[],
+                warnings=[msg],
+                duration_ms=duration,
+                trace_id=self.trace_id,
+            )
+
+        input_data = kwargs.get("input_data")
+        results = await self.control_plane.call_parallel(
+            [(agent_name, input_data) for agent_name in self.selected_agents],
+            caller=self.name,
+            trace_id=self.trace_id,
+        )
+
+        return self._make_result(results, aggregated, start)
+
+    def _make_result(
+        self,
+        agent_results: list[AgentResult],
+        aggregated: dict[str, Any],
+        start_time: float,
+    ) -> SwarmResult:
+        """Build a SwarmResult from control-plane invocation results."""
+        all_errors: list[str] = []
+        all_warnings: list[str] = []
+        all_success = True
+
+        for ar in agent_results:
+            all_errors.extend(getattr(ar, "errors", []) or [])
+            all_warnings.extend(getattr(ar, "warnings", []) or [])
+            if not getattr(ar, "success", False):
+                all_success = False
+            output = getattr(ar, "output", None)
+            if getattr(ar, "success", False) and output is not None:
+                aggregated[getattr(ar, "agent_name", "unknown")] = (
+                    output.model_dump(mode="json")
+                    if hasattr(output, "model_dump")
+                    else output
+                )
+
+        duration = (time.monotonic() - start_time) * 1000
+        self.logger.info(
+            "dynamic swarm completed in %.1fms (success=%s, agents=%d, "
+            "trace=%s)",
+            duration,
+            all_success,
+            len(agent_results),
+            self.trace_id,
+        )
+        return SwarmResult(
+            swarm_name=self.name,
+            success=all_success,
+            agent_results=list(agent_results),
+            aggregated_output=aggregated,
+            errors=all_errors,
+            warnings=all_warnings,
+            duration_ms=duration,
+            trace_id=self.trace_id,
+        )
+
+    def disband(self) -> None:
+        """Clean up after swarm execution (ephemeral lifecycle)."""
+        self.logger.debug(
+            "dynamic swarm disbanded (trace=%s)", self.trace_id
+        )
+
+
+# ---------------------------------------------------------------------------
+# B. RacingSwarm — speculative parallel execution with judge selection
+# ---------------------------------------------------------------------------
+
+
+class RacingSwarm:
+    """Speculative parallel execution: N agents race, best result wins.
+
+    All competing agents receive the same input and run concurrently. A
+    *judge* function collapses the competing results into a single winner.
+    This trades compute for latency/quality: useful when several agents
+    can attempt the same task with differing approaches and the best
+    output should be selected post-hoc.
+
+    Usage::
+
+        racer = RacingSwarm(context, control_plane)
+        winner = await racer.race(
+            ["design_a", "design_b"], design_input,
+            judge=RacingSwarm.highest_confidence_judge,
+        )
+    """
+
+    name: ClassVar[str] = "racing"
+    description: ClassVar[str] = "Speculative parallel execution"
+
+    def __init__(self, context: SwarmContext, control_plane: Any) -> None:
+        self.context: SwarmContext = context
+        self.control_plane: Any = control_plane
+        self.trace_id: str = uuid.uuid4().hex[:12]
+        self.logger: Logger = logging.getLogger(f"swarm.{self.name}")
+        self.logger.info(
+            "Spawned racing swarm (trace=%s, campaign=%s, round=%d)",
+            self.trace_id,
+            context.campaign_id,
+            context.round_number,
+        )
+
+    async def race(
+        self,
+        agent_names: list[str],
+        input_data: BaseModel,
+        *,
+        judge: JudgeFn | None = None,
+        caller: str = "racing_swarm",
+    ) -> AgentResult:
+        """Run all agents in parallel, apply judge, return the winner.
+
+        Parameters
+        ----------
+        agent_names:
+            Competing agents; all receive ``input_data``.
+        input_data:
+            Shared input payload.
+        judge:
+            Selection function over the (successful) results. Defaults to
+            :meth:`highest_confidence_judge`.
+        caller:
+            Caller identity for control-plane provenance.
+
+        Returns
+        -------
+        AgentResult
+            The winning result. If every competitor failed, the first
+            failure is returned so the caller still sees an error trail.
+        """
+        judge = judge or RacingSwarm.highest_confidence_judge
+        self.logger.info(
+            "Racing %d agents %s (trace=%s, judge=%s)",
+            len(agent_names),
+            agent_names,
+            self.trace_id,
+            getattr(judge, "__name__", repr(judge)),
+        )
+
+        results: list[AgentResult] = await self.control_plane.call_parallel(
+            [(agent_name, input_data) for agent_name in agent_names],
+            caller=caller,
+            trace_id=self.trace_id,
+        )
+
+        successful = [r for r in results if getattr(r, "success", False)]
+
+        if not successful:
+            self.logger.warning(
+                "All %d racing agents failed (trace=%s); returning first "
+                "failure",
+                len(results),
+                self.trace_id,
+            )
+            if results:
+                return results[0]
+            # No competitors at all — synthesize an explicit failure.
+            return AgentResult(
+                success=False,
+                errors=["RacingSwarm.race called with no agents"],
+                agent_name=self.name,
+                trace_id=self.trace_id,
+            )
+
+        winner = judge(successful)
+        self.logger.info(
+            "Racing winner: %s (trace=%s, candidates=%d)",
+            getattr(winner, "agent_name", "unknown"),
+            self.trace_id,
+            len(successful),
+        )
+        return winner
+
+    @staticmethod
+    def highest_confidence_judge(results: list[AgentResult]) -> AgentResult:
+        """Select the result with the highest ``output.confidence``.
+
+        Missing or unparseable confidence values default to ``0.5``.
+        """
+        return max(results, key=_extract_confidence)
+
+    @staticmethod
+    def majority_vote_judge(results: list[AgentResult]) -> AgentResult:
+        """For boolean/categorical outputs: pick the most common output.
+
+        Each result's ``output`` is reduced to a hashable vote key (a
+        ``decision``/``value``/``label`` attribute if present, else the
+        serialized output, else its repr). The result backing the most
+        common key is returned; ties resolve to the first such result, and
+        within that group the highest-confidence member is preferred.
+        """
+        if not results:
+            raise ValueError("majority_vote_judge requires at least one result")
+
+        def vote_key(r: AgentResult) -> Any:
+            output = getattr(r, "output", None)
+            if output is None:
+                return None
+            for attr in ("decision", "value", "label", "category", "verdict"):
+                if hasattr(output, attr):
+                    return getattr(output, attr)
+            if hasattr(output, "model_dump"):
+                try:
+                    return repr(sorted(output.model_dump(mode="json").items()))
+                except Exception:  # noqa: BLE001 - non-dict / unsortable
+                    return repr(output.model_dump(mode="json"))
+            return repr(output)
+
+        keyed = [(vote_key(r), r) for r in results]
+        counts = Counter(k for k, _ in keyed)
+        winning_key, _ = counts.most_common(1)[0]
+        group = [r for k, r in keyed if k == winning_key]
+        return max(group, key=_extract_confidence)
+
+
+def build_racing_swarm(
+    context: SwarmContext, control_plane: Any
+) -> RacingSwarm:
+    """Construct a :class:`RacingSwarm` bound to a control plane."""
+    return RacingSwarm(context, control_plane)
+
+
+# ---------------------------------------------------------------------------
+# C. AdversarialHypothesisLoop — Scientist↔Validator structured debate
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class DebateRound:
+    """A single round of the adversarial hypothesis debate.
+
+    Attributes:
+        round_idx: Zero-based index of this debate round.
+        hypothesis: The hypothesis proposed by the scientist this round.
+        refutations: Objections raised by the validator (empty = accepted).
+        confidence: Validator's confidence in the hypothesis [0.0, 1.0].
+    """
+
+    round_idx: int
+    hypothesis: str
+    refutations: list[str]
+    confidence: float
+
+
+class AdversarialHypothesisLoop:
+    """Scientist-Validator adversarial debate loop.
+
+    Implements a structured debate protocol that hardens a hypothesis
+    against hallucination and physical implausibility before it enters the
+    decision loop:
+
+    1. A *scientist* agent proposes a hypothesis from the initial input.
+    2. A *validator* agent runs in adversarial mode and returns refutations
+       plus a confidence score.
+    3. If there are no refutations OR confidence meets the consensus
+       threshold, the debate resolves.
+    4. Otherwise the scientist revises, given the refutations as context,
+       and the loop repeats up to ``MAX_ROUNDS``.
+    5. If unresolved after ``MAX_ROUNDS``, the loop escalates to a human and
+       returns the last hypothesis with reduced confidence.
+
+    The full debate history is returned for audit and provenance.
+    """
+
+    name: ClassVar[str] = "adversarial_hypothesis"
+    description: ClassVar[str] = "Scientist-Validator adversarial debate"
+
+    MAX_ROUNDS: ClassVar[int] = 3
+    CONSENSUS_THRESHOLD: ClassVar[float] = 0.75
+
+    def __init__(self, context: SwarmContext, control_plane: Any) -> None:
+        self.context: SwarmContext = context
+        self.control_plane: Any = control_plane
+        self.trace_id: str = uuid.uuid4().hex[:12]
+        self.logger: Logger = logging.getLogger(f"swarm.{self.name}")
+        self.logger.info(
+            "Spawned adversarial hypothesis loop (trace=%s, campaign=%s, "
+            "round=%d, max_rounds=%d, threshold=%.2f)",
+            self.trace_id,
+            context.campaign_id,
+            context.round_number,
+            self.MAX_ROUNDS,
+            self.CONSENSUS_THRESHOLD,
+        )
+
+    @staticmethod
+    def _inject_refutations(
+        input_data: BaseModel, refutations: list[str], round_idx: int
+    ) -> Any:
+        """Attach refutation context to the scientist's next input.
+
+        Prefers an in-place ``model_copy(update=...)`` if the model declares
+        a ``refutations`` field; otherwise wraps the input alongside the
+        refutation context so the scientist can still consume it.
+        """
+        fields = getattr(type(input_data), "model_fields", {}) or {}
+        if "refutations" in fields:
+            return input_data.model_copy(update={"refutations": refutations})
+        # Fallback wrapper: preserve original input + debate context.
+        return {
+            "input": input_data,
+            "refutations": refutations,
+            "debate_round": round_idx,
+        }
+
+    @staticmethod
+    def _extract_hypothesis(result: AgentResult, fallback: str) -> str:
+        """Pull a hypothesis string out of a scientist AgentResult."""
+        output = getattr(result, "output", None)
+        if output is None:
+            return fallback
+        for attr in ("hypothesis", "summary", "rationale", "description"):
+            val = getattr(output, attr, None)
+            if isinstance(val, str) and val:
+                return val
+        if hasattr(output, "model_dump"):
+            try:
+                return repr(output.model_dump(mode="json"))
+            except Exception:  # noqa: BLE001
+                return fallback
+        return fallback
+
+    @staticmethod
+    def _extract_refutations(result: AgentResult) -> list[str]:
+        """Pull a list of refutation strings out of a validator result."""
+        output = getattr(result, "output", None)
+        if output is None:
+            return []
+        for attr in ("refutations", "objections", "issues", "violations"):
+            val = getattr(output, attr, None)
+            if isinstance(val, (list, tuple)):
+                return [str(x) for x in val]
+        return []
+
+    async def run(
+        self,
+        *,
+        scientist_agent: str = "design_agent",
+        validator_agent: str = "validation_agent",
+        initial_input: BaseModel,
+        trace_id: str | None = None,
+    ) -> tuple[str, float, list[DebateRound]]:
+        """Run the adversarial debate to convergence or escalation.
+
+        Parameters
+        ----------
+        scientist_agent:
+            Control-plane name of the proposing agent.
+        validator_agent:
+            Control-plane name of the adversarial validating agent.
+        initial_input:
+            Seed input for the scientist's first hypothesis.
+        trace_id:
+            Optional externally-supplied trace id; overrides the internal one
+            so the debate can be correlated with a parent operation.
+
+        Returns
+        -------
+        tuple[str, float, list[DebateRound]]
+            ``(winning_hypothesis, final_confidence, debate_history)``.
+        """
+        if trace_id:
+            self.trace_id = trace_id
+
+        history: list[DebateRound] = []
+        current_input: Any = initial_input
+        hypothesis = ""
+        confidence = 0.0
+
+        for round_idx in range(self.MAX_ROUNDS):
+            self.logger.info(
+                "Debate round %d/%d begins (trace=%s, scientist=%s, "
+                "validator=%s)",
+                round_idx + 1,
+                self.MAX_ROUNDS,
+                self.trace_id,
+                scientist_agent,
+                validator_agent,
+            )
+
+            # --- 1. Scientist proposes / revises -------------------------
+            sci_result = await self.control_plane.call(
+                scientist_agent,
+                current_input,
+                caller=self.name,
+                trace_id=self.trace_id,
+            )
+            hypothesis = self._extract_hypothesis(sci_result, fallback=hypothesis)
+            self.logger.info(
+                "Round %d: scientist proposed hypothesis (trace=%s, "
+                "success=%s): %.120s",
+                round_idx + 1,
+                self.trace_id,
+                getattr(sci_result, "success", False),
+                hypothesis,
+            )
+
+            # --- 2. Validator refutes (adversarial mode) -----------------
+            val_input = self._inject_refutations(
+                initial_input, [], round_idx
+            )
+            # Carry the proposed hypothesis to the validator when possible.
+            if isinstance(val_input, dict):
+                val_input["hypothesis"] = hypothesis
+                val_input["mode"] = "adversarial"
+            elif "hypothesis" in (
+                getattr(type(val_input), "model_fields", {}) or {}
+            ):
+                val_input = val_input.model_copy(
+                    update={"hypothesis": hypothesis}
+                )
+
+            val_result = await self.control_plane.call(
+                validator_agent,
+                val_input,
+                caller=self.name,
+                trace_id=self.trace_id,
+            )
+            refutations = self._extract_refutations(val_result)
+            confidence = _extract_confidence(val_result, default=0.5)
+
+            history.append(
+                DebateRound(
+                    round_idx=round_idx,
+                    hypothesis=hypothesis,
+                    refutations=refutations,
+                    confidence=confidence,
+                )
+            )
+            self.logger.info(
+                "Round %d: validator returned %d refutation(s), "
+                "confidence=%.3f (trace=%s)",
+                round_idx + 1,
+                len(refutations),
+                confidence,
+                self.trace_id,
+            )
+
+            # --- 3. Consensus check --------------------------------------
+            if not refutations or confidence >= self.CONSENSUS_THRESHOLD:
+                self.logger.info(
+                    "Debate resolved at round %d (trace=%s, confidence=%.3f, "
+                    "refutations=%d)",
+                    round_idx + 1,
+                    self.trace_id,
+                    confidence,
+                    len(refutations),
+                )
+                return hypothesis, confidence, history
+
+            # --- 4. Scientist revises with refutation context ------------
+            current_input = self._inject_refutations(
+                initial_input, refutations, round_idx + 1
+            )
+
+        # --- 5. Unresolved after MAX_ROUNDS → escalate to human ----------
+        self.logger.warning(
+            "Debate unresolved after %d rounds (trace=%s); escalating to "
+            "human",
+            self.MAX_ROUNDS,
+            self.trace_id,
+        )
+        esc_hypothesis, esc_confidence = await self._escalate_to_human(history)
+        return esc_hypothesis, esc_confidence, history
+
+    async def _escalate_to_human(
+        self, history: list[DebateRound]
+    ) -> tuple[str, float]:
+        """Handle MAX_ROUNDS exhaustion via human escalation.
+
+        Returns the last proposed hypothesis with a deliberately conservative
+        confidence (0.4) signalling that automated consensus failed and human
+        review is required.
+        """
+        last_hypothesis = history[-1].hypothesis if history else ""
+        self.logger.warning(
+            "Human escalation triggered (trace=%s, rounds=%d, "
+            "last_confidence=%.3f)",
+            self.trace_id,
+            len(history),
+            history[-1].confidence if history else 0.0,
+        )
+        return last_hypothesis, 0.4
+
+    def disband(self) -> None:
+        """Clean up after the debate loop (ephemeral lifecycle)."""
+        self.logger.debug(
+            "adversarial hypothesis loop disbanded (trace=%s)", self.trace_id
+        )
+
+
+def build_adversarial_loop(
+    context: SwarmContext, control_plane: Any
+) -> AdversarialHypothesisLoop:
+    """Construct an :class:`AdversarialHypothesisLoop` bound to a control plane."""
+    return AdversarialHypothesisLoop(context, control_plane)

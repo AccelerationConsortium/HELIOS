@@ -20,7 +20,7 @@ import logging
 import math
 import random
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 from app.services.candidate_gen import (
     ParameterSpace,
@@ -601,3 +601,449 @@ class RandomBackend:
     @staticmethod
     def is_available() -> bool:
         return True
+
+
+# ===================================================================
+# Unified Optimizer Layer
+# ===================================================================
+#
+# The backends above are *stateless* one-shot samplers: every ``suggest()``
+# call must be handed the full observation history.  This works, but it forces
+# the campaign loop to re-load observations from the DB on every round
+# (latency + missed mid-campaign learning) and keeps the Bayesian and RL code
+# paths completely siloed.
+#
+# ``UnifiedOptimizer`` is a *stateful*, async-friendly facade over the
+# stateless backends.  It owns an in-memory ``ObservationBuffer`` so that a
+# completed run can be folded into the model immediately via
+# ``incremental_observe()`` -- without waiting for the next ``suggest()`` call
+# and without a DB round-trip.  Both BO and RL implementations share the same
+# interface so ``strategy_router`` can route by phase through one object.
+
+import asyncio
+import time as _time
+from abc import ABC, abstractmethod
+from threading import Lock as _Lock
+
+# Action -> backend mapping is owned by the RL module; import lazily inside
+# RLOptimizer to avoid a hard import cycle (rl_strategy_selector imports from
+# strategy_selector which imports from this module).
+
+
+@dataclass
+class ObservationBuffer:
+    """In-memory, thread-safe ring of recent observations for one campaign.
+
+    Holds *de-normalised* param dicts (what the rest of HELIOS speaks) plus the
+    objective.  ``to_observations()`` converts to the stateless
+    :class:`Observation` understood by the backends.  The buffer is the live
+    feedback channel: ``add()`` is called the instant a run completes, so the
+    surrogate / replay buffer sees the result before the next ``suggest()``.
+    """
+
+    capacity: int = 512
+    _records: list[Observation] = field(default_factory=list)
+    _lock: _Lock = field(default_factory=_Lock, repr=False)
+
+    def add(self, params: dict[str, Any], objective: float) -> None:
+        rec = Observation(params=dict(params), objective=float(objective))
+        with self._lock:
+            self._records.append(rec)
+            if len(self._records) > self.capacity:
+                # Drop oldest; recent observations dominate the surrogate.
+                del self._records[: len(self._records) - self.capacity]
+
+    def get_recent(self, n: int) -> list[Observation]:
+        with self._lock:
+            if n <= 0:
+                return []
+            return list(self._records[-n:])
+
+    def to_observations(self) -> list[Observation]:
+        with self._lock:
+            return list(self._records)
+
+    def merge(self, observations: list[Observation]) -> None:
+        """Seed the buffer (e.g. with DB history) without duplicating records."""
+        with self._lock:
+            seen = {
+                (tuple(sorted(r.params.items())), r.objective)
+                for r in self._records
+            }
+            for obs in observations:
+                key = (tuple(sorted(obs.params.items())), obs.objective)
+                if key not in seen:
+                    self._records.append(obs)
+                    seen.add(key)
+            if len(self._records) > self.capacity:
+                del self._records[: len(self._records) - self.capacity]
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._records)
+
+
+@dataclass(frozen=True)
+class SuggestResult:
+    """Outcome of a unified ``suggest()`` call."""
+
+    candidates: list[dict[str, Any]]
+    backend_name: str
+    n_observations: int
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class UnifiedOptimizer(ABC):
+    """Stateful optimizer facade with an incremental feedback channel.
+
+    Subclasses wrap a stateless backend (BO) or an agent (RL) and maintain a
+    per-campaign :class:`ObservationBuffer`.  All public methods are async so
+    the campaign orchestrator can await them without blocking the event loop;
+    CPU-bound model work is dispatched to a worker thread.
+    """
+
+    name: str = "unified"
+
+    def __init__(
+        self,
+        space: ParameterSpace,
+        *,
+        buffer: ObservationBuffer | None = None,
+        retrain_threshold: int = 1,
+    ) -> None:
+        self.space = space
+        self.buffer = buffer if buffer is not None else ObservationBuffer()
+        self._retrain_threshold = max(1, retrain_threshold)
+        self._pending_since_train = 0
+        self._log = logging.getLogger(f"{__name__}.{type(self).__name__}")
+
+    # -- feedback channel (the critical addition) --
+
+    async def incremental_observe(
+        self,
+        params: dict[str, Any],
+        objective: float,
+    ) -> None:
+        """Fold one completed run into the model *immediately*.
+
+        Called from the campaign loop's ``on_run_complete`` hook right after a
+        KPI is computed.  Updates the in-memory buffer and -- once enough new
+        observations have accrued -- refreshes the underlying model so the next
+        ``suggest()`` reflects the latest data with zero DB latency.
+        """
+        self.buffer.add(params, objective)
+        self._pending_since_train += 1
+        self._log.info(
+            "incremental_observe",
+            extra={
+                "optimizer": self.name,
+                "objective": float(objective),
+                "buffer_size": len(self.buffer),
+                "pending": self._pending_since_train,
+            },
+        )
+        if self._pending_since_train >= self._retrain_threshold:
+            await self._on_retrain(self.buffer.to_observations())
+            self._pending_since_train = 0
+
+    def seed(self, observations: list[Observation]) -> None:
+        """Warm-start the buffer from DB history (cold-start recovery)."""
+        self.buffer.merge(observations)
+
+    # -- suggestion (shared async wrapper around the abstract sync core) --
+
+    async def suggest(
+        self,
+        n: int,
+        *,
+        observations: list[Observation] | None = None,
+        seed: int | None = None,
+        **kwargs: Any,
+    ) -> SuggestResult:
+        """Return *n* candidates using buffer observations plus any extras.
+
+        ``observations`` are merged with the live buffer so a cold optimizer
+        can still be primed with DB history on the very first call.
+        """
+        obs = self.buffer.to_observations()
+        if observations:
+            extra_keys = {
+                (tuple(sorted(o.params.items())), o.objective) for o in obs
+            }
+            for o in observations:
+                key = (tuple(sorted(o.params.items())), o.objective)
+                if key not in extra_keys:
+                    obs.append(o)
+                    extra_keys.add(key)
+
+        candidates = await asyncio.to_thread(
+            self._suggest_sync, n, obs, seed, kwargs
+        )
+        return SuggestResult(
+            candidates=candidates,
+            backend_name=self.name,
+            n_observations=len(obs),
+            metadata={"requested": n, "returned": len(candidates)},
+        )
+
+    # -- abstract hooks for subclasses --
+
+    @abstractmethod
+    def _suggest_sync(
+        self,
+        n: int,
+        observations: list[Observation],
+        seed: int | None,
+        kwargs: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Synchronous, CPU-bound candidate generation (runs in a thread)."""
+
+    async def _on_retrain(self, observations: list[Observation]) -> None:
+        """Hook invoked when the retrain threshold is crossed. No-op default."""
+        return None
+
+
+class BayesianOptimizer(UnifiedOptimizer):
+    """UnifiedOptimizer backed by a stateless BO backend (default ``built_in``).
+
+    The surrogate is rebuilt from buffer observations on each ``suggest()`` /
+    retrain, so ``incremental_observe()`` makes new KPIs available without the
+    DB polling that ``load_observations_from_db`` previously required.
+    """
+
+    def __init__(
+        self,
+        space: ParameterSpace,
+        *,
+        backend_name: str = "built_in",
+        acquisition: str = "ei",
+        buffer: ObservationBuffer | None = None,
+        retrain_threshold: int = 1,
+    ) -> None:
+        super().__init__(space, buffer=buffer, retrain_threshold=retrain_threshold)
+        self.name = f"bo:{backend_name}"
+        self._backend: BackendProtocol = get_backend(backend_name)
+        self._acquisition = acquisition
+
+    def _suggest_sync(
+        self,
+        n: int,
+        observations: list[Observation],
+        seed: int | None,
+        kwargs: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        call_kwargs = dict(kwargs)
+        call_kwargs.setdefault("acquisition", self._acquisition)
+        t0 = _time.perf_counter()
+        candidates = self._backend.suggest(
+            self.space, n, observations, seed=seed, **call_kwargs
+        )
+        self._log.info(
+            "bo_suggest",
+            extra={
+                "optimizer": self.name,
+                "n_obs": len(observations),
+                "n_returned": len(candidates),
+                "latency_ms": round((_time.perf_counter() - t0) * 1000, 2),
+            },
+        )
+        return candidates
+
+    async def _on_retrain(self, observations: list[Observation]) -> None:
+        # KNN surrogate is rebuilt lazily inside suggest(); nothing to persist.
+        self._log.debug(
+            "bo_buffer_refreshed",
+            extra={"optimizer": self.name, "n_obs": len(observations)},
+        )
+
+
+class RLOptimizer(UnifiedOptimizer):
+    """UnifiedOptimizer backed by the RL strategy selector + experience replay.
+
+    ``suggest()`` asks the RL agent which *backend* to use for the current
+    phase, then delegates candidate generation to that backend.
+    ``incremental_observe()`` pushes the latest run into the agent's experience
+    replay buffer and applies a Q-update, so the policy keeps learning online.
+    """
+
+    def __init__(
+        self,
+        space: ParameterSpace,
+        *,
+        buffer: ObservationBuffer | None = None,
+        retrain_threshold: int = 1,
+        explore: bool = True,
+        selector: Any | None = None,
+        snapshot_provider: Callable[[], Any] | None = None,
+    ) -> None:
+        super().__init__(space, buffer=buffer, retrain_threshold=retrain_threshold)
+        self.name = "rl"
+        self._explore = explore
+        self._snapshot_provider = snapshot_provider
+        self._prev_state: Any | None = None
+        self._prev_action: int | None = None
+        self._prev_best: float | None = None
+
+        if selector is not None:
+            self._selector = selector
+        else:
+            from app.services.rl_strategy_selector import get_rl_selector
+
+            self._selector = get_rl_selector()
+
+    def _current_diagnostics(self) -> tuple[Any, Any]:
+        from app.services.rl_strategy_selector import compute_diagnostics
+
+        if self._snapshot_provider is None:
+            raise RuntimeError(
+                "RLOptimizer requires a snapshot_provider to build campaign state"
+            )
+        snapshot = self._snapshot_provider()
+        diagnostics = compute_diagnostics(snapshot)
+        return snapshot, diagnostics
+
+    def _suggest_sync(
+        self,
+        n: int,
+        observations: list[Observation],
+        seed: int | None,
+        kwargs: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        from app.services.rl_strategy_selector import RLState
+
+        snapshot, diagnostics = self._current_diagnostics()
+        action, backend_name = self._selector.select_action(
+            snapshot, diagnostics, explore=self._explore
+        )
+        # Remember the (state, action) so the next incremental_observe() can
+        # close the loop with a reward.
+        self._prev_state = RLState.from_snapshot(snapshot, diagnostics)
+        self._prev_action = action
+
+        backend = get_backend(backend_name)
+        candidates = backend.suggest(self.space, n, observations, seed=seed, **kwargs)
+        self._log.info(
+            "rl_suggest",
+            extra={
+                "optimizer": self.name,
+                "action": action,
+                "backend": backend_name,
+                "n_obs": len(observations),
+                "n_returned": len(candidates),
+            },
+        )
+        return candidates
+
+    async def _on_retrain(self, observations: list[Observation]) -> None:
+        """Convert the newest observation into an RL transition and learn."""
+        if self._prev_state is None or self._prev_action is None:
+            return  # no suggest() preceded this observation
+
+        from app.services.rl_strategy_selector import RLState
+
+        best = max((o.objective for o in observations), default=None)
+        if best is None:
+            return
+        prev_best = self._prev_best if self._prev_best is not None else best
+        cfg = self._selector.config
+        reward = (best - prev_best) * cfg.kpi_improvement_scale + cfg.round_cost
+        self._prev_best = best
+
+        next_state: Any | None = None
+        done = False
+        try:
+            snapshot, diagnostics = self._current_diagnostics()
+            next_state = RLState.from_snapshot(snapshot, diagnostics)
+            done = snapshot.round_number >= snapshot.max_rounds
+        except RuntimeError:
+            pass  # no snapshot provider; terminal transition
+
+        await asyncio.to_thread(
+            self._selector.learn_from_experience,
+            self._prev_state,
+            self._prev_action,
+            reward,
+            next_state,
+            done,
+        )
+        self._log.info(
+            "rl_online_update",
+            extra={
+                "optimizer": self.name,
+                "action": self._prev_action,
+                "reward": round(reward, 4),
+                "done": done,
+            },
+        )
+
+
+# ---------------------------------------------------------------------------
+# Facade factory
+# ---------------------------------------------------------------------------
+
+@register_backend
+class GPBackend:
+    """Research-grade GP backend (ARD-Matern52, multiple acquisition functions).
+
+    Replaces BuiltInBO as the default when sufficient observations exist (≥ 5×n_dims).
+    Falls back to BuiltInBO automatically when gp_surrogate is unavailable.
+    """
+
+    name = "gp_backend"
+
+    def suggest(
+        self,
+        space: ParameterSpace,
+        n: int,
+        observations: list[Observation],
+        *,
+        seed: int | None = None,
+        acquisition: str = "ei",
+        optimize_hyperparams: bool = True,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        try:
+            from app.services.gp_surrogate import sample_bo_gp
+            return sample_bo_gp(
+                space, n, observations,
+                acquisition=acquisition,
+                seed=seed,
+                optimize_hyperparams=optimize_hyperparams and len(observations) >= 10,
+            )
+        except ImportError:
+            logger.warning("gp_surrogate not available, falling back to built_in")
+            return _BACKENDS["built_in"]().suggest(space, n, observations, seed=seed)
+
+    @staticmethod
+    def is_available() -> bool:
+        try:
+            from app.services.gp_surrogate import GPSurrogate  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
+
+def build_optimizer(
+    space: ParameterSpace,
+    *,
+    mode: str = "bayesian",
+    buffer: ObservationBuffer | None = None,
+    retrain_threshold: int = 1,
+    **kwargs: Any,
+) -> UnifiedOptimizer:
+    """Construct a :class:`UnifiedOptimizer` for a campaign.
+
+    ``mode`` is ``"bayesian"`` or ``"rl"``.  The returned object is stateful and
+    should be cached per-campaign so its ObservationBuffer / RL state persists
+    across rounds.
+    """
+    mode_norm = mode.strip().lower()
+    if mode_norm in ("bayesian", "bo", "built_in"):
+        return BayesianOptimizer(
+            space, buffer=buffer, retrain_threshold=retrain_threshold, **kwargs
+        )
+    if mode_norm in ("rl", "reinforcement"):
+        return RLOptimizer(
+            space, buffer=buffer, retrain_threshold=retrain_threshold, **kwargs
+        )
+    raise ValueError(f"Unknown optimizer mode '{mode}'. Use 'bayesian' or 'rl'.")

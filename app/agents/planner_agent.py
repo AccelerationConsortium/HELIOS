@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import uuid
 import logging
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
 from app.agents.base import BaseAgent, DecisionNode
+from app.agents.design_agent import AgentCapability
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,12 @@ class PlannerAgent(BaseAgent[PlannerInput, PlannerOutput]):
     name = "planner_agent"
     description = "Multi-round campaign planning"
     layer = "L2"
+
+    capabilities: ClassVar[list[AgentCapability]] = [
+        AgentCapability("planning.campaign",    "Campaign-level experimental planning"),
+        AgentCapability("planning.schedule",    "Round scheduling and sequencing"),
+        AgentCapability("planning.resource",    "Resource allocation planning"),
+    ]
 
     def validate_input(self, input_data: PlannerInput) -> list[str]:
         errors = []

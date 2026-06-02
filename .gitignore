@@ -55,3 +55,6 @@ recovery-agent/presentation/
 .vscode/
 *.swp
 *.swo
+
+# Local backup files created during refactors
+*.bak

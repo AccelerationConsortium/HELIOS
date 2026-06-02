@@ -19,6 +19,7 @@ from app.services.contract_bridge import (
     injection_pack_to_task_contract,
     task_contract_to_orchestrator_input,
 )
+from app.services.durable_execution import get_durable_backend
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,46 @@ async def _run_orchestrator(campaign_id: str, orch_input: OrchestratorInput) -> 
         _campaign_errors[campaign_id] = str(exc)
 
 
+def _track_orchestrator_task(campaign_id: str, task: asyncio.Task) -> None:
+    """Populate legacy in-memory result stores from a durable backend task."""
+
+    def _done(done: asyncio.Task) -> None:
+        try:
+            output = done.result()
+            if isinstance(output, OrchestratorOutput):
+                _campaign_results[campaign_id] = output
+            else:
+                _campaign_errors[campaign_id] = "Unexpected orchestrator result"
+        except asyncio.CancelledError:
+            _campaign_errors[campaign_id] = "Campaign cancelled"
+        except Exception as exc:
+            logger.exception("Orchestrator campaign %s failed", campaign_id)
+            _campaign_errors[campaign_id] = str(exc)
+
+    task.add_done_callback(_done)
+
+
+async def _start_durable_campaign(
+    campaign_id: str,
+    orch_input: OrchestratorInput,
+    *,
+    resume_from_round: int | None = None,
+    restored_state: dict[str, Any] | None = None,
+) -> None:
+    backend = get_durable_backend()
+    await backend.start_campaign(
+        orch_input,
+        resume_from_round=resume_from_round,
+        restored_state=restored_state,
+    )
+    get_task = getattr(backend, "get_task", None)
+    if callable(get_task):
+        task = get_task(campaign_id)
+        if task is not None:
+            _running_campaigns[campaign_id] = task
+            _track_orchestrator_task(campaign_id, task)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -127,11 +168,7 @@ async def orchestrate_start(payload: OrchestrateRequest) -> OrchestrateStartResp
         campaign_id=campaign_id,
     )
 
-    task = asyncio.create_task(
-        _run_orchestrator(campaign_id, orch_input),
-        name=f"orchestrator-{campaign_id}",
-    )
-    _running_campaigns[campaign_id] = task
+    await _start_durable_campaign(campaign_id, orch_input)
 
     return OrchestrateStartResponse(campaign_id=campaign_id, status="started")
 
@@ -175,11 +212,7 @@ async def orchestrate_from_session(
     orch_kwargs = task_contract_to_orchestrator_input(task_contract)
     orch_kwargs["campaign_id"] = campaign_id
     orch_input = OrchestratorInput(**orch_kwargs)
-    task = asyncio.create_task(
-        _run_orchestrator(campaign_id, orch_input),
-        name=f"orchestrator-{campaign_id}",
-    )
-    _running_campaigns[campaign_id] = task
+    await _start_durable_campaign(campaign_id, orch_input)
 
     contract_summary = {
         "contract_id": task_contract.contract_id,
@@ -302,7 +335,7 @@ async def orchestrate_stop(campaign_id: str) -> dict:
 @router.post("/{campaign_id}/resume", response_model=OrchestrateStartResponse)
 async def orchestrate_resume(campaign_id: str) -> OrchestrateStartResponse:
     """Resume a paused/crashed campaign from its last checkpoint."""
-    from app.services.campaign_state import load_campaign
+    from app.services.campaign_state import load_campaign, load_completed_candidates
 
     # Reject if already running in memory
     task = _running_campaigns.get(campaign_id)
@@ -319,20 +352,17 @@ async def orchestrate_resume(campaign_id: str) -> OrchestrateStartResponse:
             detail=f"Campaign already {db_state['status']}, cannot resume",
         )
 
-    async def _resume(cid: str) -> None:
-        agent = OrchestratorAgent()
-        try:
-            result = await agent.resume_campaign(cid)
-            _campaign_results[cid] = result
-        except Exception as exc:
-            logger.exception("Resume campaign %s failed", cid)
-            _campaign_errors[cid] = str(exc)
+    orch_input = OrchestratorInput(**db_state["input"])
+    orch_input.campaign_id = campaign_id
+    restored_state = load_completed_candidates(campaign_id)
+    start_round_num = db_state["current_round"] or 1
 
-    task = asyncio.create_task(
-        _resume(campaign_id),
-        name=f"orchestrator-resume-{campaign_id}",
+    await _start_durable_campaign(
+        campaign_id,
+        orch_input,
+        resume_from_round=start_round_num,
+        restored_state=restored_state,
     )
-    _running_campaigns[campaign_id] = task
 
     return OrchestrateStartResponse(campaign_id=campaign_id, status="resuming")
 

@@ -7,6 +7,33 @@ Layers:
 1. **Episodic**: Raw per-step records (run X used primitive Y with params Z → succeeded/failed)
 2. **Semantic**: Aggregated facts (success rates, parameter priors via Welford's algorithm)
 3. **Procedural**: Repair/fallback recipes (if primitive X fails with error Y → recovery steps)
+
+Listener lifecycle
+------------------
+The async write path is driven by a single :class:`MemoryListener` subscribed
+to ``run.completed`` events on the event bus.  Historically this module held a
+bare module-level ``_listener_task`` that was overwritten — but never cancelled
+— on every ``start_memory_listener()`` call.  When a campaign was resumed or
+restarted, each invocation leaked the prior task: the orphaned coroutine kept
+its ``Subscription`` registered on the bus, kept consuming dispatched events,
+and kept writing to memory tables under a stale campaign context.  Over many
+resumes this produced unbounded task growth (OOM risk) and cross-campaign state
+leakage (data corruption risk).
+
+:class:`MemoryListener` fixes this by:
+
+1. Tracking the ``campaign_id`` bound to the live listener.
+2. Making :meth:`MemoryListener.start` idempotent — a second start for the same
+   campaign returns the existing subscription instead of spawning a duplicate.
+3. Enforcing a single live listener: starting for a *different* campaign
+   cancels and unsubscribes the previous one first (lazy re-initialisation).
+4. Exposing explicit lifecycle state so tests can assert clean teardown
+   between campaigns.
+
+The module-level :func:`start_memory_listener` / :func:`stop_memory_listener`
+helpers remain for backward compatibility with ``app.main`` — they delegate to a
+process-wide singleton, but the class itself is dependency-injectable and holds
+no hidden global state, so unit tests can construct isolated instances.
 """
 from __future__ import annotations
 
@@ -14,10 +41,10 @@ import asyncio
 import logging
 import math
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from app.core.db import connection, json_dumps, parse_json, run_txn, utcnow_iso
+from app.core.db import json_dumps, parse_json, run_txn, utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -510,9 +537,6 @@ def format_memory_for_prompt(primitives: list[str] | None = None) -> str:
 # ---------------------------------------------------------------------------
 
 
-_listener_task: asyncio.Task[None] | None = None
-
-
 async def _on_run_completed(run_id: str) -> None:
     """Process a completed run: extract episodes → update semantics → detect repairs."""
     try:
@@ -525,37 +549,142 @@ async def _on_run_completed(run_id: str) -> None:
         logger.warning("Memory extraction failed for run %s", run_id, exc_info=True)
 
 
-async def start_memory_listener(bus: Any) -> Any:
-    """Subscribe to the event bus and process run.completed events.
+class MemoryListener:
+    """Single-instance, campaign-aware async listener for the memory write path.
 
-    Returns the Subscription handle for cleanup.
+    Holds no module-level global state — construct one per process (or per test)
+    and inject the event bus into :meth:`start`.  The instance guarantees that
+    at most one live subscription + task pair exists at a time, eliminating the
+    task-leak / cross-campaign-leakage class of bugs.
     """
-    global _listener_task
 
-    sub = await bus.subscribe(run_id=None)  # global subscription
+    def __init__(self) -> None:
+        self._task: asyncio.Task[None] | None = None
+        self._sub: Any | None = None
+        self._bus: Any | None = None
+        self._campaign_id: str | None = None
+        # Serialises concurrent start/stop calls (e.g. overlapping campaign
+        # resume + shutdown) so we never race on the task/sub fields.
+        self._lock = asyncio.Lock()
 
-    async def _listen() -> None:
+    # -- introspection (used by tests + diagnostics) -------------------------
+
+    @property
+    def is_running(self) -> bool:
+        """True iff a live listener task is currently active."""
+        return self._task is not None and not self._task.done()
+
+    @property
+    def campaign_id(self) -> str | None:
+        """The campaign currently bound to the live listener, if any."""
+        return self._campaign_id
+
+    # -- lifecycle -----------------------------------------------------------
+
+    async def start(self, bus: Any, campaign_id: str | None = None) -> Any:
+        """Subscribe to the bus and begin processing ``run.completed`` events.
+
+        Idempotent and deduplicating:
+
+        * If a listener is already live for the same *campaign_id* (including
+          the ``None`` global case), the existing subscription is returned and
+          **no** new task is created.
+        * If a listener is live for a *different* campaign, it is cancelled and
+          unsubscribed first, then a fresh one is created (lazy re-init).  This
+          enforces a single global listener and prevents orphaned tasks from
+          accumulating across campaign resumes/restarts.
+        """
+        async with self._lock:
+            if self.is_running:
+                if self._campaign_id == campaign_id:
+                    logger.debug(
+                        "Memory listener already running for campaign %s — reusing",
+                        campaign_id,
+                    )
+                    return self._sub
+                logger.info(
+                    "Memory listener rebinding campaign %s → %s — cancelling prior listener",
+                    self._campaign_id,
+                    campaign_id,
+                )
+                await self._teardown_locked()
+
+            sub = await bus.subscribe(run_id=None)  # global subscription
+            self._sub = sub
+            self._bus = bus
+            self._campaign_id = campaign_id
+            self._task = asyncio.create_task(
+                self._listen(sub),
+                name=f"memory-listener:{campaign_id or 'global'}",
+            )
+            logger.info("Memory listener started for campaign %s", campaign_id)
+            return sub
+
+    async def stop(self) -> None:
+        """Cancel the listener task and unsubscribe.  Safe to call when idle."""
+        async with self._lock:
+            await self._teardown_locked()
+
+    async def _teardown_locked(self) -> None:
+        """Cancel + unsubscribe the live listener.  Caller must hold ``_lock``."""
+        sub, bus, task = self._sub, self._bus, self._task
+        self._sub = None
+        self._bus = None
+        self._task = None
+        self._campaign_id = None
+
+        if sub is not None:
+            try:
+                sub.cancel()
+            except Exception:
+                logger.debug("Memory listener subscription cancel failed", exc_info=True)
+        if sub is not None and bus is not None:
+            try:
+                await bus.unsubscribe(sub)
+            except Exception:
+                logger.debug("Memory listener unsubscribe failed", exc_info=True)
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.debug("Memory listener task raised on shutdown", exc_info=True)
+
+    async def _listen(self, sub: Any) -> None:
         async for event in sub:
             if event.action == "run.completed":
                 run_id = event.run_id
                 if run_id:
                     await _on_run_completed(run_id)
 
-    _listener_task = asyncio.create_task(_listen())
-    return sub
+
+# ---------------------------------------------------------------------------
+# Process-wide singleton + backward-compatible helpers
+# ---------------------------------------------------------------------------
+#
+# ``app.main`` calls the module-level helpers below.  They delegate to a single
+# shared :class:`MemoryListener` so the legacy call sites keep working while the
+# class remains independently constructible for unit tests.
+
+_default_listener = MemoryListener()
 
 
-async def stop_memory_listener(sub: Any, bus: Any) -> None:
-    """Cancel the memory listener and unsubscribe."""
-    global _listener_task
+async def start_memory_listener(bus: Any, campaign_id: str | None = None) -> Any:
+    """Start the process-wide memory listener.  Returns the Subscription handle.
 
-    sub.cancel()
-    await bus.unsubscribe(sub)
+    Backward compatible with the previous signature ``start_memory_listener(bus)``.
+    Repeated calls no longer leak tasks — see :meth:`MemoryListener.start`.
+    """
+    return await _default_listener.start(bus, campaign_id=campaign_id)
 
-    if _listener_task is not None:
-        _listener_task.cancel()
-        try:
-            await _listener_task
-        except asyncio.CancelledError:
-            pass
-        _listener_task = None
+
+async def stop_memory_listener(sub: Any | None = None, bus: Any | None = None) -> None:
+    """Stop the process-wide memory listener.
+
+    *sub* and *bus* are accepted for signature compatibility with the previous
+    implementation but are no longer required — the listener owns its own
+    subscription and bus references.
+    """
+    await _default_listener.stop()

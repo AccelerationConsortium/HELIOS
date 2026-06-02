@@ -15,7 +15,7 @@ import time
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Generic, TypeVar
+from typing import Any, Awaitable, Callable, ClassVar, Generic, TypeVar
 
 from pydantic import BaseModel
 
@@ -32,6 +32,18 @@ logger = logging.getLogger(__name__)
 
 InputT = TypeVar("InputT", bound=BaseModel)
 OutputT = TypeVar("OutputT", bound=BaseModel)
+
+
+@dataclass(frozen=True)
+class AgentCapability:
+    name: str   # e.g. "hypothesis.bayesian", "spectral.xrd", "protocol.opentrons"
+    description: str = ""
+    min_confidence: float = 0.0  # self-reported calibration score 0-1
+
+    @property
+    def tag(self) -> str:
+        """Alias for 'name' — backward compatibility."""
+        return self.name
 
 
 @dataclass(frozen=True)
@@ -96,7 +108,8 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
 
     name: str = "base_agent"
     description: str = ""
-    layer: str = ""  # L0, L1, L2, L3, or "cross-cutting"
+    layer: ClassVar[str] = "L0"  # L0, L1, L2, L3, or "cross-cutting"
+    capabilities: ClassVar[list[AgentCapability]] = []
 
     def __init__(self) -> None:
         self.logger = logging.getLogger(f"agent.{self.name}")
@@ -105,6 +118,26 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
         self._call: Callable[..., Awaitable[AgentResult]] | None = None
         # Accumulated during a single run() invocation
         self._run_pause_decisions: list[dict[str, Any]] = []
+
+    def has_capability(self, tag: str) -> bool:
+        """Return True if any declared capability matches ``tag``.
+
+        Matching is exact or prefix-based: a query of ``"hypothesis"`` matches
+        a declared capability of ``"hypothesis.bayesian"``.
+        """
+        for cap in self.capabilities:
+            cap_name = cap.name if hasattr(cap, 'name') else cap.tag
+            if cap_name == tag or cap_name.startswith(f"{tag}."):
+                return True
+        return False
+
+    @classmethod
+    def capability_tags(cls) -> list[str]:
+        """Return the list of all declared capability tag strings."""
+        return [
+            (cap.name if hasattr(cap, 'name') else cap.tag)
+            for cap in cls.capabilities
+        ]
 
     @abstractmethod
     def validate_input(self, input_data: InputT) -> list[str]:

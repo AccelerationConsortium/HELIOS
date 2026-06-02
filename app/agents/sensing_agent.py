@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
 from app.agents.base import BaseAgent
+from app.agents.design_agent import AgentCapability
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +259,12 @@ class SensingAgent(BaseAgent[SensingInput, SensingOutput]):
     description = "Mid-run quality control and anomaly detection"
     layer = "L0"
 
+    capabilities: ClassVar[list[AgentCapability]] = [
+        AgentCapability("sensing.realtime",    "Real-time instrument sensor reading"),
+        AgentCapability("sensing.anomaly",     "Anomaly detection in sensor streams"),
+        AgentCapability("spectral.raw",        "Raw spectral data acquisition"),
+    ]
+
     def validate_input(self, input_data: SensingInput) -> list[str]:
         errors: list[str] = []
         if not input_data.step_key:
@@ -353,9 +360,23 @@ class SensingAgent(BaseAgent[SensingInput, SensingOutput]):
             quality = "good"
             recommendation = "continue"
 
-        return SensingOutput(
+        output = SensingOutput(
             overall_quality=quality,
             checks=checks,
             anomalies_detected=anomalies,
             recommendation=recommendation,
         )
+
+        # 5. Optional blackboard integration: publish detected anomalies so other
+        # agents can react. Only fires if a blackboard has been wired up.
+        if hasattr(self, '_blackboard') and self._blackboard is not None:
+            if anomalies:
+                import asyncio
+                asyncio.create_task(self._blackboard.write(
+                    "sensing.anomaly",
+                    {"type": "sensor_anomaly", "detail": str(output)},
+                    author=self.name,
+                    confidence=0.85,
+                ))
+
+        return output

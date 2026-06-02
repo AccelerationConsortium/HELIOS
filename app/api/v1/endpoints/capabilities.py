@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Query
 
+from app.services.mcp_manifest import build_mcp_manifest
 from app.services.primitives_registry import get_registry
 
 router = APIRouter(tags=["capabilities"])
@@ -95,3 +96,9 @@ async def capabilities_summary() -> dict[str, str]:
     """Return an LLM-friendly text summary of all capabilities."""
     registry = get_registry()
     return {"summary": registry.summary_for_llm()}
+
+
+@router.get("/capabilities/mcp")
+async def mcp_capabilities_manifest() -> dict[str, Any]:
+    """Return an MCP-style tools/resources manifest for agent runtimes."""
+    return build_mcp_manifest()

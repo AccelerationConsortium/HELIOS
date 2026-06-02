@@ -9,15 +9,25 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
 from app.agents.base import BaseAgent
 from app.agents.capability_agent import CapabilitySnapshot
+from app.agents.design_agent import AgentCapability
 from app.contracts.workflow_ir import WorkflowGraph
 
 logger = logging.getLogger(__name__)
+
+
+# Adversarial reviewer system prompt (used when mode == "adversarial").
+ADVERSARIAL_SYSTEM_PROMPT = (
+    "You are an adversarial reviewer. Actively try to find flaws, errors, and "
+    "reasons why the following hypothesis is WRONG or physically implausible. "
+    "List specific refutations. If you cannot find any, return an empty "
+    "refutations list."
+)
 
 
 # ── Sub-models ─────────────────────────────────────────────────────────────
@@ -40,6 +50,10 @@ class ValidationInput(BaseModel):
     workflow: WorkflowGraph
     capability: CapabilitySnapshot
     compiled_protocol: dict[str, Any] | None = None
+    mode: str = Field(default="standard",
+        description="'standard' for compliance check, 'adversarial' to actively seek refutations")
+    hypothesis: str = Field(default="",
+        description="The hypothesis text to validate/refute in adversarial mode")
 
 
 class ValidationOutput(BaseModel):
@@ -50,6 +64,10 @@ class ValidationOutput(BaseModel):
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     simulation_error_raw: str | None = None
+    refutations: list[str] = Field(default_factory=list,
+        description="Specific refutations found (non-empty only in adversarial mode)")
+    confidence: float = Field(default=0.8,
+        description="Validator's confidence in its assessment (0-1)")
 
 
 # ── Agent Implementation ───────────────────────────────────────────────────
@@ -66,6 +84,12 @@ class ValidationAgent(BaseAgent[ValidationInput, ValidationOutput]):
     description = "3-tier workflow validation (semantic, capability, simulation)"
     layer = "L1"
 
+    capabilities: ClassVar[list[AgentCapability]] = [
+        AgentCapability("validation.physical_plausibility", "Physical plausibility checking"),
+        AgentCapability("validation.adversarial",           "Adversarial hypothesis refutation"),
+        AgentCapability("validation.safety_check",          "Safety envelope validation"),
+    ]
+
     def validate_input(self, input_data: ValidationInput) -> list[str]:
         errors: list[str] = []
         if not input_data.workflow or not input_data.workflow.steps:
@@ -80,6 +104,12 @@ class ValidationAgent(BaseAgent[ValidationInput, ValidationOutput]):
         all_errors: list[str] = []
         all_warnings: list[str] = []
         sim_error_raw: str | None = None
+
+        # In adversarial mode, the validator actively seeks refutations of the
+        # hypothesis. The adversarial system prompt drives the LLM-backed review.
+        adversarial = input_data.mode == "adversarial"
+        system_prompt = ADVERSARIAL_SYSTEM_PROMPT if adversarial else None
+        refutations: list[str] = []
 
         # ── Tier 1: Semantic validation ────────────────────────────────────
         tier1 = self._validate_semantic(workflow)
@@ -129,12 +159,17 @@ class ValidationAgent(BaseAgent[ValidationInput, ValidationOutput]):
         if not tier3_passed:
             all_errors.extend(tier3_findings)
 
+        # In adversarial mode, surface concrete validation failures as
+        # refutations of the hypothesis under review.
+        if adversarial:
+            refutations = list(all_errors)
+
         # ── Overall result ─────────────────────────────────────────────────
         passed = all([t.passed for t in tier_results])
 
         logger.info(
-            "validation_agent: workflow=%s passed=%s tier1=%s tier2=%s tier3=%s",
-            workflow.graph_id, passed, tier_results[0].passed,
+            "validation_agent: workflow=%s mode=%s passed=%s tier1=%s tier2=%s tier3=%s",
+            workflow.graph_id, input_data.mode, passed, tier_results[0].passed,
             tier_results[1].passed, tier_results[2].passed,
         )
 
@@ -152,6 +187,7 @@ class ValidationAgent(BaseAgent[ValidationInput, ValidationOutput]):
             errors=all_errors,
             warnings=all_warnings,
             simulation_error_raw=sim_error_raw,
+            refutations=refutations,
         )
 
     # ── Tier 1: Semantic Validation ────────────────────────────────────────
