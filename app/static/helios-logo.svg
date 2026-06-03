@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+       viewBox="0 0 620 104" width="620" height="104"
+       role="img" aria-label="HELIOS">
+    <defs>
+      <pattern id="gs" width="10" height="10" patternUnits="userSpaceOnUse">
+        <path d="M10 0H0V10" fill="none" stroke="#0d1e40" stroke-width=".4"/>
+      </pattern>
+      <pattern id="gl" width="50" height="50" patternUnits="userSpaceOnUse">
+        <rect width="50" height="50" fill="url(#gs)"/>
+        <path d="M50 0H0V50" fill="none" stroke="#122040" stroke-width=".8"/>
+      </pattern>
+      <pattern id="hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <line x1="0" y1="0" x2="0" y2="4" stroke="#1a3a70" stroke-width="1.2"/>
+      </pattern>
+      <filter id="fi" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur stdDeviation="2" result="b"/>
+        <feFlood flood-color="#f97316" flood-opacity=".45" result="c"/>
+        <feComposite in="c" in2="b" operator="in" result="g"/>
+        <feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="fo" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur stdDeviation="2" result="b"/>
+        <feFlood flood-color="#22d3ee" flood-opacity=".45" result="c"/>
+        <feComposite in="c" in2="b" operator="in" result="g"/>
+        <feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
+
+    <rect width="620" height="104" fill="#050d1e" rx="8"/>
+    <rect width="620" height="104" fill="url(#gl)" rx="8" opacity=".9"/>
+
+    <!-- Trajectory (liquid path) -->
+    <path d="M14 52 C32 52 44 52 60 52 C76 52 82 28 96 28 C112 28 118 52 134 52
+             C148 52 158 68 176 64 C190 60 198 68 214 68 L240 68
+             C258 68 272 52 304 44 C316 42 320 44 330 44
+             C356 44 368 68 400 58 C416 53 424 68 456 56
+             C468 52 476 52 492 52 C508 40 512 28 536 28
+             C548 28 556 40 566 52 L596 52"
+          fill="none" stroke="#102040" stroke-width="1" stroke-dasharray="3 4.5"/>
+    <circle cx="14" cy="52" r="2.5" fill="#162a50" opacity=".8"/>
+
+    <!-- ══ H — clean strokes only ══ -->
+    <g id="H1" transform="translate(24,20)">
+      <line x1="12" y1="4"  x2="12" y2="60" stroke="#8aaac8" stroke-width="2.8" stroke-linecap="round"/>
+      <line x1="66" y1="4"  x2="66" y2="60" stroke="#8aaac8" stroke-width="2.8" stroke-linecap="round"/>
+      <line x1="12" y1="32" x2="66" y2="32" stroke="#8aaac8" stroke-width="2.8" stroke-linecap="round"/>
+    </g>
+
+    <!-- ══ E — multi-agent swarm topology ══
+         Backbone = ControlPlane event bus
+         Three arms = three specialist swarm dispatch lanes
+         Circles = individual agent instances                -->
+    <g id="E1" transform="translate(116,20)">
+      <!-- Backbone (ControlPlane) -->
+      <line x1="10" y1="4" x2="10" y2="60" stroke="#8aaac8" stroke-width="2.8" stroke-linecap="round"/>
+
+      <!-- ── Top arm: Scientist + Engineer swarm (3 agents) ── -->
+      <line x1="10" y1="4" x2="60" y2="4" stroke="#8aaac8" stroke-width="2.8" stroke-linecap="round"/>
+      <!-- Dispatch tick from backbone -->
+      <line x1="10" y1="4" x2="10" y2="10" stroke="#2a5080" stroke-width=".8"/>
+      <!-- Agent nodes -->
+      <circle cx="28" cy="4" r="4.2" fill="#080f1e" stroke="#5a8ab0" stroke-width="1.5"/>
+      <circle cx="44" cy="4" r="4.2" fill="#080f1e" stroke="#5a8ab0" stroke-width="1.5"/>
+      <!-- Lead agent (slightly larger, brighter) -->
+      <circle cx="58" cy="4" r="5"   fill="#0c1828" stroke="#78aed0" stroke-width="1.8"/>
+      <!-- Pulse ring on lead agent -->
+      <circle cx="58" cy="4" r="8"   fill="none"   stroke="#3a7090" stroke-width=".7" stroke-dasharray="2 2" opacity=".65"/>
+      <!-- Inter-agent comm links (dotted) -->
+      <line x1="32" y1="4" x2="40" y2="4" stroke="#1e3860" stroke-width=".9" stroke-dasharray="1.5 2"/>
+      <line x1="48" y1="4" x2="53" y2="4" stroke="#1e3860" stroke-width=".9" stroke-dasharray="1.5 2"/>
+      <!-- Label -->
+      <text x="14" y="-2" font-family="'JetBrains Mono',monospace" font-size="5"
+            fill="#1e3860" letter-spacing=".08em">×3 SCIENTIST</text>
+
+      <!-- ── Middle arm: Analyst + Optimizer (2 agents, shorter) ── -->
+      <line x1="10" y1="32" x2="48" y2="32" stroke="#8aaac8" stroke-width="2.8" stroke-linecap="round"/>
+      <circle cx="26" cy="32" r="4.2" fill="#080f1e" stroke="#5a8ab0" stroke-width="1.5"/>
+      <circle cx="46" cy="32" r="4.2" fill="#080f1e" stroke="#5a8ab0" stroke-width="1.5"/>
+      <line x1="30" y1="32" x2="42" y2="32" stroke="#1e3860" stroke-width=".9" stroke-dasharray="1.5 2"/>
+      <text x="52" y="35" font-family="'JetBrains Mono',monospace" font-size="5"
+            fill="#1e3860" letter-spacing=".06em">×2</text>
+
+      <!-- ── Bottom arm: Executor agents (3 agents) ── -->
+      <line x1="10" y1="60" x2="60" y2="60" stroke="#8aaac8" stroke-width="2.8" stroke-linecap="round"/>
+      <circle cx="24" cy="60" r="4.2" fill="#080f1e" stroke="#5a8ab0" stroke-width="1.5"/>
+      <circle cx="40" cy="60" r="4.2" fill="#080f1e" stroke="#5a8ab0" stroke-width="1.5"/>
+      <circle cx="56" cy="60" r="4.2" fill="#080f1e" stroke="#5a8ab0" stroke-width="1.5"/>
+      <line x1="28" y1="60" x2="36" y2="60" stroke="#1e3860" stroke-width=".9" stroke-dasharray="1.5 2"/>
+      <line x1="44" y1="60" x2="52" y2="60" stroke="#1e3860" stroke-width=".9" stroke-dasharray="1.5 2"/>
+      <text x="14" y="72" font-family="'JetBrains Mono',monospace" font-size="5"
+            fill="#1e3860" letter-spacing=".08em">×3 EXECUTOR</text>
+    </g>
+
+    <!-- ══ L — pipette ══ (unchanged) -->
+    <g id="L1" transform="translate(208,20)">
+      <line x1="12" y1="4"  x2="12" y2="60" stroke="#8aaac8" stroke-width="2.8" stroke-linecap="round"/>
+      <line x1="12" y1="60" x2="62" y2="60" stroke="#8aaac8" stroke-width="2.8" stroke-linecap="round"/>
+      <g stroke="#1e3a60" stroke-width=".8">
+        <line x1="4" y1="15" x2="12" y2="15"/>
+        <line x1="4" y1="27" x2="12" y2="27"/>
+        <line x1="4" y1="40" x2="12" y2="40"/>
+        <line x1="4" y1="52" x2="12" y2="52"/>
+      </g>
+      <line x1="12" y1="8" x2="12" y2="32" stroke="#1a3a5a" stroke-width="1.2" stroke-dasharray="2 2"/>
+      <circle cx="12" cy="60" r="3.5" fill="#080f20" stroke="#4a7090" stroke-width="1.2"/>
+      <path d="M 58,56 L 66,60 L 58,64" fill="#06101e" stroke="#6090b0" stroke-width="1.2"/>
+      <circle cx="67" cy="72" r="3"   fill="none" stroke="#2060a0" stroke-width="1" stroke-dasharray="2 1"/>
+      <line  x1="66" y1="64" x2="67" y2="69" stroke="#1e4060" stroke-width=".8"/>
+      <text x="1" y="16" font-family="'JetBrains Mono',monospace" font-size="4.5"
+            fill="#1a3050" text-anchor="end">200</text>
+      <text x="1" y="53" font-family="'JetBrains Mono',monospace" font-size="4.5"
+            fill="#1a3050" text-anchor="end">10</text>
+    </g>
+
+    <!-- ══ I — UR5 arm ══ (unchanged) -->
+    <g id="I1" transform="translate(300,14)" filter="url(#fi)">
+      <rect x="8" y="70" width="44" height="8" rx="2.5"
+            fill="#0c1820" stroke="#f97316" stroke-width="1.5"/>
+      <line x1="0" y1="74" x2="8" y2="74" stroke="#f97316" stroke-width=".8" opacity=".5"/>
+      <line x1="52" y1="74" x2="60" y2="74" stroke="#f97316" stroke-width=".8" opacity=".5"/>
+      <line x1="30" y1="70" x2="30" y2="10" stroke="#d4804a" stroke-width="1.8"/>
+      <circle cx="30" cy="65" r="7"  fill="#0a1218" stroke="#f97316" stroke-width="2"/>
+      <circle cx="30" cy="65" r="2.5" fill="#f97316" opacity=".7"/>
+      <text x="42" y="68" font-family="'JetBrains Mono',monospace" font-size="5" fill="#7a4010">J1</text>
+      <line x1="37" y1="65" x2="41" y2="65" stroke="#7a4010" stroke-width=".7"/>
+      <circle cx="30" cy="44" r="6"  fill="#0a1218" stroke="#f97316" stroke-width="1.8"/>
+      <circle cx="30" cy="44" r="2"  fill="#f97316" opacity=".6"/>
+      <text x="41" y="47" font-family="'JetBrains Mono',monospace" font-size="5" fill="#6a3808">J2</text>
+      <line x1="36" y1="44" x2="40" y2="44" stroke="#6a3808" stroke-width=".7"/>
+      <circle cx="30" cy="25" r="5"  fill="#0a1218" stroke="#fb923c" stroke-width="1.5"/>
+      <circle cx="30" cy="25" r="1.8" fill="#fb923c" opacity=".55"/>
+      <text x="40" y="28" font-family="'JetBrains Mono',monospace" font-size="5" fill="#5a3006">J3</text>
+      <line x1="35" y1="25" x2="39" y2="25" stroke="#5a3006" stroke-width=".7"/>
+      <rect x="16" y="6" width="28" height="9" rx="2"
+            fill="#0c1820" stroke="#fb923c" stroke-width="1.3"/>
+      <line x1="24" y1="6"  x2="24" y2="15" stroke="#5a3006" stroke-width=".8"/>
+      <line x1="30" y1="6"  x2="30" y2="15" stroke="#5a3006" stroke-width=".8"/>
+      <line x1="36" y1="6"  x2="36" y2="15" stroke="#5a3006" stroke-width=".8"/>
+      <line x1="2"  y1="10" x2="2" y2="70"  stroke="#5a3006" stroke-width=".8" stroke-dasharray="2 2"/>
+      <line x1="0"  y1="10" x2="4" y2="10"  stroke="#5a3006" stroke-width=".8"/>
+      <line x1="0"  y1="70" x2="4" y2="70"  stroke="#5a3006" stroke-width=".8"/>
+    </g>
+
+    <!-- ══ O — OT-2 deck ══ (unchanged) -->
+    <g id="O1" transform="translate(388,14)" filter="url(#fo)">
+      <rect x="4" y="4" width="68" height="72" rx="8"
+            fill="#040e1c" stroke="#8aaac8" stroke-width="2"/>
+      <rect x="10" y="10" width="56" height="60" rx="4"
+            fill="none" stroke="#122240" stroke-width=".8" stroke-dasharray="3 2"/>
+      <g fill="#0a1828" stroke="#1a3050" stroke-width=".8">
+        <circle cx="24" cy="24" r="4"/> <circle cx="38" cy="24" r="4"/> <circle cx="52" cy="24" r="4"/>
+        <circle cx="24" cy="40" r="4"/> <circle cx="38" cy="40" r="4"/> <circle cx="52" cy="40" r="4"/>
+        <circle cx="24" cy="56" r="4"/> <circle cx="38" cy="56" r="4"/> <circle cx="52" cy="56" r="4"/>
+      </g>
+      <line x1="8"  y1="40" x2="68" y2="40" stroke="#22d3ee" stroke-width="1.6" stroke-dasharray="5 3"/>
+      <line x1="38" y1="8"  x2="38" y2="72" stroke="#22d3ee" stroke-width="1.6" stroke-dasharray="5 3" opacity=".7"/>
+      <circle cx="38" cy="40" r="5.5" fill="#04101e" stroke="#22d3ee" stroke-width="1.8"/>
+      <circle cx="38" cy="40" r="2"   fill="#22d3ee"/>
+      <rect x="10" y="63" width="14" height="7" rx="1.5"
+            fill="url(#hatch)" stroke="#122240" stroke-width=".7" opacity=".6"/>
+      <line x1="68" y1="4"  x2="78" y2="-4" stroke="#0e2a40" stroke-width=".8"/>
+      <text x="80" y="-5"   font-family="'JetBrains Mono',monospace" font-size="5" fill="#0e2a40">OT-2</text>
+    </g>
+
+    <!-- ══ S — clear S shape: two quadratic arcs + end caps ══
+         Represents the convergence sigmoid of the RL outer loop -->
+    <g id="S1" transform="translate(480,20)">
+      <!-- Top cap: extends LEFT from upper-center -->
+      <line x1="10" y1="7" x2="40" y2="7"
+            stroke="#8aaac8" stroke-width="2.8" stroke-linecap="round"/>
+      <!-- S curve: two quadratic beziers sharing midpoint (40,32) -->
+      <!-- Upper arc: center-top → pulls RIGHT → mid-center -->
+      <path d="M 40,7  Q 72,7  72,22  Q 72,34 40,34"
+            fill="none" stroke="#8aaac8" stroke-width="2.8" stroke-linecap="round"/>
+      <!-- Lower arc: mid-center → pulls LEFT → bottom-center -->
+      <path d="M 40,34 Q  6,34   6,49  Q  6,60 40,60"
+            fill="none" stroke="#8aaac8" stroke-width="2.8" stroke-linecap="round"/>
+      <!-- Bottom cap: extends RIGHT from lower-center -->
+      <line x1="40" y1="60" x2="70" y2="60"
+            stroke="#8aaac8" stroke-width="2.8" stroke-linecap="round"/>
+
+      <!-- Flow direction arrows (RL convergence direction) -->
+      <path d="M 66,14 L 70,10 L 72,15"
+            fill="none" stroke="#2a5080" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M 10,48 L  6,52 L  4,47"
+            fill="none" stroke="#2a5080" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+
+      <!-- Midpoint inflection marker -->
+      <circle cx="40" cy="34" r="2.5" fill="#1a3a5a" stroke="#3a6090" stroke-width="1"/>
+
+      <!-- "CONVERGE" annotation -->
+      <text x="44" y="37" font-family="'JetBrains Mono',monospace" font-size="4.5"
+            fill="#1a3858" letter-spacing=".06em">σ</text>
+    </g>
+
+    <!-- Bottom annotation bar -->
+    <line x1="24" y1="97" x2="596" y2="97" stroke="#0d1f3a" stroke-width=".6"/>
+    <text x="24" y="102" font-family="'JetBrains Mono',monospace" font-size="5"
+          fill="#0d1f3a" letter-spacing=".1em">
+      H:CLEAN · E:MULTI-AGENT · L:PIPETTE · I:UR5-ARM · O:OT2-DECK · S:SIGMOID
+    </text>
+  </svg>

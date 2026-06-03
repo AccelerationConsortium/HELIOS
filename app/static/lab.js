@@ -617,6 +617,17 @@ function handleSSEEvent(type, data) {
                     params: data.params || {},
                 });
                 updateBestKpi(data.kpi);
+                // Feed the live KPI chart
+                if (typeof window.recordKpiPoint === 'function') {
+                    window.recordKpiPoint(
+                        state.campaignId,
+                        roundNum,
+                        data.kpi,
+                        state.direction,
+                        state.bestKpi,
+                        data.strategy || null
+                    );
+                }
             }
             break;
         }
@@ -637,6 +648,11 @@ function handleSSEEvent(type, data) {
                 updateStepStatus(`${roundId}-strategy`, 'success',
                     `${data.backend} (${data.phase}) — ${data.reason}`);
                 updateStepData(`${roundId}-strategy`, data);
+            }
+            // Live panel: surface the new strategy
+            if (typeof window.recordLiveEvent === 'function') {
+                const strat = data.backend ? `${data.backend} (${data.phase || ''})` : (data.phase || 'strategy');
+                window.recordLiveEvent(state.campaignId, 'Strategy', strat);
             }
             break;
 
@@ -1990,32 +2006,38 @@ function escapeHtml(str) {
 // ---------------------------------------------------------------------------
 
 const tabWorkflow   = $('#tabWorkflow');
+const tabLive       = $('#tabLive');
 const tabQuery      = $('#tabQuery');
 const queryPanel    = $('#queryPanel');
+const livePanel     = $('#livePanel');
 const instrumentBar = $('#instrumentBar');
 
-/** Switch between Workflow and Query tabs in the middle panel. */
+/** Switch between Workflow, Live, and Query tabs in the middle panel. */
 function switchMiddleTab(tab) {
     const isQuery = tab === 'query';
+    const isLive  = tab === 'live';
 
-    // Tab button active state
-    tabWorkflow.classList.toggle('active', !isQuery);
-    tabQuery.classList.toggle('active', isQuery);
+    if (tabWorkflow) tabWorkflow.classList.toggle('active', !isQuery && !isLive);
+    if (tabLive)     tabLive.classList.toggle('active',     isLive);
+    if (tabQuery)    tabQuery.classList.toggle('active',    isQuery);
 
-    // Content visibility
-    pipelineContainer.style.display = isQuery ? 'none' : '';
-    queryPanel.style.display        = isQuery ? '' : 'none';
+    if (pipelineContainer) pipelineContainer.style.display = (isQuery || isLive) ? 'none' : '';
+    if (queryPanel)        queryPanel.style.display        = isQuery ? '' : 'none';
+    if (livePanel)         livePanel.style.display         = isLive  ? '' : 'none';
     if (instrumentBar) {
-        instrumentBar.style.display = isQuery ? 'none' : (Object.keys(state.instrumentStatus).length ? '' : 'none');
+        instrumentBar.style.display = (isQuery || isLive) ? 'none' : (Object.keys(state.instrumentStatus).length ? '' : 'none');
     }
 
-    // Lazy-load entity list on first open
     if (isQuery && !queryState.entitiesLoaded) {
         loadQueryEntities();
+    }
+    if (isLive) {
+        if (window.kpiChart) requestAnimationFrame(() => window.kpiChart.resize());
     }
 }
 
 if (tabWorkflow) tabWorkflow.addEventListener('click', () => switchMiddleTab('workflow'));
+if (tabLive)     tabLive.addEventListener('click',     () => switchMiddleTab('live'));
 if (tabQuery)    tabQuery.addEventListener('click',    () => switchMiddleTab('query'));
 
 // ---------------------------------------------------------------------------
@@ -2571,3 +2593,170 @@ onboardNextBtn.addEventListener('click', () => {
 onboardBackBtn.addEventListener('click', () => {
     if (_obStep > 1) _obSetStep(_obStep - 1);
 });
+
+// ===========================================================================
+// Live KPI Panel — Chart.js convergence plot + event feed
+// Hooks into existing SSE event stream and status-poll updates.
+// ===========================================================================
+
+(function setupLivePanel() {
+    const canvas = document.querySelector('#kpiChart');
+    if (!canvas || typeof Chart === 'undefined') {
+        return;
+    }
+
+    const liveRoundPill    = document.querySelector('#liveRoundPill');
+    const liveKpiPill      = document.querySelector('#liveKpiPill');
+    const liveStrategyPill = document.querySelector('#liveStrategyPill');
+    const liveEventList    = document.querySelector('#liveEventList');
+
+    const campaigns = new Map();
+
+    function getSeries(campaignId) {
+        if (!campaigns.has(campaignId)) {
+            campaigns.set(campaignId, {
+                rounds: [], kpis: [], bestKpis: [], events: [], best: null,
+            });
+        }
+        return campaigns.get(campaignId);
+    }
+
+    const ctx = canvas.getContext('2d');
+    const chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [
+                {
+                    label: 'Round KPI',
+                    data: [],
+                    borderColor: '#7B5EA7',
+                    backgroundColor: 'rgba(123, 94, 167, 0.15)',
+                    borderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    tension: 0.25,
+                    fill: false,
+                },
+                {
+                    label: 'Best so far',
+                    data: [],
+                    borderColor: '#2E8B57',
+                    backgroundColor: 'rgba(46, 139, 87, 0.20)',
+                    borderWidth: 2,
+                    borderDash: [4, 4],
+                    pointRadius: 3,
+                    pointHoverRadius: 5,
+                    tension: 0.1,
+                    fill: true,
+                },
+            ],
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 400 },
+            interaction: { mode: 'index', intersect: false },
+            scales: {
+                x: { title: { display: true, text: 'Round', color: '#7A8FAF' },
+                     ticks: { color: '#4A5A78' },
+                     grid:  { color: 'rgba(30, 58, 95, 0.06)' } },
+                y: { title: { display: true, text: 'KPI value', color: '#7A8FAF' },
+                     ticks: { color: '#4A5A78' },
+                     grid:  { color: 'rgba(30, 58, 95, 0.06)' } },
+            },
+            plugins: {
+                legend: { labels: { color: '#1E2A3B', font: { size: 11 } } },
+                tooltip: { backgroundColor: '#0F1A28', titleColor: '#88ff88', bodyColor: '#e2e8f0' },
+            },
+        },
+    });
+    window.kpiChart = chart;
+
+    function renderForCampaign(campaignId) {
+        const s = getSeries(campaignId);
+        chart.data.labels = s.rounds;
+        chart.data.datasets[0].data = s.kpis;
+        chart.data.datasets[1].data = s.bestKpis;
+        chart.update();
+
+        if (liveRoundPill) {
+            liveRoundPill.textContent = s.rounds.length
+                ? 'Round ' + s.rounds[s.rounds.length - 1]
+                : 'Round —';
+        }
+        if (liveKpiPill) {
+            liveKpiPill.textContent = s.best != null ? 'Best ' + formatKpi(s.best) : 'Best —';
+        }
+    }
+
+    function formatKpi(v) {
+        if (v == null || isNaN(v)) return '—';
+        const abs = Math.abs(v);
+        if (abs >= 1000) return v.toExponential(2);
+        if (abs >= 1)    return v.toFixed(3);
+        return v.toFixed(4);
+    }
+
+    function pushEvent(campaignId, label, detail) {
+        const s = getSeries(campaignId);
+        const time = new Date().toLocaleTimeString();
+        s.events.unshift({ time: time, label: label, detail: detail });
+        if (s.events.length > 50) s.events.length = 50;
+
+        if (liveEventList) {
+            liveEventList.innerHTML = s.events.map(function (e, i) {
+                return '<li class="' + (i === 0 ? 'live-event-fresh' : '') + '">' +
+                    '<span class="live-event-time">' + e.time + '</span>' +
+                    '<strong>' + escapeHtml(e.label) + '</strong>' +
+                    (e.detail ? '— ' + escapeHtml(e.detail) : '') +
+                    '</li>';
+            }).join('');
+        }
+    }
+
+    window.recordKpiPoint = function (campaignId, round, kpi, direction, bestKpi, strategy) {
+        if (!campaignId || round == null || kpi == null) return;
+        const s = getSeries(campaignId);
+
+        const existingIdx = s.rounds.indexOf(round);
+        if (existingIdx >= 0) {
+            s.kpis[existingIdx]     = kpi;
+            s.bestKpis[existingIdx] = bestKpi != null ? bestKpi : s.bestKpis[existingIdx];
+        } else {
+            s.rounds.push(round);
+            s.kpis.push(kpi);
+            if (bestKpi != null) {
+                s.best = bestKpi;
+            } else if (s.best == null) {
+                s.best = kpi;
+            } else if (direction === 'minimize') {
+                s.best = Math.min(s.best, kpi);
+            } else if (direction === 'maximize') {
+                s.best = Math.max(s.best, kpi);
+            }
+            s.bestKpis.push(s.best);
+        }
+
+        if (strategy && liveStrategyPill) {
+            liveStrategyPill.textContent = 'Strategy: ' + strategy;
+        }
+
+        pushEvent(campaignId, 'Round ' + round + ' completed', 'KPI = ' + formatKpi(kpi) + ', best = ' + formatKpi(s.best));
+        renderForCampaign(campaignId);
+    };
+
+    window.recordLiveEvent = function (campaignId, label, detail) {
+        pushEvent(campaignId, label, detail);
+    };
+
+    window.resetLivePanel = function (campaignId) {
+        campaigns.set(campaignId, { rounds: [], kpis: [], bestKpis: [], events: [], best: null });
+        renderForCampaign(campaignId);
+        if (liveEventList) liveEventList.innerHTML = '';
+    };
+
+    if (typeof state !== 'undefined' && state.campaignId) {
+        renderForCampaign(state.campaignId);
+    }
+})();

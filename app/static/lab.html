@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/lab.css?v=3" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <!-- ===== Onboard Device Modal ===== -->
@@ -106,7 +107,7 @@
         <aside class="panel panel-left" id="panelLeft">
             <div class="panel-header">
                 <div class="logo">
-                    <span class="logo-icon">&#x1F9EA;</span>
+                    <img class="logo-img" src="/static/helios-logo.svg" alt="HELIOS" />
                     <h1>HELIOS</h1>
                 </div>
                 <span class="version-tag">Lab Agent v2</span>
@@ -192,6 +193,7 @@
             <div class="panel-header">
                 <div class="middle-tabs">
                     <button class="middle-tab active" id="tabWorkflow" data-tab="workflow">Workflow</button>
+                    <button class="middle-tab" id="tabLive" data-tab="live">Live</button>
                     <button class="middle-tab" id="tabQuery" data-tab="query">Query</button>
                 </div>
                 <div class="header-actions">
@@ -222,6 +224,25 @@
                     <p class="text-muted">Each step &mdash; parsing, planning, designing, compiling, executing, QC &mdash; is shown in real time.</p>
                 </div>
                 <!-- Pipeline steps injected dynamically by lab.js -->
+            </div>
+
+            <!-- ===== Live KPI Panel (hidden until Live tab selected) ===== -->
+            <div class="live-panel" id="livePanel" style="display:none;">
+                <div class="live-panel-header">
+                    <h3>Live Convergence</h3>
+                    <div class="live-panel-meta" id="livePanelMeta">
+                        <span class="live-pill" id="liveRoundPill">Round —</span>
+                        <span class="live-pill" id="liveKpiPill">Best —</span>
+                        <span class="live-pill live-pill-muted" id="liveStrategyPill">Strategy —</span>
+                    </div>
+                </div>
+                <div class="live-chart-wrap">
+                    <canvas id="kpiChart"></canvas>
+                </div>
+                <div class="live-events" id="liveEvents">
+                    <h4>Recent events</h4>
+                    <ul id="liveEventList"></ul>
+                </div>
             </div>
 
             <!-- ===== Query Panel (hidden until Query tab selected) ===== -->
