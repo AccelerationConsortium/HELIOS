@@ -827,9 +827,12 @@ function handleSSEEvent(type, data) {
             onCampaignDone();
             // Auto-select complete step to show results
             selectStep('complete');
-            // Refresh memory panel — new episodes + priors may have landed
+            // Refresh memory + graph panels — new episodes + priors may have landed
             if (typeof window.loadMemorySnapshot === 'function') {
                 window.loadMemorySnapshot();
+            }
+            if (typeof window.loadKnowledgeGraph === 'function') {
+                window.loadKnowledgeGraph();
             }
             break;
 
@@ -2033,29 +2036,34 @@ function escapeHtml(str) {
 const tabWorkflow   = $('#tabWorkflow');
 const tabLive       = $('#tabLive');
 const tabMemory     = $('#tabMemory');
+const tabGraph      = $('#tabGraph');
 const tabQuery      = $('#tabQuery');
 const queryPanel    = $('#queryPanel');
 const livePanel     = $('#livePanel');
 const memoryPanel   = $('#memoryPanel');
+const graphPanel    = $('#graphPanel');
 const instrumentBar = $('#instrumentBar');
 
-/** Switch between Workflow, Live, Memory, and Query tabs in the middle panel. */
+/** Switch between Workflow, Live, Memory, Graph, and Query tabs in the middle panel. */
 function switchMiddleTab(tab) {
     const isQuery  = tab === 'query';
     const isLive   = tab === 'live';
     const isMemory = tab === 'memory';
+    const isGraph  = tab === 'graph';
 
-    if (tabWorkflow) tabWorkflow.classList.toggle('active', !isQuery && !isLive && !isMemory);
+    if (tabWorkflow) tabWorkflow.classList.toggle('active', !isQuery && !isLive && !isMemory && !isGraph);
     if (tabLive)     tabLive.classList.toggle('active',     isLive);
     if (tabMemory)   tabMemory.classList.toggle('active',   isMemory);
+    if (tabGraph)    tabGraph.classList.toggle('active',    isGraph);
     if (tabQuery)    tabQuery.classList.toggle('active',    isQuery);
 
-    if (pipelineContainer) pipelineContainer.style.display = (isQuery || isLive || isMemory) ? 'none' : '';
+    if (pipelineContainer) pipelineContainer.style.display = (isQuery || isLive || isMemory || isGraph) ? 'none' : '';
     if (queryPanel)        queryPanel.style.display        = isQuery  ? '' : 'none';
     if (livePanel)         livePanel.style.display         = isLive   ? '' : 'none';
     if (memoryPanel)       memoryPanel.style.display       = isMemory ? '' : 'none';
+    if (graphPanel)        graphPanel.style.display        = isGraph  ? '' : 'none';
     if (instrumentBar) {
-        instrumentBar.style.display = (isQuery || isLive || isMemory) ? 'none' : (Object.keys(state.instrumentStatus).length ? '' : 'none');
+        instrumentBar.style.display = (isQuery || isLive || isMemory || isGraph) ? 'none' : (Object.keys(state.instrumentStatus).length ? '' : 'none');
     }
 
     if (isQuery && !queryState.entitiesLoaded) {
@@ -2067,11 +2075,15 @@ function switchMiddleTab(tab) {
     if (isMemory) {
         loadMemorySnapshot();
     }
+    if (isGraph) {
+        loadKnowledgeGraph();
+    }
 }
 
 if (tabWorkflow) tabWorkflow.addEventListener('click', () => switchMiddleTab('workflow'));
 if (tabLive)     tabLive.addEventListener('click',     () => switchMiddleTab('live'));
 if (tabMemory)   tabMemory.addEventListener('click',   () => switchMiddleTab('memory'));
+if (tabGraph)    tabGraph.addEventListener('click',    () => switchMiddleTab('graph'));
 if (tabQuery)    tabQuery.addEventListener('click',    () => switchMiddleTab('query'));
 
 // ---------------------------------------------------------------------------
@@ -2796,6 +2808,94 @@ onboardBackBtn.addEventListener('click', () => {
 })();
 
 // ===========================================================================
+// URL deep-linking — ?scenario=<key> pre-fills the input; &auto_run=1
+// fires the campaign after a short delay; &demo=1 routes to the fast
+// pre-canned /api/v1/orchestrate/demo endpoint instead of the real
+// orchestrator (which would block on a DesignAgent pause for the first
+// campaign when memory is empty). Used by the demo recorder.
+// ===========================================================================
+(function setupDeepLink() {
+    const params = new URLSearchParams(window.location.search);
+    const scenario = params.get('scenario');
+    if (!scenario) return;
+
+    const scenarios = {
+        oer:      'Screen OER catalysts',
+        battery:  'Formulate a lithium-ion battery electrolyte',
+        pcr:      'Optimize a PCR thermocycling protocol',
+        peptide:  'Calibrate an automated peptide coupling',
+    };
+    const needle = scenarios[scenario];
+    if (!needle) return;
+
+    const tile = Array.from(document.querySelectorAll('.demo-scenario'))
+        .find(btn => (btn.getAttribute('data-example') || '').includes(needle));
+    if (!tile) return;
+
+    // Defer until the lab's other init code has run
+    setTimeout(() => {
+        tile.click();
+        if (params.get('auto_run') !== '1') return;
+
+        const useDemo = params.get('demo') === '1';
+
+        if (useDemo) {
+            // Fire the fast /orchestrate/demo endpoint directly. This path
+            // emits a pre-canned sequence of events (~6s total) without
+            // hitting the real DesignAgent that would pause for approval
+            // when memory is empty.
+            setTimeout(async () => {
+                try {
+                    const resp = await fetch(API + '/orchestrate/demo', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            objective_kpi: 'overpotential_eta10',
+                            max_rounds: 2,
+                        }),
+                    });
+                    const data = await resp.json();
+                    if (data.campaign_id) {
+                        state.campaignId = data.campaign_id;
+                        state.phase = 'running';
+                        updateStatusBar();
+                        showCampaignStatus();
+                        connectSSE(data.campaign_id);
+
+                        // Auto-cycle through tabs so the recording shows
+                        // the wow moments: Pipeline → Live (chart) → Memory → Graph
+                        // The demo emits both rounds in ~14s, so wait long
+                        // enough for round 2's KPI to be on the chart before
+                        // we switch to Live.
+                        if (params.get('auto_cycle') === '1') {
+                            setTimeout(() => switchMiddleTab('live'),  16000);
+                            setTimeout(() => switchMiddleTab('memory'), 22000);
+                            setTimeout(() => switchMiddleTab('graph'),  28000);
+                        }
+                    }
+                } catch (e) {
+                    console.error('demo deep-link launch failed:', e);
+                }
+            }, 600);
+            return;
+        }
+
+        // Otherwise click Run Campaign in the UI (real orchestrator path).
+        setTimeout(() => {
+            const sendBtn = document.querySelector('#sendBtn');
+            if (sendBtn && !sendBtn.disabled) sendBtn.click();
+        }, 800);
+        if (params.get('skip_plan') === '1') {
+            // Plan modal opens ~1s after Run Campaign is clicked. Auto-approve.
+            setTimeout(() => {
+                const approve = document.querySelector('#planApproveBtn');
+                if (approve) approve.click();
+            }, 1800);
+        }
+    }, 600);
+})();
+
+// ===========================================================================
 // Memory Panel — fetch the three-layer snapshot and render tables
 // Hooks into the "Memory" tab and the "Memory Recall" banner that pops
 // up when a campaign launches, showing priors relevant to the chosen
@@ -2955,5 +3055,264 @@ onboardBackBtn.addEventListener('click', () => {
     // Refresh memory panel after every campaign completes (so the new episodes show up)
     if (typeof state !== 'undefined') {
         // Lazy: poll-style refresh by hooking into the existing campaign_complete path below
+    }
+})();
+
+// ===========================================================================
+// Knowledge Graph Panel — D3 force-directed visualization of campaigns,
+// primitives, failure patterns, and recovery recipes. Fetches
+// /api/v1/memory/graph and renders an interactive force simulation.
+// ===========================================================================
+
+(function setupKnowledgeGraph() {
+    const svgEl     = document.querySelector('#graphSvg');
+    const tooltipEl = document.querySelector('#graphTooltip');
+    const refreshBtn = document.querySelector('#graphRefreshBtn');
+    const nodePill   = document.querySelector('#graphNodePill');
+    const edgePill   = document.querySelector('#graphEdgePill');
+
+    if (!svgEl || typeof d3 === 'undefined') {
+        return; // d3 not loaded; silently no-op
+    }
+
+    const COLOR = {
+        campaign:      '#7B5EA7',
+        primitive:     '#2E8B57',
+        error_pattern: '#C5517C',
+        recipe:        '#E5A84B',
+    };
+    const RADIUS = {
+        campaign: 14,
+        primitive: 18,
+        error_pattern: 13,
+        recipe: 16,
+    };
+
+    let _loading = false;
+    let _simulation = null;
+    let _svg = null;
+
+    function buildTooltipContent(d) {
+        const lines = [];
+        lines.push(`<strong>${escapeHtml(d.type.replace('_', ' '))}</strong>`);
+        lines.push(escapeHtml(d.label));
+        if (d.run_count != null) {
+            const sr = d.success_rate != null ? (d.success_rate * 100).toFixed(0) + '%' : '—';
+            lines.push(`<br/>runs: <strong>${d.run_count}</strong> · success: <strong>${sr}</strong>`);
+        }
+        if (d.parent_primitive) {
+            lines.push(`<br/>from: ${escapeHtml(d.parent_primitive)}`);
+        }
+        if (d.source) {
+            lines.push(`<br/>source: ${escapeHtml(d.source)}`);
+        }
+        return lines.join(' ');
+    }
+
+    function renderGraph(data) {
+        try {
+            return _renderGraph(data);
+        } catch (err) {
+            console.error('renderGraph failed:', err);
+            const wrap = svgEl.parentNode;
+            if (wrap) {
+                wrap.innerHTML = '<div style="padding:20px;color:#C5517C;font-family:monospace;">' +
+                    'Failed to render graph: ' + (err && err.message ? err.message : String(err)) + '</div>';
+            }
+            return null;
+        }
+    }
+
+    function _renderGraph(data) {
+        // Clear previous render
+        const parent = svgEl.parentNode;
+        if (!parent) return null;
+        const newSvg = svgEl.cloneNode(false);
+        parent.replaceChild(newSvg, svgEl);
+        // re-bind svgEl to the new node
+        const liveSvg = newSvg;
+        _svg = liveSvg;
+
+        const wrap = liveSvg.parentNode;
+        if (!wrap) return null;
+        const width  = wrap.clientWidth  || 800;
+        const height = wrap.clientHeight || 500;
+
+        const svg = d3.select(liveSvg)
+            .attr('viewBox', `0 0 ${width} ${height}`)
+            .attr('preserveAspectRatio', 'xMidYMid meet');
+
+        // Arrow marker for directed edges
+        const defs = svg.append('defs');
+        defs.append('marker')
+            .attr('id', 'arrow')
+            .attr('viewBox', '0 -5 10 10')
+            .attr('refX', 18)
+            .attr('refY', 0)
+            .attr('markerWidth', 7)
+            .attr('markerHeight', 7)
+            .attr('orient', 'auto')
+            .append('path')
+            .attr('d', 'M0,-5L10,0L0,5')
+            .attr('fill', '#7A8FAF');
+
+        // Map id → node (for edge lookups)
+        const byId = {};
+        data.nodes.forEach(n => { byId[n.id] = n; });
+
+        // Drop edges that reference missing nodes (defensive)
+        const validEdges = data.edges.filter(e => byId[e.source] && byId[e.target]);
+
+        // Edge group (drawn before nodes so circles sit on top)
+        const edgeGroup = svg.append('g').attr('class', 'graph-edges');
+        const nodeGroup = svg.append('g').attr('class', 'graph-nodes');
+        const labelGroup = svg.append('g').attr('class', 'graph-labels');
+
+        const linkSel = edgeGroup.selectAll('line.graph-edge')
+            .data(validEdges)
+            .enter()
+            .append('line')
+            .attr('class', 'graph-edge')
+            .attr('stroke', '#7A8FAF')
+            .attr('stroke-width', d => 1 + Math.min(4, Math.sqrt(d.weight || 1)))
+            .attr('marker-end', 'url(#arrow)');
+
+        // Edge labels (relation name) — small, dim
+        const edgeLabelSel = edgeGroup.selectAll('text.graph-edge-label')
+            .data(validEdges)
+            .enter()
+            .append('text')
+            .attr('class', 'graph-edge-label')
+            .attr('font-size', 9)
+            .attr('font-family', "'JetBrains Mono', monospace")
+            .attr('fill', '#7A8FAF')
+            .attr('fill-opacity', 0.7)
+            .text(d => d.relation);
+
+        // Nodes
+        const nodeSel = nodeGroup.selectAll('g.graph-node')
+            .data(data.nodes, d => d.id)
+            .enter()
+            .append('g')
+            .attr('class', 'graph-node')
+            .attr('data-type', d => d.type)
+            .style('color', d => COLOR[d.type] || '#7A8FAF');
+
+        nodeSel.append('circle')
+            .attr('r', d => RADIUS[d.type] || 14)
+            .attr('fill', d => COLOR[d.type] || '#7A8FAF')
+            .attr('stroke', '#FFFFFF')
+            .attr('stroke-width', 2)
+            .attr('opacity', 0.92);
+
+        // Label under each node
+        nodeSel.append('text')
+            .attr('class', 'graph-node-label')
+            .attr('text-anchor', 'middle')
+            .attr('dy', d => (RADIUS[d.type] || 14) + 12)
+            .text(d => d.label.length > 22 ? d.label.slice(0, 20) + '…' : d.label);
+
+        // Tooltip handlers
+        nodeSel.on('mouseover', function (event, d) {
+            if (!tooltipEl) return;
+            tooltipEl.innerHTML = buildTooltipContent(d);
+            tooltipEl.style.display = 'block';
+        }).on('mousemove', function (event) {
+            if (!tooltipEl || tooltipEl.style.display === 'none') return;
+            const rect = wrap.getBoundingClientRect();
+            const x = event.clientX - rect.left + 12;
+            const y = event.clientY - rect.top + 12;
+            tooltipEl.style.left = x + 'px';
+            tooltipEl.style.top  = y + 'px';
+        }).on('mouseout', function () {
+            if (tooltipEl) tooltipEl.style.display = 'none';
+        });
+
+        // Force simulation
+        const sim = d3.forceSimulation(data.nodes)
+            .force('link', d3.forceLink(validEdges)
+                .id(d => d.id)
+                .distance(d => d.relation === 'used' ? 60 : d.relation === 'recovered_by' ? 90 : 75)
+                .strength(0.6))
+            .force('charge', d3.forceManyBody().strength(-280))
+            .force('center', d3.forceCenter(width / 2, height / 2))
+            .force('collide', d3.forceCollide().radius(d => (RADIUS[d.type] || 14) + 6))
+            .alpha(0.9)
+            .alphaDecay(0.04);
+
+        sim.on('tick', () => {
+            linkSel
+                .attr('x1', d => d.source.x)
+                .attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x)
+                .attr('y2', d => d.target.y);
+            edgeLabelSel
+                .attr('x', d => (d.source.x + d.target.x) / 2)
+                .attr('y', d => (d.source.y + d.target.y) / 2 - 4);
+            nodeSel.attr('transform', d => `translate(${d.x},${d.y})`);
+        });
+
+        // Drag behaviour
+        const drag = d3.drag()
+            .on('start', (event, d) => {
+                if (!event.active) sim.alphaTarget(0.3).restart();
+                d.fx = d.x; d.fy = d.y;
+            })
+            .on('drag', (event, d) => {
+                d.fx = event.x; d.fy = event.y;
+            })
+            .on('end', (event, d) => {
+                if (!event.active) sim.alphaTarget(0);
+                d.fx = null; d.fy = null;
+            });
+        nodeSel.call(drag);
+
+        // Zoom / pan
+        const zoom = d3.zoom()
+            .scaleExtent([0.3, 4])
+            .on('zoom', (event) => {
+                svg.selectAll('g').attr('transform', event.transform);
+            });
+        svg.call(zoom);
+
+        _simulation = sim;
+    }
+
+    window.loadKnowledgeGraph = async function loadKnowledgeGraph() {
+        if (_loading) return;
+        _loading = true;
+        try {
+            const resp = await fetch(API + '/memory/graph');
+            if (!resp.ok) {
+                const errText = await resp.text().catch(() => '');
+                throw new Error('HTTP ' + resp.status + ' — ' + (errText || resp.statusText || 'no body'));
+            }
+            const raw = await resp.json();
+            const data = raw && (raw.nodes ? raw : (raw.graph || raw));
+            if (!data || !Array.isArray(data.nodes) || !Array.isArray(data.edges)) {
+                throw new Error('Unexpected response shape: ' + JSON.stringify(raw).slice(0, 120));
+            }
+            if (nodePill) nodePill.textContent = (data.node_count || data.nodes.length) + ' nodes';
+            if (edgePill) edgePill.textContent = (data.edge_count || data.edges.length) + ' edges';
+            renderGraph(data);
+        } catch (err) {
+            console.error('graph load failed:', err);
+            const wrap = svgEl.parentNode;
+            if (wrap) {
+                wrap.innerHTML = '<div style="padding:20px;color:#C5517C;font-family:monospace;">' +
+                    'Failed to load graph: ' + (err && err.message ? err.message : String(err)) + '</div>';
+            }
+        } finally {
+            _loading = false;
+        }
+    };
+
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => loadKnowledgeGraph());
+    }
+
+    // Auto-refresh the graph after each campaign completes
+    if (typeof state !== 'undefined') {
+        // (handled below by patching campaign_complete)
     }
 })();

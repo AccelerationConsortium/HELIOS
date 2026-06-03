@@ -33,7 +33,16 @@ from app.services.instrument_onboarding import (
     ParamInput,
     PrimitiveInput,
 )
-from app.services.llm_gateway import get_llm_provider
+# Lazy import to break circular dependency with llm_gateway ↔ agent_context
+# (llm_gateway imports agent_context which imports app.agents.base which
+# imports onboarding_agent which would re-import llm_gateway).
+_llm_provider_fn = None
+def _llm():
+    global _llm_provider_fn
+    if _llm_provider_fn is None:
+        from app.services.llm_gateway import get_llm_provider
+        _llm_provider_fn = get_llm_provider
+    return _llm_provider_fn
 
 logger = logging.getLogger(__name__)
 
@@ -306,7 +315,7 @@ class OnboardingAgent(BaseAgent[OnboardingInput, OnboardingOutput]):
         warnings: list[str] = []
 
         try:
-            llm = get_llm_provider()
+            llm = _llm()()
             response = await llm.complete(
                 messages=[{"role": "user", "content": user_message}],
                 system=system_prompt,

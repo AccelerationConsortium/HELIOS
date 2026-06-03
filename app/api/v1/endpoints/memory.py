@@ -184,3 +184,129 @@ async def memory_recall(
         "recipes": recipes,
         "summary": " · ".join(summary_parts),
     }
+
+
+@router.get("/graph")
+async def memory_graph() -> Dict[str, Any]:
+    """Knowledge graph of past campaigns, primitives, failures, and recipes.
+
+    Returns a node/edge list suitable for a D3 force-directed graph. The
+    graph shows what HELIOS has learned: which campaigns used which
+    primitives, which primitives fail with which error patterns, and
+    which recovery recipes exist for those patterns.
+
+    Node types:
+      - ``campaign``     — one per run id (or "demo_seed" synthetic for the seed rows)
+      - ``primitive``    — a hardware primitive (e.g. robot.dispense)
+      - ``error_pattern``— a substring seen in a failure error (e.g. "tip")
+      - ``recipe``       — a repair recipe in memory_procedures
+
+    Edge labels:
+      - "used"          — campaign → primitive
+      - "fails_with"    — primitive → error_pattern
+      - "recovered_by"  — error_pattern → recipe
+    """
+    nodes: Dict[str, Dict[str, Any]] = {}
+    edges: List[Dict[str, Any]] = []
+
+    def node(node_id: str, ntype: str, label: str, **extra) -> None:
+        # First-write-wins; merges extra fields into existing record
+        if node_id not in nodes:
+            nodes[node_id] = {"id": node_id, "type": ntype, "label": label}
+        for k, v in extra.items():
+            nodes[node_id].setdefault(k, v)
+
+    def edge(src: str, tgt: str, rel: str, weight: int = 1) -> None:
+        # Coalesce duplicate edges; bump weight on repeat
+        for e in edges:
+            if e["source"] == src and e["target"] == tgt and e["relation"] == rel:
+                e["weight"] += 1
+                return
+        edges.append({"source": src, "target": tgt, "relation": rel, "weight": weight})
+
+    # ---- Episodes → campaign/primitive nodes + "used" edges ----
+    def _load_episodes(conn):
+        return conn.execute(
+            "SELECT run_id, primitive, outcome, error FROM memory_episodes "
+            "ORDER BY created_at DESC LIMIT 500"
+        ).fetchall()
+
+    try:
+        episode_rows = run_txn(_load_episodes)
+    except Exception:
+        episode_rows = []
+
+    # Track per-(primitive, error_pattern) failure counts so we can emit
+    # primitive → error_pattern edges with sensible weights.
+    fail_counts: Dict[tuple[str, str], int] = {}
+
+    for r in episode_rows:
+        run_id    = r["run_id"] or "unknown"
+        primitive = r["primitive"] or "unknown"
+        outcome   = r["outcome"] or "succeeded"
+        error     = r["error"] or ""
+
+        node(f"campaign:{run_id}", "campaign", run_id[-8:])
+        node(f"primitive:{primitive}", "primitive", primitive)
+        edge(f"campaign:{run_id}", f"primitive:{primitive}", "used", 1)
+
+        if outcome == "failed" and error:
+            # Bucket the error into a coarse pattern (lowercase, stripped
+            # of digits and punctuation so "Tip not attached" and
+            # "tip 2" collapse to the same "tip" pattern).
+            import re as _re
+            pat = _re.sub(r"[^a-z ]+", "", error.lower()).strip()[:40] or "unknown"
+            pat = pat or "unknown"
+            node(f"err:{primitive}:{pat}", "error_pattern", f"{pat}", parent_primitive=primitive)
+            edge(f"primitive:{primitive}", f"err:{primitive}:{pat}", "fails_with", 1)
+            fail_counts[(primitive, pat)] = fail_counts.get((primitive, pat), 0) + 1
+
+    # ---- Recipes → error_pattern/recipe nodes + "recovered_by" edges ----
+    def _load_recipes(conn):
+        return conn.execute(
+            "SELECT id, trigger_primitive, trigger_error_pattern, source, hit_count "
+            "FROM memory_procedures ORDER BY hit_count DESC"
+        ).fetchall()
+
+    try:
+        recipe_rows = run_txn(_load_recipes)
+    except Exception:
+        recipe_rows = []
+
+    for r in recipe_rows:
+        prim = r["trigger_primitive"] or "unknown"
+        pat  = r["trigger_error_pattern"] or "unknown"
+        rid  = r["id"]
+        node(f"recipe:{rid}", "recipe", f"{prim} ↳ {pat}", source=r["source"] or "—")
+        # Connect to its triggering error pattern if we have one
+        err_id = f"err:{prim}:{pat}"
+        if err_id in nodes:
+            edge(err_id, f"recipe:{rid}", "recovered_by", max(1, r["hit_count"] or 1))
+        else:
+            # Recipe exists but no failure was observed yet; still surface
+            # the recipe, attached to the primitive.
+            node(err_id, "error_pattern", pat, parent_primitive=prim)
+            edge(f"primitive:{prim}", err_id, "fails_with", 1)
+            edge(err_id, f"recipe:{rid}", "recovered_by", max(1, r["hit_count"] or 1))
+
+    # ---- Annotate primitives with run counts from episodes ----
+    prim_runs: Dict[str, int] = {}
+    prim_success: Dict[str, int] = {}
+    for r in episode_rows:
+        p = r["primitive"] or "unknown"
+        prim_runs[p] = prim_runs.get(p, 0) + 1
+        if r["outcome"] == "succeeded":
+            prim_success[p] = prim_success.get(p, 0) + 1
+    for prim, total in prim_runs.items():
+        ok = prim_success.get(prim, 0)
+        rate = ok / total if total else 0.0
+        nodes[f"primitive:{prim}"]["run_count"] = total
+        nodes[f"primitive:{prim}"]["success_count"] = ok
+        nodes[f"primitive:{prim}"]["success_rate"] = rate
+
+    return {
+        "nodes": list(nodes.values()),
+        "edges": edges,
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+    }

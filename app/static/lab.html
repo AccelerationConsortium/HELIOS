@@ -9,6 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/lab.css?v=3" />
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
 </head>
 <body>
     <!-- ===== Onboard Device Modal ===== -->
@@ -238,6 +239,7 @@
                     <button class="middle-tab active" id="tabWorkflow" data-tab="workflow">Workflow</button>
                     <button class="middle-tab" id="tabLive" data-tab="live">Live</button>
                     <button class="middle-tab" id="tabMemory" data-tab="memory">Memory</button>
+                    <button class="middle-tab" id="tabGraph" data-tab="graph">Graph</button>
                     <button class="middle-tab" id="tabQuery" data-tab="query">Query</button>
                 </div>
                 <div class="header-actions">
@@ -268,6 +270,28 @@
                     <p class="text-muted">Each step &mdash; parsing, planning, designing, compiling, executing, QC &mdash; is shown in real time.</p>
                 </div>
                 <!-- Pipeline steps injected dynamically by lab.js -->
+            </div>
+
+            <!-- ===== Graph Panel (hidden until Graph tab selected) ===== -->
+            <div class="graph-panel" id="graphPanel" style="display:none;">
+                <div class="graph-panel-header">
+                    <h3>Knowledge Graph</h3>
+                    <div class="graph-panel-meta">
+                        <span class="live-pill" id="graphNodePill">0 nodes</span>
+                        <span class="live-pill" id="graphEdgePill">0 edges</span>
+                        <button class="btn btn-sm btn-ghost" id="graphRefreshBtn" title="Refresh">↻</button>
+                    </div>
+                </div>
+                <div class="graph-legend">
+                    <span class="graph-legend-item"><span class="graph-legend-dot graph-type-campaign"></span> Campaign</span>
+                    <span class="graph-legend-item"><span class="graph-legend-dot graph-type-primitive"></span> Primitive</span>
+                    <span class="graph-legend-item"><span class="graph-legend-dot graph-type-error_pattern"></span> Error</span>
+                    <span class="graph-legend-item"><span class="graph-legend-dot graph-type-recipe"></span> Recipe</span>
+                </div>
+                <div class="graph-tooltip" id="graphTooltip" style="display:none;"></div>
+                <div class="graph-canvas-wrap">
+                    <svg id="graphSvg"></svg>
+                </div>
             </div>
 
             <!-- ===== Memory Panel (hidden until Memory tab selected) ===== -->

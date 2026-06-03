@@ -2605,3 +2605,133 @@ body {
     animation: demo-scenario-pulse 1.2s ease-out;
     border-color: var(--accent-primary) !important;
 }
+
+/* ==========================================================================
+   Knowledge Graph Panel — D3 force-directed graph
+   ========================================================================== */
+.graph-panel {
+    padding: 16px 20px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+}
+
+.graph-panel-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.graph-panel-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-bright);
+}
+
+.graph-panel-meta {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.graph-legend {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding: 4px 0;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.graph-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.graph-legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    border: 1.5px solid var(--bg-input);
+    box-shadow: 0 0 0 1px var(--border-subtle);
+}
+
+.graph-type-campaign      { background: #7B5EA7; }
+.graph-type-primitive     { background: #2E8B57; }
+.graph-type-error_pattern { background: #C5517C; }
+.graph-type-recipe        { background: #E5A84B; }
+
+.graph-canvas-wrap {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    background: var(--bg-input);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.graph-canvas-wrap svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    cursor: grab;
+}
+
+.graph-canvas-wrap svg:active {
+    cursor: grabbing;
+}
+
+.graph-canvas-wrap .graph-node {
+    cursor: pointer;
+    transition: filter 0.15s ease;
+}
+
+.graph-canvas-wrap .graph-node:hover {
+    filter: brightness(1.15) drop-shadow(0 0 6px currentColor);
+}
+
+.graph-canvas-wrap .graph-node-label {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+    fill: var(--text-primary);
+    pointer-events: none;
+    user-select: none;
+}
+
+.graph-canvas-wrap .graph-edge {
+    stroke-opacity: 0.45;
+    transition: stroke-opacity 0.2s ease;
+}
+
+.graph-canvas-wrap .graph-edge:hover {
+    stroke-opacity: 0.95;
+}
+
+.graph-tooltip {
+    position: absolute;
+    z-index: 10;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-default);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    font-size: 11px;
+    color: var(--text-primary);
+    max-width: 280px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    pointer-events: none;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+    line-height: 1.5;
+}
+
+.graph-tooltip strong {
+    color: var(--text-bright);
+    font-family: 'IBM Plex Sans', system-ui, sans-serif;
+}

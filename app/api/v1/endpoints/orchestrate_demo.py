@@ -117,12 +117,23 @@ async def _run_demo_campaign(campaign_id: str, max_rounds: int):
             eta10 = 127.3 if round_num == 1 else 89.7
             improvement = 0.0 if round_num == 1 else 29.5
 
+            # Emit as round_complete (for the pipeline UI) AND as an
+            # agent_result with kpi=eta10 (so the Live KPI chart fills).
             publish_campaign_event(campaign_id, {
                 "type": "round_complete",
                 "round": round_num,
                 "eta10": eta10,
                 "improvement_pct": improvement,
                 "message": f"Round {round_num} complete: η10 = {eta10} mV",
+            })
+            publish_campaign_event(campaign_id, {
+                "type": "agent_result",
+                "agent": "analyzer",
+                "round": round_num,
+                "success": True,
+                "kpi": eta10,
+                "message": f"Round {round_num} analyzed: η10 = {eta10} mV",
+                "duration_ms": 1500,
             })
 
             await asyncio.sleep(0.5)
