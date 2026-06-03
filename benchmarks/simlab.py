@@ -158,7 +158,7 @@ class SimAdapter:
         if primitive == "robot.set_lights":
             return {"status": "ok"}
 
-        # Original OTbot primitives
+        # Original HELIOS primitives
         if primitive == "aspirate":
             return self._sim_aspirate(params)
 

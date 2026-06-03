@@ -357,7 +357,7 @@ def _build_transition(
 
 async def stream_campaign_transitions(
     campaign_id: str,
-    db_path: str = "otbot.db",
+    db_path: str = "helios.db",
     *,
     reward_config: RewardConfig | None = None,
     page_size: int = DEFAULT_ROUND_PAGE_SIZE,
@@ -432,7 +432,7 @@ async def stream_campaign_transitions(
 
 
 async def stream_historical_transitions(
-    db_path: str = "otbot.db",
+    db_path: str = "helios.db",
     *,
     min_rounds: int = 3,
     reward_config: RewardConfig | None = None,
@@ -514,7 +514,7 @@ def _materialize_trace(
 
 async def extract_campaign_trace_async(
     campaign_id: str,
-    db_path: str = "otbot.db",
+    db_path: str = "helios.db",
     reward_config: RewardConfig | None = None,
     *,
     page_size: int = DEFAULT_ROUND_PAGE_SIZE,
@@ -570,7 +570,7 @@ def _run_async(coro: Awaitable[Any]) -> Any:
 
 def extract_campaign_trace(
     campaign_id: str,
-    db_path: str = "otbot.db",
+    db_path: str = "helios.db",
     reward_config: RewardConfig | None = None,
 ) -> dict[str, Any] | None:
     """Extract training data from a single campaign (backward-compatible sync API).
@@ -584,7 +584,7 @@ def extract_campaign_trace(
 
 
 async def collect_historical_campaigns_async(
-    db_path: str = "otbot.db",
+    db_path: str = "helios.db",
     min_rounds: int = 3,
     reward_config: RewardConfig | None = None,
     *,
@@ -612,7 +612,7 @@ async def collect_historical_campaigns_async(
 
 
 def collect_historical_campaigns(
-    db_path: str = "otbot.db",
+    db_path: str = "helios.db",
     min_rounds: int = 3,
     reward_config: RewardConfig | None = None,
 ) -> list[dict[str, Any]]:

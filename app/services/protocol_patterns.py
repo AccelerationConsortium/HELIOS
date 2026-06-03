@@ -45,7 +45,7 @@ class PatternStep:
     """A single step in a protocol pattern."""
 
     name: str
-    primitive: str  # OTbot primitive e.g. "heat", "robot.aspirate"
+    primitive: str  # HELIOS primitive e.g. "heat", "robot.aspirate"
     params: tuple[PatternParam, ...]
     order: int
     description: str = ""

@@ -1,11 +1,11 @@
 # ============================================================
-# OTbot — Multi-agent laboratory orchestrator
+# HELIOS — Multi-agent laboratory orchestrator
 # ============================================================
 # Build variants:
-#   Default (simulated):  docker build -t otbot .
-#   With hardware:        docker build --build-arg EXTRAS=hardware -t otbot:hw .
-#   With ML (DQN):        docker build --build-arg EXTRAS=ml -t otbot:ml .
-#   Full:                 docker build --build-arg EXTRAS=all -t otbot:full .
+#   Default (simulated):  docker build -t helios .
+#   With hardware:        docker build --build-arg EXTRAS=hardware -t helios:hw .
+#   With ML (DQN):        docker build --build-arg EXTRAS=ml -t helios:ml .
+#   Full:                 docker build --build-arg EXTRAS=all -t helios:full .
 # ============================================================
 
 FROM python:3.11-slim

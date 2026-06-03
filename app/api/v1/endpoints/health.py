@@ -23,7 +23,7 @@ router = APIRouter(tags=["health"])
 @router.get("/health")
 async def health() -> dict[str, Any]:
     """Liveness probe for Docker / k8s / load balancer."""
-    return {"ok": True, "service": "otbot"}
+    return {"ok": True, "service": "helios"}
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +89,7 @@ async def health_detail() -> dict[str, Any]:
 
     return {
         "ok": all_ok,
-        "service": "otbot",
+        "service": "helios",
         "elapsed_ms": round(elapsed_ms, 1),
         "components": components,
     }

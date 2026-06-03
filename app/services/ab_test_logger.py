@@ -55,7 +55,7 @@ class ABTestLogger:
     )
     """
 
-    def __init__(self, db_path: str = "otbot.db"):
+    def __init__(self, db_path: str = "helios.db"):
         self.db_path = db_path
         self._ensure_table()
 

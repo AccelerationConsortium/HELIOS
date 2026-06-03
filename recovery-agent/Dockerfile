@@ -1,5 +1,5 @@
 # ============================================================
-# OTbot Recovery Agent — Hardware bridge with serial support
+# HELIOS Recovery Agent — Hardware bridge with serial support
 # ============================================================
 
 FROM python:3.11-slim

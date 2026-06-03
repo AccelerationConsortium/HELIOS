@@ -1,5 +1,5 @@
 # ============================================================
-# OTbot Docker Compose
+# HELIOS Docker Compose
 # ============================================================
 # Quick start (simulation):
 #   docker compose up
@@ -16,17 +16,17 @@
 
 services:
   # ── Main orchestrator ──────────────────────────────────
-  otbot:
+  helios:
     build:
       context: .
       args:
         EXTRAS: ""  # Use "hardware" or "all" for real devices
-    image: otbot:latest
-    container_name: otbot
+    image: helios:latest
+    container_name: helios
     ports:
-      - "${OTBOT_PORT:-8000}:8000"
+      - "${HELIOS_PORT:-8000}:8000"
     volumes:
-      - otbot-data:/app/data
+      - helios-data:/app/data
     env_file:
       - .env
     environment:
@@ -52,14 +52,14 @@ services:
     build:
       context: ./recovery-agent
       dockerfile: Dockerfile
-    image: otbot-recovery-agent:latest
-    container_name: otbot-recovery-agent
+    image: helios-recovery-agent:latest
+    container_name: helios-recovery-agent
     profiles:
       - hardware
     ports:
       - "${RECOVERY_PORT:-8001}:8001"
     volumes:
-      - otbot-data:/app/data
+      - helios-data:/app/data
     env_file:
       - .env
     environment:
@@ -71,9 +71,9 @@ services:
     #   - /dev/ttyACM0:/dev/ttyACM0
     restart: unless-stopped
     depends_on:
-      otbot:
+      helios:
         condition: service_healthy
 
 volumes:
-  otbot-data:
+  helios-data:
     driver: local

@@ -1,5 +1,5 @@
 /**
- * OTbot Lab Agent v2 — Three-Column Pipeline UI with SSE reasoning stream.
+ * HELIOS Lab Agent v2 — Three-Column Pipeline UI with SSE reasoning stream.
  *
  * Layout: Left (chat input) | Middle (agent pipeline) | Right (step context)
  *

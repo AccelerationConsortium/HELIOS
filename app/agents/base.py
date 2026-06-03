@@ -1,4 +1,4 @@
-"""Base Agent protocol for the OTbot multi-agent orchestrator.
+"""Base Agent protocol for the HELIOS multi-agent orchestrator.
 
 All agents implement the same interface. Agents are Python classes,
 not microservices. Communication is via typed Pydantic models (contracts).
@@ -96,7 +96,7 @@ class AgentPauseRejected(Exception):
 
 
 class BaseAgent(ABC, Generic[InputT, OutputT]):
-    """Base class for all OTbot agents.
+    """Base class for all HELIOS agents.
 
     Agents are stateless processors: they take typed input,
     validate it, process it, and return typed output.

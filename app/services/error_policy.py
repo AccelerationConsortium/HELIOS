@@ -50,7 +50,7 @@ CRITICAL_PRIMITIVES: frozenset[str] = frozenset(
         "cleanup.run_full",
         # Sample preparation
         "sample.prepare_from_csv",
-        # Original OTbot primitives
+        # Original HELIOS primitives
         "aspirate",
         "eis",
     }

@@ -1,6 +1,6 @@
 """Error type mapping for RecoveryAgent integration.
 
-Maps Python exceptions and OTbot errors to recovery-agent error types
+Maps Python exceptions and HELIOS errors to recovery-agent error types
 for consistent error recovery strategies.
 """
 from typing import Any
@@ -40,8 +40,8 @@ EXCEPTION_TYPE_MAP = {
 }
 
 
-# OTbot-specific error codes to recovery-agent types
-OTBOT_ERROR_MAP = {
+# HELIOS-specific error codes to recovery-agent types
+HELIOS_ERROR_MAP = {
     # Execution errors
     "execution_failed": "unknown_error",
     "protocol_failed": "postcondition_failed",
@@ -121,16 +121,16 @@ def map_exception_to_error_type(exc: Exception) -> str:
     return "unknown_error"
 
 
-def map_otbot_error_to_type(error_code: str) -> str:
-    """Map OTbot error code to recovery-agent error type.
+def map_helios_error_to_type(error_code: str) -> str:
+    """Map HELIOS error code to recovery-agent error type.
 
     Args:
-        error_code: OTbot error code string
+        error_code: HELIOS error code string
 
     Returns:
         Recovery-agent error type string
     """
-    return OTBOT_ERROR_MAP.get(error_code, "unknown_error")
+    return HELIOS_ERROR_MAP.get(error_code, "unknown_error")
 
 
 def get_error_severity(error_type: str) -> str:
@@ -166,7 +166,7 @@ def extract_error_context(exc: Exception) -> dict[str, Any]:
     if hasattr(exc, "__context__") and exc.__context__:
         context["context"] = str(exc.__context__)
 
-    # Extract custom attributes (e.g., from OTbot custom exceptions)
+    # Extract custom attributes (e.g., from HELIOS custom exceptions)
     for attr in ["device", "stage", "run_id", "candidate_id"]:
         if hasattr(exc, attr):
             context[attr] = getattr(exc, attr)
@@ -224,7 +224,7 @@ def should_emit_chemical_safety_alert(error_type: str, telemetry: dict[str, Any]
     return False
 
 
-# OTbot device name normalization
+# HELIOS device name normalization
 DEVICE_NAME_MAP = {
     "opentrons": "opentrons_ot2",
     "ot2": "opentrons_ot2",

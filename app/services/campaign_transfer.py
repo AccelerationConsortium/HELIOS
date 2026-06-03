@@ -771,7 +771,7 @@ class CampaignTransferManager:
 
     _ACQUISITIONS = ["ei", "ucb", "thompson", "mes", "kg"]
 
-    def __init__(self, db_path: str = "otbot.db") -> None:
+    def __init__(self, db_path: str = "helios.db") -> None:
         self.db_path = db_path
         # in-memory cache of summaries built this session
         self._summary_cache: dict[str, CampaignSummary] = {}

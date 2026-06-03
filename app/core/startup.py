@@ -284,7 +284,7 @@ def run_startup_checks() -> list[CheckResult]:
     total_t0 = time.monotonic()
 
     logger.info("=" * 60)
-    logger.info("OTbot startup validation")
+    logger.info("HELIOS startup validation")
     logger.info("=" * 60)
 
     for check_fn, required in STARTUP_CHECKS:

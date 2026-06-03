@@ -1,6 +1,6 @@
 """Campaign-level Metrics Engine — Discovery Velocity, Cost-per-Insight, Success Rate.
 
-Implements the outer meta-RL feedback signals described in the OTbot AI4X paper.
+Implements the outer meta-RL feedback signals described in the HELIOS AI4X paper.
 Three campaign-level KPIs feed back to the L3 Orchestrator as meta-optimization
 signals for adjusting round cadence, budget allocation, and strategy selection.
 

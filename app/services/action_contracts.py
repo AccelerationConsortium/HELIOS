@@ -90,7 +90,7 @@ LEGACY_SAFETY_MAP: dict[str, SafetyClass] = {
     "robot.dispense": SafetyClass.HAZARDOUS,
     "squidstat.run_experiment": SafetyClass.HAZARDOUS,
     "sample.prepare_from_csv": SafetyClass.HAZARDOUS,
-    # Original OTbot primitives
+    # Original HELIOS primitives
     "aspirate": SafetyClass.HAZARDOUS,
     "eis": SafetyClass.HAZARDOUS,
 }

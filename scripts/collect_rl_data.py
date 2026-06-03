@@ -2,7 +2,7 @@
 """Collect training data from historical campaigns for RL strategy selector.
 
 Usage:
-    python3 scripts/collect_rl_data.py --db otbot.db --output models/rl_training_data.json
+    python3 scripts/collect_rl_data.py --db helios.db --output models/rl_training_data.json
 """
 from __future__ import annotations
 
@@ -34,8 +34,8 @@ def main():
     parser.add_argument(
         "--db",
         type=str,
-        default="otbot.db",
-        help="Path to campaign database (default: otbot.db)",
+        default="helios.db",
+        help="Path to campaign database (default: helios.db)",
     )
     parser.add_argument(
         "--output",
@@ -64,7 +64,7 @@ def main():
     db_path = Path(args.db)
     if not db_path.exists():
         logger.error(f"Database not found: {args.db}")
-        logger.info("Please provide a valid path to campaign_state.db or otbot.db")
+        logger.info("Please provide a valid path to campaign_state.db or helios.db")
         sys.exit(1)
 
     logger.info(f"Collecting campaigns from: {args.db}")

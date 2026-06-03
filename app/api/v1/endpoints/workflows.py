@@ -33,7 +33,7 @@ class WorkflowImportRequest(BaseModel):
 def import_workflow(body: WorkflowImportRequest) -> dict[str, Any]:
     """Translate a battery-lab workflow and create a scheduled run.
 
-    The workflow is translated from the phase-based format to OTbot's
+    The workflow is translated from the phase-based format to HELIOS's
     flat step-list format, compiled, safety-checked, and persisted.
     """
     try:

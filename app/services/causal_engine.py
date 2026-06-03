@@ -792,7 +792,7 @@ class CausalReasoningService:
     wired into the worker loop without becoming a failure point.
     """
 
-    def __init__(self, db_path: str = "otbot.db") -> None:
+    def __init__(self, db_path: str = "helios.db") -> None:
         self.db_path = db_path
         self._graphs: dict[str, CausalGraph] = {}
         self._discovery = CausalDiscovery()

@@ -1,6 +1,6 @@
 """Agent Swarm system — ephemeral specialist groups spawned on demand.
 
-Implements the four specialist swarms described in the OTbot AI4X paper:
+Implements the four specialist swarms described in the HELIOS AI4X paper:
 
 1. **Scientist Swarm** — hypothesis generation via first-principles reasoning
 2. **Engineer Swarm** — protocol optimisation and in-silico simulation
@@ -100,7 +100,7 @@ class SwarmResult:
 
 
 class BaseSwarm(ABC):
-    """Abstract base for all OTbot agent swarms.
+    """Abstract base for all HELIOS agent swarms.
 
     Swarms are ephemeral containers that:
     1. Accept a SwarmContext (campaign state)

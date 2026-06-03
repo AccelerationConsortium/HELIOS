@@ -157,7 +157,7 @@ def _handle_generic_ok(*, instrument_id: str, primitive: str, params: dict[str, 
 
 # Mapping of primitive name → handler
 _PRIMITIVE_HANDLERS: dict[str, Any] = {
-    # Original OTbot primitives
+    # Original HELIOS primitives
     "aspirate": _handle_aspirate,
     "heat": _handle_heat,
     "eis": _handle_eis,

@@ -1,4 +1,4 @@
-"""Translate refactored_battery phase-based workflow JSON into OTbot protocol format.
+"""Translate refactored_battery phase-based workflow JSON into HELIOS protocol format.
 
 The battery-lab workflow uses a phase/parallel_threads structure:
 
@@ -10,7 +10,7 @@ The battery-lab workflow uses a phase/parallel_threads structure:
         ]},
     ]}
 
-OTbot's compiler expects a flat list of steps with explicit ``depends_on``:
+HELIOS's compiler expects a flat list of steps with explicit ``depends_on``:
 
     {"steps": [
         {"step_key": "setup_001", "primitive": "robot.home", "params": {}, "depends_on": []},
@@ -58,7 +58,7 @@ def _resource_for_primitive(primitive: str) -> list[str]:
 
 
 def translate_battery_workflow(workflow: dict[str, Any]) -> dict[str, Any]:
-    """Convert a phase-based battery-lab workflow into an OTbot protocol dict.
+    """Convert a phase-based battery-lab workflow into an HELIOS protocol dict.
 
     Args:
         workflow: The raw JSON object (parsed) with ``phases`` key.

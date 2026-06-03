@@ -73,12 +73,12 @@ async def lifespan(_: FastAPI):
     await scheduler.start()
 
     elapsed = (time.monotonic() - t0) * 1000
-    logger.info("OTbot startup complete in %.0f ms", elapsed)
+    logger.info("HELIOS startup complete in %.0f ms", elapsed)
 
     try:
         yield
     finally:
-        logger.info("OTbot shutting down …")
+        logger.info("HELIOS shutting down …")
         await scheduler.stop()
         set_event_bus(None)
         await stop_governance_listener(governance_sub, event_bus)
@@ -88,7 +88,7 @@ async def lifespan(_: FastAPI):
         await stop_metrics_listener(metrics_sub, event_bus)
         await stop_memory_listener(mem_sub, event_bus)
         await event_bus.stop()
-        logger.info("OTbot shutdown complete")
+        logger.info("HELIOS shutdown complete")
 
 
 app = FastAPI(
@@ -111,7 +111,7 @@ async def root_health() -> dict:
     The detailed endpoints live at ``/api/v1/health/ready`` and
     ``/api/v1/health/detail``.
     """
-    return {"ok": True, "service": "otbot"}
+    return {"ok": True, "service": "helios"}
 
 
 @app.get("/", include_in_schema=False)

@@ -2,7 +2,7 @@
 
 Given a minimal instrument specification (name, manufacturer, primitives),
 this service generates all files required to integrate a new instrument into
-the OTbot platform:
+the HELIOS platform:
 
 1. Hardware controller  (``app/hardware/{name}_controller.py``)
 2. Skill definition     (``agent/skills/{name}.md``)
@@ -692,7 +692,7 @@ except ImportError:
 class {cls}:
     """Wrapper for {spec.display_name} instrument control.
 
-    Provides a clean interface for the OTbot ActionDispatcher.
+    Provides a clean interface for the HELIOS ActionDispatcher.
     Thread-safe via ``_lock``.
     """
 

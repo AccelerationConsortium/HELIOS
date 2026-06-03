@@ -1,4 +1,4 @@
-"""OTbot Agent system -- typed agents with unified interface.
+"""HELIOS Agent system -- typed agents with unified interface.
 
 Individual agents follow the BaseAgent protocol. For paper-aligned
 grouping, use the four specialist swarms via SwarmFactory.

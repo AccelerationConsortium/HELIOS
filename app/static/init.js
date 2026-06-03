@@ -1,5 +1,5 @@
 /* ==========================================================================
-   OTbot Campaign Initialization — Vanilla JS Conversation Client
+   HELIOS Campaign Initialization — Vanilla JS Conversation Client
    ========================================================================== */
 
 const API = '/api/v1/init';

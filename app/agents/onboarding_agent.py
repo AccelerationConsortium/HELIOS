@@ -1,4 +1,4 @@
-"""Onboarding Agent — integrates new instruments into the OTbot platform.
+"""Onboarding Agent — integrates new instruments into the HELIOS platform.
 
 Wraps the InstrumentOnboardingService with the BaseAgent interface so it
 can be driven by the orchestrator or called directly from the API layer.
@@ -149,7 +149,7 @@ class OnboardingOutput(BaseModel):
 
 
 class OnboardingAgent(BaseAgent[OnboardingInput, OnboardingOutput]):
-    """Agent that onboards new instruments into OTbot.
+    """Agent that onboards new instruments into HELIOS.
 
     Lifecycle (multi-turn):
     1. generate: InstrumentSpec → code + confirmations
@@ -274,7 +274,7 @@ class OnboardingAgent(BaseAgent[OnboardingInput, OnboardingOutput]):
         """
         system_prompt = (
             "You are a laboratory automation integration specialist.\n"
-            "Given a lab instrument, you propose hardware control primitives for OTbot.\n"
+            "Given a lab instrument, you propose hardware control primitives for HELIOS.\n"
             "Return ONLY valid JSON (no markdown, no prose):\n"
             '{"primitives": [{'
             '"name": "string", '
@@ -299,7 +299,7 @@ class OnboardingAgent(BaseAgent[OnboardingInput, OnboardingOutput]):
             f"Instrument: {name_line}\n"
             f"SDK package (if known): {input_data.sdk_package or 'not provided'}\n"
             f"Documentation: {input_data.docs_url or 'not provided'}\n\n"
-            "List all meaningful hardware control primitives for OTbot integration."
+            "List all meaningful hardware control primitives for HELIOS integration."
         )
 
         discovered: list[dict[str, Any]] = []

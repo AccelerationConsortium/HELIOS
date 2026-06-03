@@ -1,4 +1,4 @@
-"""CLI entry point for OTbot Offline Benchmark Framework.
+"""CLI entry point for HELIOS Offline Benchmark Framework.
 
 Usage:
     python -m benchmarks                          # Run all scenarios
@@ -15,7 +15,7 @@ import sys
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="OTbot Offline Benchmark Framework",
+        description="HELIOS Offline Benchmark Framework",
     )
     parser.add_argument(
         "--category",

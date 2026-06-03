@@ -9,9 +9,9 @@ from app.services.action_contracts import (
     _evaluate_predicate_dict,
 )
 
-# All primitives supported by the battery-lab hardware + original OTbot primitives
+# All primitives supported by the battery-lab hardware + original HELIOS primitives
 BATTERY_LAB_PRIMITIVES: list[str] = [
-    # Original OTbot
+    # Original HELIOS
     "aspirate", "heat", "eis", "upload_artifact", "wait",
     # Robot
     "robot.home", "robot.load_pipettes", "robot.set_lights",

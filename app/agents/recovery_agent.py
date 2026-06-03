@@ -128,7 +128,7 @@ class RecoveryAgent(BaseAgent[RecoveryInput, RecoveryOutput]):
             # Fallback: simple retry logic
             return self._fallback_recovery(input_data)
 
-        # Convert OTbot input to recovery-agent types
+        # Convert HELIOS input to recovery-agent types
         state = self._build_device_state(input_data)
         error = self._build_hardware_error(input_data)
         history = self._build_history(input_data)
@@ -142,7 +142,7 @@ class RecoveryAgent(BaseAgent[RecoveryInput, RecoveryOutput]):
             stage=input_data.stage,
         )
 
-        # Convert decision back to OTbot format
+        # Convert decision back to HELIOS format
         output = RecoveryOutput(
             decision=decision.kind,
             rationale=decision.rationale,
@@ -172,7 +172,7 @@ class RecoveryAgent(BaseAgent[RecoveryInput, RecoveryOutput]):
         return output
 
     def _build_device_state(self, input_data: RecoveryInput):
-        """Convert OTbot input to recovery-agent DeviceState."""
+        """Convert HELIOS input to recovery-agent DeviceState."""
         # Normalize status to recovery-agent's DeviceStatus literals
         status_map = {
             "idle": "idle",
@@ -191,7 +191,7 @@ class RecoveryAgent(BaseAgent[RecoveryInput, RecoveryOutput]):
         )
 
     def _build_hardware_error(self, input_data: RecoveryInput):
-        """Convert OTbot input to recovery-agent HardwareError."""
+        """Convert HELIOS input to recovery-agent HardwareError."""
         # Normalize severity to recovery-agent's Severity literals
         severity_map = {
             "low": "low",
@@ -210,7 +210,7 @@ class RecoveryAgent(BaseAgent[RecoveryInput, RecoveryOutput]):
         )
 
     def _build_history(self, input_data: RecoveryInput) -> list:
-        """Convert OTbot history to recovery-agent DeviceState list."""
+        """Convert HELIOS history to recovery-agent DeviceState list."""
         # Status normalization map
         status_map = {
             "idle": "idle",

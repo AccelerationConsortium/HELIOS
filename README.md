@@ -15,7 +15,7 @@
 
 # HELIOS — Holistic Experiment Learning Intelligent Orchestration System
 
-HELIOS is a multi-agent system for self-driving laboratories (SDLs). Scientists describe experiments in plain language; HELIOS plans, validates, executes, and iterates autonomously — closing the loop between hypothesis and hardware.
+HELIOS is an **agent-native orchestrator** for self-driving laboratories (SDLs). It composes 25 specialist agents into 4 cooperating swarms behind a single natural-language interface — so scientists describe experiments in plain language, and HELIOS plans, validates, executes, and iterates autonomously, closing the loop between hypothesis and hardware.
 
 ```
 Scientist (natural language) → NL Parser → Campaign Planner → Safety Gate
@@ -28,7 +28,7 @@ Scientist (natural language) → NL Parser → Campaign Planner → Safety Gate
 ## Features
 
 - **Natural language intake** — paste a free-text experiment description; the NL parser extracts objective KPIs, parameter spaces, instrument requirements, and round counts
-- **Multi-agent pipeline** — 24 specialist agents (planner, safety, simulation, analyzer, compiler, monitor, recovery, …) orchestrated as a campaign
+- **Agent-native orchestration** — 25 specialist agents grouped into 4 swarms (Scientist / Engineer / Analyst / Validator), composed as a stage graph that branches, retries, and remembers
 - **Real-time reasoning stream** — every agent step emits SSE events; the browser shows a live decision tree of what each agent considered and why
 - **Hardware agnostic** — runs in `simulated` mode for development; switches to live Opentrons OT-2, PLC relays, and electrochemistry sensors by changing one env var
 - **Adaptive optimization** — Bayesian Optimization (Ax), DQN, PPO, genetic algorithms, and multi-objective Pareto search, selected automatically per campaign phase
@@ -87,8 +87,8 @@ Scientist (natural language) → NL Parser → Campaign Planner → Safety Gate
 
 ```bash
 # 1. Clone
-git clone https://github.com/your-org/OTbot.git
-cd OTbot
+git clone https://github.com/SissiFeng/HELIOS.git
+cd HELIOS
 
 # 2. Configure
 cp .env.example .env
@@ -150,7 +150,7 @@ All configuration is via environment variables (`.env` file or shell).
 | `ROBOT_IP` | — | OT-2 / OT-2 Flex HTTP API address |
 | `RELAY_PORT` | `auto` | Serial port for relay controller |
 | `SQUIDSTAT_PORT` | `auto` | Serial port for Squidstat potentiostat |
-| `OTBOT_PORT` | `8000` | Main service port |
+| `HELIOS_PORT` | `8000` | Main service port |
 | `RECOVERY_PORT` | `8001` | Hardware recovery bridge port |
 | `DB_PATH` | `/app/data/orchestrator.db` | SQLite database path |
 
@@ -277,9 +277,9 @@ ruff format app/
 ## Project Structure
 
 ```
-OTbot/
+HELIOS/
 ├── app/
-│   ├── agents/              # 24 specialist agents
+│   ├── agents/              # 25 specialist agents + 4 swarm coordinators
 │   ├── api/v1/endpoints/    # FastAPI route handlers
 │   ├── services/            # 73+ domain services
 │   │   ├── bayesian_opt.py  # Bayesian Optimization (Ax)
@@ -315,7 +315,7 @@ OTbot/
 
 ```yaml
 # docker-compose.yml provides:
-# - otbot       : main service on :8000, with SQLite volume
+# - helios       : main service on :8000, with SQLite volume
 # - recovery-agent : hardware bridge on :8001 (profile: hardware)
 ```
 
@@ -327,23 +327,23 @@ docker compose up
 docker compose --profile hardware up -d
 
 # View logs
-docker compose logs -f otbot
+docker compose logs -f helios
 ```
 
 ### Docker Build Variants
 
 ```bash
 # Simulated only (smallest image, default)
-docker build -t otbot .
+docker build -t helios .
 
 # With hardware serial drivers
-docker build --build-arg EXTRAS=hardware -t otbot:hw .
+docker build --build-arg EXTRAS=hardware -t helios:hw .
 
 # With ML strategy models
-docker build --build-arg EXTRAS=ml -t otbot:ml .
+docker build --build-arg EXTRAS=ml -t helios:ml .
 
 # Full stack
-docker build --build-arg EXTRAS=all -t otbot:full .
+docker build --build-arg EXTRAS=all -t helios:full .
 ```
 
 ### Health Checks
