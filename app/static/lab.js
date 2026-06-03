@@ -169,6 +169,19 @@ $$('.example-chip').forEach((chip) => {
     });
 });
 
+// Featured demo scenarios — same fill-and-focus behavior, but larger tiles
+$$('.demo-scenario').forEach((btn) => {
+    btn.addEventListener('click', () => {
+        mainInput.value = btn.dataset.example;
+        mainInput.style.height = 'auto';
+        mainInput.style.height = Math.min(mainInput.scrollHeight, 150) + 'px';
+        mainInput.focus();
+        // Visual feedback: briefly highlight the input
+        mainInput.classList.add('demo-scenario-pulse');
+        setTimeout(() => mainInput.classList.remove('demo-scenario-pulse'), 1200);
+    });
+});
+
 stopBtn.addEventListener('click', handleStop);
 
 if (editParamsBtn) {

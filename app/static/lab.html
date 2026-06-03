@@ -142,6 +142,39 @@
                             Mixing experiment
                         </button>
                     </div>
+
+                    <!-- ===== Featured demo scenarios (one-click → fills input) ===== -->
+                    <div class="demo-scenarios">
+                        <h3 class="demo-scenarios-title">★ Featured demos</h3>
+                        <button class="demo-scenario" data-example="Screen OER catalysts to minimize overpotential at 10 mA/cm². Parameters: Fe:Co:Ni ratio 0-100% (3 factors), deposition_time 5-60 min, electrolyte_KOH 0.1-1.0 M. Target η10 < 80 mV, max 8 rounds, batch size 4, Bayesian strategy.">
+                            <span class="demo-scenario-icon">🧪</span>
+                            <span class="demo-scenario-body">
+                                <span class="demo-scenario-name">OER catalyst screening</span>
+                                <span class="demo-scenario-desc">Minimize η₁₀ with 3-factor composition sweep</span>
+                            </span>
+                        </button>
+                        <button class="demo-scenario" data-example="Formulate a lithium-ion battery electrolyte to maximize ionic conductivity. Parameters: LiPF6_conc 0.5-1.5 M, EC:EMC_ratio 1:4 to 4:1, FEC_additive 0-10 vol%. Maximize conductivity, max 6 rounds, 4 candidates per round, Bayesian strategy.">
+                            <span class="demo-scenario-icon">🔋</span>
+                            <span class="demo-scenario-body">
+                                <span class="demo-scenario-name">Battery electrolyte</span>
+                                <span class="demo-scenario-desc">Maximize ionic conductivity over 3-component mix</span>
+                            </span>
+                        </button>
+                        <button class="demo-scenario" data-example="Optimize a PCR thermocycling protocol. Parameters: annealing_temp 55-68 °C, extension_time 15-90 s, primer_conc 0.1-1.0 µM. Maximize yield, max 5 rounds, 3 candidates per round, Bayesian strategy.">
+                            <span class="demo-scenario-icon">🧬</span>
+                            <span class="demo-scenario-body">
+                                <span class="demo-scenario-name">PCR thermocycling</span>
+                                <span class="demo-scenario-desc">Maximize yield across temperature / time / [primer]</span>
+                            </span>
+                        </button>
+                        <button class="demo-scenario" data-example="Calibrate an automated peptide coupling. Parameters: HATU_equiv 1.0-2.0, coupling_time 5-30 min, temperature 20-40 °C. Minimize coupling_failure_rate, max 6 rounds, 3 candidates per round, LHS strategy.">
+                            <span class="demo-scenario-icon">⚗️</span>
+                            <span class="demo-scenario-body">
+                                <span class="demo-scenario-name">Peptide coupling</span>
+                                <span class="demo-scenario-desc">Minimize failure rate for HATU-mediated coupling</span>
+                            </span>
+                        </button>
+                    </div>
                     <div class="onboard-entry">
                         <button class="btn btn-sm btn-ghost onboard-entry-btn" id="onboardDeviceBtn">
                             &#x2B; Onboard New Device
