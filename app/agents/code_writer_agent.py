@@ -8,7 +8,6 @@ If it is not available, the agent degrades gracefully with a clear error.
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -150,8 +149,8 @@ class CodeWriterAgent(BaseAgent[CodeWriterInput, CodeWriterOutput]):
     async def process(self, input_data: CodeWriterInput) -> CodeWriterOutput:
         # Import lazily so the module can be loaded even when ot2-nlp-agent
         # is absent (validate_input will catch that first).
-        from ot2_agent.planner import Planner, ConfirmedWorkflow
         from ot2_agent.compiler import Compiler
+        from ot2_agent.planner import ConfirmedWorkflow, Planner
 
         # --- Step 1: Plan ---
         planner = Planner()

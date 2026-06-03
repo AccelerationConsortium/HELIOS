@@ -1,16 +1,16 @@
 """Protocol definitions for the sensing layer."""
 
-from exp_agent.sensing.protocol.sensor_event import (
-    SensorEvent,
-    QualityStatus,
-    SensorQuality,
-    SensorMeta,
-    SensorType,
-)
 from exp_agent.sensing.protocol.health_event import (
-    SensorHealthEvent,
-    HealthStatus,
     HealthMetrics,
+    HealthStatus,
+    SensorHealthEvent,
+)
+from exp_agent.sensing.protocol.sensor_event import (
+    QualityStatus,
+    SensorEvent,
+    SensorMeta,
+    SensorQuality,
+    SensorType,
 )
 from exp_agent.sensing.protocol.snapshot import (
     SensorSnapshot,

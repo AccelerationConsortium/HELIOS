@@ -7,11 +7,10 @@ matrices to the Nexus embedding / SSL pipeline.
 from __future__ import annotations
 
 import logging
-import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from app.core.db import connection, json_dumps, parse_json, run_txn, utcnow_iso
+from app.core.db import connection, json_dumps, parse_json, run_txn
 
 logger = logging.getLogger(__name__)
 

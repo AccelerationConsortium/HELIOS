@@ -9,8 +9,8 @@ The hub:
 5. Publishes to event bus for downstream consumers
 """
 
-from exp_agent.sensing.hub.sensor_hub import SensorHub, HubConfig
 from exp_agent.sensing.hub.ring_buffer import RingBuffer
+from exp_agent.sensing.hub.sensor_hub import HubConfig, SensorHub
 
 __all__ = [
     "SensorHub",

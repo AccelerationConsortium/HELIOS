@@ -1,8 +1,9 @@
-import random
 import time
-from typing import Literal, Optional
+from typing import Literal
+
+from ...core.types import Action, DeviceState, HardwareError
 from ..base import Device
-from ...core.types import DeviceState, Action, HardwareError
+
 
 class SimHeater(Device):
     def __init__(self, name: str, fault_mode: Literal["none", "random", "timeout", "overshoot", "sensor_fail"] = "none"):
@@ -21,43 +22,45 @@ class SimHeater(Device):
         now = time.time()
         dt = now - self.last_update_time
         self.last_update_time = now
-        
-        # Speed up simulation: 1s real = 10s sim? 
+
+        # Speed up simulation: 1s real = 10s sim?
         # Or just keep 1:1. 1:1 is fine if we wait 5s.
         # Let's make it 2x faster to be snappy.
-        dt = dt * 2.0 
+        dt = dt * 2.0
 
         if self.heating:
             if self.heating_start_time == 0.0:
                  self.heating_start_time = now
-            
+
             # Simple approach to target
             diff = self.target_temp - self.current_temp
             # Rate: 5 degrees per second (fast heater!)
-            rate = 10.0 
+            rate = 10.0
             if diff > 0:
                 change = rate * dt
-                if change > diff: change = diff
+                if change > diff:
+                    change = diff
                 self.current_temp += change
             elif diff < 0:
                 change = -rate * dt
-                if change < diff: change = diff
+                if change < diff:
+                    change = diff
                 self.current_temp += change
-            
+
             # Time-based Fault Injection
             duration = now - self.heating_start_time # This is real time duration
-            
+
             # Physics-based Overshoot Fault (injected)
             # Trigger after 2 seconds of heating
             if self.fault_mode == "overshoot" and duration > 2.0:
                  # Force drift upwards
                  self.current_temp += 20.0 * dt
 
-            # Timeout Fault 
+            # Timeout Fault
             if self.fault_mode == "timeout" and duration > 2.0:
                 if self.fault_mode == "timeout":
                      # Undo progress or drift back
-                     self.current_temp -= change * 0.9 
+                     self.current_temp -= change * 0.9
 
         else:
             self.heating_start_time = 0.0 # Reset
@@ -73,7 +76,7 @@ class SimHeater(Device):
         self._update_physics()
 
         # Simulate sensor failure
-        if self.fault_mode == "sensor_fail": 
+        if self.fault_mode == "sensor_fail":
              # Only trigger after some time
              if self.tick_count > 5:
                 raise HardwareError(
@@ -84,14 +87,14 @@ class SimHeater(Device):
                     when=str(time.time()),
                     context={"status": self.status, "tick": self.tick_count}
                 )
-        
+
         # Check Safety Overshoot implicitly during read (sensor monitoring)
         if self.current_temp > self.max_safe_temp:
             self.status = "error"
             # We used to raise here, but that blocks recovery actions (like cool_down).
-            # We return the state, and let the Policy/Executor decide to raise 
+            # We return the state, and let the Policy/Executor decide to raise
             # if we are in a strict monitoring phase.
-            # raise HardwareError(...) 
+            # raise HardwareError(...)
 
 
         return DeviceState(
@@ -112,20 +115,20 @@ class SimHeater(Device):
             self.heating = True
             self.status = "running"
             print(f"[{self.name}] Setting target to {target}")
-            
+
         elif action.name == "wait":
             duration = action.params.get("duration", 0)
             print(f"[{self.name}] Waiting for {duration} seconds... (Simulated by sleep in logic)")
             # In real device, 'wait' might be a sleep command sent to firmware.
             # Here we just acknowledge.
             pass
-            
+
         elif action.name == "cool_down":
             self.target_temp = 25.0
             self.heating = False
             self.status = "idle"
             print(f"[{self.name}] Cooling down to 25.0")
-            
+
         else:
             print(f"[{self.name}] Unknown action: {action.name}")
 

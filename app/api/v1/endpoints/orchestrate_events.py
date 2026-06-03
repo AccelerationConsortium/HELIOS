@@ -70,7 +70,7 @@ async def _campaign_event_generator(
                 break
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=15)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 yield ": keepalive\n\n"
                 continue
 
@@ -97,9 +97,9 @@ async def campaign_event_stream(
     Supports ``Last-Event-ID`` header for reconnection replay.
     """
     from app.api.v1.endpoints.orchestrate import (
-        _running_campaigns,
-        _campaign_results,
         _campaign_errors,
+        _campaign_results,
+        _running_campaigns,
     )
 
     # Check campaign exists — in-memory first, then DB

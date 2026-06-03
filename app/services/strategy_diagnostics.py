@@ -16,13 +16,11 @@ import math
 from typing import Any
 
 from app.services.convergence import (
-    ConvergenceConfig,
-    ConvergenceStatus,
+    _mean,
+    _variance,
     detect_convergence,
     rolling_improvement_rate,
     variance_collapse,
-    _mean,
-    _variance,
 )
 from app.services.strategy_models import (
     CampaignSnapshot,
@@ -278,7 +276,7 @@ def _compute_replicate_need(
         return None
 
     total_w = sum(weights)
-    return sum(c * w for c, w in zip(components, weights)) / total_w
+    return sum(c * w for c, w in zip(components, weights, strict=False)) / total_w
 
 
 # ---------------------------------------------------------------------------

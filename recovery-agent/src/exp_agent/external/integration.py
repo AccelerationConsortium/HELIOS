@@ -49,14 +49,14 @@ Examples:
 """
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional
 
 from ..core.types import Action, DeviceState, HardwareError
 from ..devices.base import Device
-from .base import ExternalExecutor, ExecutionResult, ExecutionStatus, ExecutionError
-from .cli import CLIExecutor, CLIAction
-from .script import ScriptExecutor, ScriptAction, ScriptType
-from .api import APIExecutor, APIAction, HTTPMethod
+from .api import APIAction, APIExecutor, HTTPMethod
+from .base import ExecutionError, ExecutionResult, ExternalExecutor
+from .cli import CLIAction, CLIExecutor
+from .script import ScriptAction, ScriptExecutor, ScriptType
 
 
 @dataclass
@@ -68,8 +68,8 @@ class ExternalAction:
     name: str
     effect: str  # "read" or "write"
     executor_type: str  # "cli", "script", or "api"
-    external_config: Dict[str, Any] = field(default_factory=dict)
-    params: Dict[str, Any] = field(default_factory=dict)
+    external_config: dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
     timeout_seconds: float = 30.0
     retries: int = 0
 
@@ -111,7 +111,7 @@ class ActionRouter:
     and handles the execution.
     """
 
-    def __init__(self, executors: Dict[str, ExternalExecutor]):
+    def __init__(self, executors: dict[str, ExternalExecutor]):
         self.executors = executors
 
     def _build_cli_action(self, action: ExternalAction) -> CLIAction:
@@ -208,8 +208,8 @@ class ExternalDevice(Device):
     def __init__(
         self,
         name: str,
-        executors: Optional[Dict[str, ExternalExecutor]] = None,
-        initial_state: Optional[Dict[str, Any]] = None,
+        executors: dict[str, ExternalExecutor] | None = None,
+        initial_state: dict[str, Any] | None = None,
     ):
         """Initialize external device.
 
@@ -222,7 +222,7 @@ class ExternalDevice(Device):
         self.executors = executors or {}
         self.router = ActionRouter(self.executors)
         self._state = initial_state or {}
-        self._last_result: Optional[ExecutionResult] = None
+        self._last_result: ExecutionResult | None = None
         self._healthy = True
 
     def add_executor(self, name: str, executor: ExternalExecutor) -> None:
@@ -310,7 +310,7 @@ class ExternalDevice(Device):
                 message=str(e),
                 action=action.name,
                 context={"result": e.result.to_dict() if e.result else None}
-            )
+            ) from e
 
     def health(self) -> bool:
         """Check device health."""
@@ -319,8 +319,8 @@ class ExternalDevice(Device):
 
 def create_cli_device(
     name: str,
-    allowed_commands: Optional[List[str]] = None,
-    working_dir: Optional[str] = None,
+    allowed_commands: list[str] | None = None,
+    working_dir: str | None = None,
 ) -> ExternalDevice:
     """Create a device for CLI tool execution.
 
@@ -345,8 +345,8 @@ def create_cli_device(
 
 def create_script_device(
     name: str,
-    python_venv: Optional[str] = None,
-    allowed_paths: Optional[List[str]] = None,
+    python_venv: str | None = None,
+    allowed_paths: list[str] | None = None,
 ) -> ExternalDevice:
     """Create a device for script execution.
 
@@ -372,8 +372,8 @@ def create_script_device(
 def create_api_device(
     name: str,
     base_url: str,
-    default_headers: Optional[Dict[str, str]] = None,
-    allowed_domains: Optional[List[str]] = None,
+    default_headers: dict[str, str] | None = None,
+    allowed_domains: list[str] | None = None,
 ) -> ExternalDevice:
     """Create a device for API calls.
 
@@ -400,9 +400,9 @@ def create_api_device(
 
 def create_hybrid_device(
     name: str,
-    cli_config: Optional[Dict[str, Any]] = None,
-    script_config: Optional[Dict[str, Any]] = None,
-    api_config: Optional[Dict[str, Any]] = None,
+    cli_config: dict[str, Any] | None = None,
+    script_config: dict[str, Any] | None = None,
+    api_config: dict[str, Any] | None = None,
 ) -> ExternalDevice:
     """Create a device with multiple executor types.
 

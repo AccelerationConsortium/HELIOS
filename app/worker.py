@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import logging
-import sys
 import sqlite3
+import sys
 import threading
 from collections import defaultdict
 from typing import Any
@@ -14,7 +14,7 @@ from app.core.config import get_settings
 from app.core.constants import RUN_STATUS_FAILED, RUN_STATUS_SUCCEEDED
 from app.core.db import run_txn
 from app.services.action_contracts import ActionContract, SafetyClass
-from app.services.artifact_store import persist_json_artifact, persist_file_artifact
+from app.services.artifact_store import persist_json_artifact
 from app.services.audit import record_event
 from app.services.error_policy import ErrorPolicy, classify_step_error, classify_step_safety
 from app.services.lock_manager import acquire_lock, release_lock

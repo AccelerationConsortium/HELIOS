@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger("helios.services.meta_learning")
@@ -56,10 +56,10 @@ class TaskEmbedding:
             float(self.initial_kpi or 0.0),
         ]
 
-    def similarity(self, other: "TaskEmbedding") -> float:
+    def similarity(self, other: TaskEmbedding) -> float:
         v1 = self.to_vector()
         v2 = other.to_vector()
-        dot = sum(a * b for a, b in zip(v1, v2))
+        dot = sum(a * b for a, b in zip(v1, v2, strict=False))
         n1 = math.sqrt(sum(a**2 for a in v1)) + 1e-8
         n2 = math.sqrt(sum(a**2 for a in v2)) + 1e-8
         # Tag overlap bonus
@@ -188,13 +188,13 @@ class HyperparamPrior:
         sims = []
         for rec in self._records:
             rv = rec["task_vec"]
-            dot = sum(a * b for a, b in zip(task_vec, rv))
+            dot = sum(a * b for a, b in zip(task_vec, rv, strict=False))
             n1 = math.sqrt(sum(a**2 for a in task_vec)) + 1e-8
             n2 = math.sqrt(sum(a**2 for a in rv)) + 1e-8
             sims.append(dot / (n1 * n2))
 
         k = min(3, len(self._records))
-        top_k = sorted(zip(sims, self._records), reverse=True)[:k]
+        top_k = sorted(zip(sims, self._records, strict=False), reverse=True)[:k]
         weights = [max(s, 0) for s, _ in top_k]
         total_w = sum(weights) + 1e-8
 

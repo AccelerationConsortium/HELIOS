@@ -6,8 +6,9 @@ Plugin for imaging and video capture in lab automation.
 
 import re
 from enum import Enum
-from typing import Any, Dict, List
-from ...core.plugin_base import PluginBase, ParserBase, OperationDef
+from typing import Any
+
+from ...core.plugin_base import OperationDef, ParserBase, PluginBase
 
 
 class CameraOperation(Enum):
@@ -19,7 +20,7 @@ class CameraOperation(Enum):
     STOP_RECORDING = "stop_recording"
 
 
-CAMERA_OPERATIONS: Dict[CameraOperation, OperationDef] = {
+CAMERA_OPERATIONS: dict[CameraOperation, OperationDef] = {
     CameraOperation.START_STREAM: OperationDef(
         name="start_stream",
         action="camera.start_stream",
@@ -90,7 +91,7 @@ class CameraParser(ParserBase):
     def __init__(self):
         self._operations = CAMERA_OPERATIONS
 
-    def parse(self, instruction: str) -> Dict[str, Any]:
+    def parse(self, instruction: str) -> dict[str, Any]:
         """Parse camera instruction."""
         language = self.detect_language(instruction)
 
@@ -155,13 +156,13 @@ class CameraPlugin(PluginBase):
 
     def _register_operations(self):
         """Register camera operations."""
-        for op_type, op_def in CAMERA_OPERATIONS.items():
+        for _op_type, op_def in CAMERA_OPERATIONS.items():
             self.register_operation(op_def)
 
     def _create_parser(self) -> ParserBase:
         """Create camera parser."""
         return CameraParser()
 
-    def get_supported_operations(self) -> List[str]:
+    def get_supported_operations(self) -> list[str]:
         """Get list of supported operation names."""
         return [op.value for op in CameraOperation]

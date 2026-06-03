@@ -311,7 +311,7 @@ def get_custom_labware_definition(load_name: str) -> dict[str, Any] | None:
         return None
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         logger.debug("Failed to load custom labware '%s' from %s", load_name, path, exc_info=True)
@@ -337,7 +337,7 @@ def list_custom_labware(config_dir: str | None = None) -> list[dict[str, str]]:
     d = _ensure_dir(config_dir)
     for fp in sorted(d.glob("*.json")):
         try:
-            with open(fp, "r", encoding="utf-8") as f:
+            with open(fp, encoding="utf-8") as f:
                 data = json.load(f)
             load_name = data.get("parameters", {}).get("loadName", fp.stem)
             results.append({

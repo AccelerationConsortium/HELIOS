@@ -65,7 +65,6 @@ import numpy as np
 
 from app.services.candidate_gen import (
     ParameterSpace,
-    SearchDimension,
     _unit_to_value,
     sample_lhs,
 )
@@ -344,7 +343,7 @@ class MultiFidelityGP:
     def fit(
         self,
         observations: dict[str, list[tuple[np.ndarray, float]]],
-    ) -> "MultiFidelityGP":
+    ) -> MultiFidelityGP:
         """Fit the MTGP from ``{fidelity_name: [(x_vector, y), ...]}``.
 
         Each ``x_vector`` must already be a normalized [0,1]^d numpy array.
@@ -659,7 +658,7 @@ class MultiFidelityOptimizer:
         # Greedy top-n by cost-aware EI.
         scored.sort(key=lambda s: s[0], reverse=True)
         out: list[tuple[dict[str, Any], str]] = []
-        for ei, x, fname in scored[:n]:
+        for _ei, x, fname in scored[:n]:
             out.append((_vector_to_params(x, self.space), fname))
         return out
 

@@ -4,8 +4,9 @@ Liquid Handler Plugin
 Main plugin class for liquid handling robots.
 """
 
-from typing import Any, Dict, List
-from ...core.plugin_base import PluginBase, ParserBase, OperationDef
+from typing import Any
+
+from ...core.plugin_base import ParserBase, PluginBase
 from .operations import LIQUID_OPERATIONS, LiquidOperation
 from .parser import LiquidHandlerParser
 
@@ -44,18 +45,18 @@ class LiquidHandlerPlugin(PluginBase):
 
     def _register_operations(self):
         """Register all liquid handling operations."""
-        for op_type, op_def in LIQUID_OPERATIONS.items():
+        for _op_type, op_def in LIQUID_OPERATIONS.items():
             self.register_operation(op_def)
 
     def _create_parser(self) -> ParserBase:
         """Create the liquid handler parser."""
         return LiquidHandlerParser()
 
-    def get_supported_operations(self) -> List[str]:
+    def get_supported_operations(self) -> list[str]:
         """Get list of supported operation names."""
         return [op.value for op in LiquidOperation]
 
-    def get_keywords(self, language: str = "en") -> Dict[str, List[str]]:
+    def get_keywords(self, language: str = "en") -> dict[str, list[str]]:
         """Get all keywords organized by operation."""
         result = {}
         for op_type, op_def in LIQUID_OPERATIONS.items():
@@ -76,7 +77,7 @@ class LiquidHandlerAdapter:
     manufacturer: str = "Generic"
     model: str = "Generic Liquid Handler"
 
-    def translate_action(self, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def translate_action(self, action: str, params: dict[str, Any]) -> dict[str, Any]:
         """
         Translate generic action to hardware-specific command.
 
@@ -93,7 +94,7 @@ class LiquidHandlerAdapter:
             "params": params,
         }
 
-    def get_capabilities(self) -> Dict[str, Any]:
+    def get_capabilities(self) -> dict[str, Any]:
         """Get adapter capabilities."""
         return {
             "name": self.name,

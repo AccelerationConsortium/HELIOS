@@ -14,8 +14,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.agents.base import AgentPauseRejected, BaseAgent, DecisionNode
-from app.agents.pause import Granularity, PauseRequest, RiskAssessment
+from app.agents.base import BaseAgent, DecisionNode
+from app.agents.pause import Granularity, PauseRequest
 
 
 class SafetyCheckInput(BaseModel):

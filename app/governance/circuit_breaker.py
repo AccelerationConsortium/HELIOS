@@ -31,12 +31,12 @@ import logging
 from typing import Any
 
 from app.core.db import connection, json_dumps, utcnow_iso
-from app.governance.claim_verifier import ClaimVerifier
 from app.governance.claim_tracker import ClaimTracker
+from app.governance.claim_verifier import ClaimVerifier
 from app.governance.schemas import (
     BreakCondition,
-    Claim,
     CircuitBreakerState,
+    Claim,
     GovernanceDecision,
     GovernanceVerdict,
     PolicyViolation,

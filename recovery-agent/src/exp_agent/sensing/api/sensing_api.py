@@ -6,13 +6,13 @@ Can be used standalone or integrated into an existing FastAPI app.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Any
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from exp_agent.sensing.hub.sensor_hub import SensorHub
 from exp_agent.sensing.health.health_monitor import HealthMonitor
-from exp_agent.sensing.protocol.sensor_event import SensorType
+from exp_agent.sensing.hub.sensor_hub import SensorHub
 from exp_agent.sensing.protocol.health_event import HealthStatus
+from exp_agent.sensing.protocol.sensor_event import SensorType
 
 
 @dataclass
@@ -29,7 +29,7 @@ class SensingAPI:
     """
 
     hub: SensorHub
-    health_monitor: Optional[HealthMonitor] = None
+    health_monitor: HealthMonitor | None = None
 
     def get_snapshot(self) -> dict[str, Any]:
         """
@@ -54,14 +54,14 @@ class SensingAPI:
         snapshot = self.hub.get_snapshot()
         return snapshot.to_dict()
 
-    def get_sensor(self, sensor_id: str) -> Optional[dict[str, Any]]:
+    def get_sensor(self, sensor_id: str) -> dict[str, Any] | None:
         """Get snapshot for a specific sensor."""
         sensor_snapshot = self.hub.get_sensor_snapshot(sensor_id)
         if sensor_snapshot is None:
             return None
         return sensor_snapshot.to_dict()
 
-    def get_value(self, sensor_id: str) -> Optional[float]:
+    def get_value(self, sensor_id: str) -> float | None:
         """Get latest value for a sensor."""
         return self.hub.get_latest_value(sensor_id)
 
@@ -102,8 +102,8 @@ class SensingAPI:
 
     def get_history(
         self,
-        sensor_id: Optional[str] = None,
-        since: Optional[datetime] = None,
+        sensor_id: str | None = None,
+        since: datetime | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """Get historical events."""
@@ -174,9 +174,9 @@ class SensingAPI:
     def check_threshold(
         self,
         sensor_id: str,
-        max_value: Optional[float] = None,
-        min_value: Optional[float] = None,
-    ) -> tuple[bool, Optional[str]]:
+        max_value: float | None = None,
+        min_value: float | None = None,
+    ) -> tuple[bool, str | None]:
         """
         Check if a sensor value is within thresholds.
 
@@ -199,7 +199,7 @@ class SensingAPI:
         self,
         sensor_id: str,
         min_airflow: float = 0.3,
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """Check fume hood airflow is adequate."""
         return self.check_threshold(sensor_id, min_value=min_airflow)
 
@@ -207,7 +207,7 @@ class SensingAPI:
         self,
         sensor_id: str,
         max_temp: float,
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """Check temperature is below limit."""
         return self.check_threshold(sensor_id, max_value=max_temp)
 
@@ -215,7 +215,7 @@ class SensingAPI:
         self,
         sensor_id: str,
         max_pressure: float,
-    ) -> tuple[bool, Optional[str]]:
+    ) -> tuple[bool, str | None]:
         """Check pressure is below limit."""
         return self.check_threshold(sensor_id, max_value=max_pressure)
 
@@ -232,8 +232,8 @@ def create_sensing_router(api: SensingAPI):
     """
     try:
         from fastapi import APIRouter, HTTPException, Query
-    except ImportError:
-        raise ImportError("FastAPI is required for HTTP API. Install with: pip install fastapi")
+    except ImportError as e:
+        raise ImportError("FastAPI is required for HTTP API. Install with: pip install fastapi") from e
 
     router = APIRouter(tags=["sensors"])
 
@@ -272,12 +272,12 @@ def create_sensing_router(api: SensingAPI):
     def get_sensor_history(
         sensor_id: str,
         limit: int = Query(default=100, le=1000),
-        since_minutes: Optional[int] = Query(default=None),
+        since_minutes: int | None = Query(default=None),
     ):
         """Get historical events for a sensor."""
         since = None
         if since_minutes:
-            since = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
+            since = datetime.now(UTC) - timedelta(minutes=since_minutes)
         return api.get_history(sensor_id=sensor_id, since=since, limit=limit)
 
     @router.get("/type/{sensor_type}")

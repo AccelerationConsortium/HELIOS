@@ -4,18 +4,18 @@ OT-2 NLP Agent - FastAPI Test Server
 Supports both traditional instruction-based workflow and the new Planner/Compiler architecture.
 """
 
+from typing import Any
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
-
 from ot2_agent import OT2Agent
+from ot2_agent.compiler import Compiler
+from ot2_agent.compiler.device_mapper import DeviceRegistry
 
 # Import Planner/Compiler
-from ot2_agent.planner import Planner, PlannerOutput, WorkflowDraft, ConfirmedWorkflow
-from ot2_agent.compiler import Compiler, CompilerOutput
+from ot2_agent.planner import ConfirmedWorkflow, Planner, PlannerOutput
 from ot2_agent.planner.domain_knowledge import OERDomainKnowledge
-from ot2_agent.compiler.device_mapper import DeviceRegistry
+from pydantic import BaseModel, Field
 
 app = FastAPI(
     title="OT-2 NLP Agent API",
@@ -43,7 +43,7 @@ class ParseRequest(BaseModel):
     instruction: str
 
 class ParseResponse(BaseModel):
-    operation: Optional[str]
+    operation: str | None
     params: dict
     confidence: float
     language: str
@@ -51,19 +51,19 @@ class ParseResponse(BaseModel):
 class LabwareRequest(BaseModel):
     labware_type: str
     slot: int
-    name: Optional[str] = None
+    name: str | None = None
 
 class PipetteRequest(BaseModel):
     pipette_type: str
     mount: str
-    tip_rack: Optional[str] = None
+    tip_rack: str | None = None
 
 class ProtocolRequest(BaseModel):
     name: str
     description: str = ""
-    labware: List[LabwareRequest] = []
-    pipettes: List[PipetteRequest] = []
-    instructions: List[str] = []
+    labware: list[LabwareRequest] = []
+    pipettes: list[PipetteRequest] = []
+    instructions: list[str] = []
 
 class ProtocolResponse(BaseModel):
     preview: str
@@ -79,8 +79,8 @@ class MissingInfoResponse(BaseModel):
     parameter: str
     question: str
     question_zh: str
-    options: Optional[List[str]] = None
-    default: Optional[Any] = None
+    options: list[str] | None = None
+    default: Any | None = None
     required: bool = True
 
 
@@ -89,8 +89,8 @@ class UnitOperationResponse(BaseModel):
     name: str
     uo_type: str
     description: str
-    parameters: Dict[str, Any]
-    placeholders: List[MissingInfoResponse]
+    parameters: dict[str, Any]
+    placeholders: list[MissingInfoResponse]
 
 
 class WorkflowCandidateResponse(BaseModel):
@@ -98,9 +98,9 @@ class WorkflowCandidateResponse(BaseModel):
     name: str
     description: str
     confidence: float
-    unit_operations: List[UnitOperationResponse]
-    assumptions: List[str]
-    alternatives: List[str]
+    unit_operations: list[UnitOperationResponse]
+    assumptions: list[str]
+    alternatives: list[str]
 
 
 class IntentResponse(BaseModel):
@@ -109,27 +109,27 @@ class IntentResponse(BaseModel):
     domain: str
     language: str
     confidence: float
-    target_metrics: List[str]
-    known_conditions: Dict[str, Any]
+    target_metrics: list[str]
+    known_conditions: dict[str, Any]
 
 
 class PlanRequest(BaseModel):
     """Request to plan an experiment."""
     intent: str = Field(..., description="Natural language description of the experiment")
-    context: Optional[Dict[str, Any]] = Field(default=None, description="Known conditions and constraints")
+    context: dict[str, Any] | None = Field(default=None, description="Known conditions and constraints")
 
 
 class PlanResponse(BaseModel):
     """Response from the planner."""
     intent: IntentResponse
-    candidates: List[WorkflowCandidateResponse]
+    candidates: list[WorkflowCandidateResponse]
     recommended_idx: int
 
 
 class CompileRequest(BaseModel):
     """Request to compile a workflow."""
     candidate_index: int = Field(..., description="Index of the candidate workflow to compile")
-    filled_parameters: Dict[str, Any] = Field(default_factory=dict, description="Parameters filled in by the user")
+    filled_parameters: dict[str, Any] = Field(default_factory=dict, description="Parameters filled in by the user")
     # The workflow candidates must be passed from a previous /plan call
     # In a real app, you might store them in a session or pass them directly
 
@@ -138,7 +138,7 @@ class ValidationIssueResponse(BaseModel):
     """A validation issue."""
     severity: str
     message: str
-    step: Optional[str] = None
+    step: str | None = None
 
 
 class CheckpointResponse(BaseModel):
@@ -155,8 +155,8 @@ class CompileResponse(BaseModel):
     is_valid: bool
     error_count: int
     warning_count: int
-    issues: List[ValidationIssueResponse]
-    checkpoints: List[CheckpointResponse]
+    issues: list[ValidationIssueResponse]
+    checkpoints: list[CheckpointResponse]
     python_code: str
     workflow_json: str
 
@@ -164,8 +164,8 @@ class CompileResponse(BaseModel):
 class PlanAndCompileRequest(BaseModel):
     """Combined request to plan and compile in one step."""
     intent: str = Field(..., description="Natural language description of the experiment")
-    context: Optional[Dict[str, Any]] = Field(default=None, description="Known conditions and constraints")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="Parameters to fill in")
+    context: dict[str, Any] | None = Field(default=None, description="Known conditions and constraints")
+    parameters: dict[str, Any] = Field(default_factory=dict, description="Parameters to fill in")
     candidate_index: int = Field(default=0, description="Which candidate to use (0 = recommended)")
 
 
@@ -273,7 +273,7 @@ def list_pipettes():
 # ============ Planner/Compiler Endpoints ============
 
 # Store last planning result for compile endpoint
-_last_plan_output: Optional[PlannerOutput] = None
+_last_plan_output: PlannerOutput | None = None
 
 
 @app.post("/plan", response_model=PlanResponse)
@@ -337,7 +337,7 @@ def plan_experiment(request: PlanRequest):
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/compile", response_model=CompileResponse)
@@ -407,7 +407,7 @@ def compile_workflow(request: CompileRequest):
         )
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/plan-compile", response_model=CompileResponse)
@@ -477,7 +477,7 @@ def plan_and_compile(request: PlanAndCompileRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/templates")
@@ -503,7 +503,7 @@ def list_templates():
 
 
 @app.get("/missing-parameters")
-def get_missing_parameters(intent: str, context: Optional[str] = None):
+def get_missing_parameters(intent: str, context: str | None = None):
     """
     Get the missing parameters for a given intent.
 
@@ -539,7 +539,7 @@ def get_missing_parameters(intent: str, context: Optional[str] = None):
         return {"missing_parameters": missing}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 if __name__ == "__main__":

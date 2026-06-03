@@ -5,12 +5,12 @@ This module maintains real-time state about the current experiment phase,
 tools being held, electrode status, and other critical information needed
 to determine appropriate recovery actions when failures occur.
 """
-from typing import Optional, Dict, Any, Literal
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
+from typing import Any
 
 
-class ExperimentPhase(str, Enum):
+class ExperimentPhase(StrEnum):
     """Current phase of the experiment"""
     SAMPLE_PREP = "SAMPLE_PREP"  # Sample preparation: pipetting, mixing, adding reagents
     ELECTROCHEM_RUNNING = "ELECTROCHEM_RUNNING"  # Electrochemical test in progress
@@ -18,7 +18,7 @@ class ExperimentPhase(str, Enum):
     UNKNOWN = "UNKNOWN"  # Cannot determine phase (error state)
 
 
-class Payload(str, Enum):
+class Payload(StrEnum):
     """Current tool/item held by the OT2 robot"""
     TIP = "TIP"  # Regular pipette tip
     FLUSH_TOOL = "FLUSH_TOOL"  # Flusher tool
@@ -36,12 +36,12 @@ class RunContext:
     """
 
     # Current execution position
-    current_step_id: Optional[str] = None
+    current_step_id: str | None = None
     current_phase: ExperimentPhase = ExperimentPhase.UNKNOWN
 
     # OT2 robot state
     payload: Payload = Payload.NONE
-    pipette_has_tip: Dict[str, bool] = field(default_factory=lambda: {
+    pipette_has_tip: dict[str, bool] = field(default_factory=lambda: {
         'left': False,
         'right': False
     })
@@ -51,27 +51,27 @@ class RunContext:
     electrode_contaminated: bool = False  # Has electrode been used (needs cleaning)
 
     # Loop context
-    loop_num: Optional[int] = None
-    reactor_well: Optional[str] = None
-    vial_pos: Optional[str] = None
-    tip_pos: Optional[str] = None
+    loop_num: int | None = None
+    reactor_well: str | None = None
+    vial_pos: str | None = None
+    tip_pos: str | None = None
 
     # Additional metadata
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def update_step(self, step_id: str, phase: Optional[ExperimentPhase] = None):
+    def update_step(self, step_id: str, phase: ExperimentPhase | None = None):
         """Update current step and optionally phase"""
         self.current_step_id = step_id
         if phase is not None:
             self.current_phase = phase
 
-    def acquire_payload(self, payload: Payload, pipette: Optional[str] = None):
+    def acquire_payload(self, payload: Payload, pipette: str | None = None):
         """Record that robot has acquired a tool/tip"""
         self.payload = payload
         if payload == Payload.TIP and pipette:
             self.pipette_has_tip[pipette] = True
 
-    def release_payload(self, pipette: Optional[str] = None):
+    def release_payload(self, pipette: str | None = None):
         """Record that robot has released current tool/tip"""
         if self.payload == Payload.TIP and pipette:
             self.pipette_has_tip[pipette] = False
@@ -106,7 +106,7 @@ class RunContext:
         self.electrode_inserted = False
         self.electrode_contaminated = False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert context to dictionary for logging"""
         return {
             'current_step_id': self.current_step_id,

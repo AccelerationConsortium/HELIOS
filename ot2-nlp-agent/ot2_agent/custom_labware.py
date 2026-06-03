@@ -14,9 +14,7 @@ https://labware.opentrons.com/create
 import json
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # OT-2 physical constraints (mm)
@@ -61,7 +59,7 @@ class LabwareValidationResult:
     warnings: list[str]        # suspicious but potentially valid
     missing_fields: list[str]  # fields the user still needs to provide
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "valid": self.valid,
             "errors": self.errors,
@@ -74,9 +72,9 @@ class LabwareValidationResult:
 class WellDefinition:
     """Definition of a single well."""
     depth: float  # mm
-    diameter: Optional[float] = None  # mm, for circular wells
-    x_dimension: Optional[float] = None  # mm, for rectangular wells
-    y_dimension: Optional[float] = None  # mm, for rectangular wells
+    diameter: float | None = None  # mm, for circular wells
+    x_dimension: float | None = None  # mm, for rectangular wells
+    y_dimension: float | None = None  # mm, for rectangular wells
     total_liquid_volume: float = 0  # µL
     shape: str = "circular"  # "circular" or "rectangular"
 
@@ -95,7 +93,7 @@ class CustomLabwareDefinition:
     # Labware dimensions
     format: str = "irregular"  # "96Standard", "384Standard", "trough", "irregular"
     brand: str = "custom"
-    brand_id: Optional[str] = None
+    brand_id: str | None = None
 
     # Dimensions in mm
     x_dimension: float = 127.76  # Standard SBS footprint
@@ -103,8 +101,8 @@ class CustomLabwareDefinition:
     z_dimension: float = 15.0
 
     # Well configuration
-    wells: Dict[str, WellDefinition] = field(default_factory=dict)
-    well_ordering: List[List[str]] = field(default_factory=list)
+    wells: dict[str, WellDefinition] = field(default_factory=dict)
+    well_ordering: list[list[str]] = field(default_factory=list)
 
     # Grid parameters (for regular grids)
     rows: int = 0
@@ -121,7 +119,7 @@ class CustomLabwareDefinition:
     version: int = 1
     schema_version: int = 2
 
-    def to_opentrons_json(self) -> Dict[str, Any]:
+    def to_opentrons_json(self) -> dict[str, Any]:
         """Convert to Opentrons labware JSON format."""
         # Build wells dict
         wells_dict = {}
@@ -403,7 +401,7 @@ class CustomLabwareManager:
             labware_dir: Directory to search for custom labware JSON files
         """
         self.labware_dir = labware_dir or os.path.expanduser("~/.ot2-labware")
-        self.custom_labware: Dict[str, CustomLabwareDefinition] = {}
+        self.custom_labware: dict[str, CustomLabwareDefinition] = {}
         self._load_builtin_templates()
 
     def _load_builtin_templates(self):
@@ -560,11 +558,11 @@ class CustomLabwareManager:
 
         return labware
 
-    def get_template(self, name: str) -> Optional[CustomLabwareDefinition]:
+    def get_template(self, name: str) -> CustomLabwareDefinition | None:
         """Get a built-in template by name."""
         return self.templates.get(name)
 
-    def list_templates(self) -> List[str]:
+    def list_templates(self) -> list[str]:
         """List available built-in templates."""
         return list(self.templates.keys())
 
@@ -578,7 +576,7 @@ class CustomLabwareManager:
         Returns:
             CustomLabwareDefinition object
         """
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, encoding='utf-8') as f:
             data = json.load(f)
 
         name = data['parameters']['loadName']
@@ -698,13 +696,13 @@ class CustomLabwareManager:
         self.custom_labware[name] = labware
         return labware
 
-    def get_labware(self, name: str) -> Optional[CustomLabwareDefinition]:
+    def get_labware(self, name: str) -> CustomLabwareDefinition | None:
         """Get a loaded custom labware by name."""
         return self.custom_labware.get(name) or self.templates.get(name)
 
 
 # Singleton instance
-_labware_manager: Optional[CustomLabwareManager] = None
+_labware_manager: CustomLabwareManager | None = None
 
 
 def get_labware_manager() -> CustomLabwareManager:

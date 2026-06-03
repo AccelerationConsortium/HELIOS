@@ -15,10 +15,10 @@ from __future__ import annotations
 # Import all migration modules to register them
 # New migrations should be imported here
 from app.contracts.migrations import (
-    task_contract_migrations,
     campaign_plan_migrations,
-    run_bundle_migrations,
     result_packet_migrations,
+    run_bundle_migrations,
+    task_contract_migrations,
 )
 
 __all__ = [

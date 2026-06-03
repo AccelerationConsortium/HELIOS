@@ -6,15 +6,14 @@ device connections, protocols, and settings.
 """
 
 import json
-import os
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional
 from pathlib import Path
+from typing import Any
 
 from .communication import (
     CommunicationInterface,
-    SerialCommunication,
     NetworkCommunication,
+    SerialCommunication,
 )
 
 
@@ -24,16 +23,16 @@ class DeviceConfig:
 
     name: str
     type: str  # e.g., "heater", "pump", "sensor"
-    brand: Optional[str] = None  # e.g., "IKA", "ThermoFisher"
-    model: Optional[str] = None
+    brand: str | None = None  # e.g., "IKA", "ThermoFisher"
+    model: str | None = None
 
     # Connection settings
     connection_type: str  # "serial", "network", "usb"
-    connection_params: Dict[str, Any] = field(default_factory=dict)
+    connection_params: dict[str, Any] = field(default_factory=dict)
 
     # Device-specific settings
-    safety_limits: Dict[str, Any] = field(default_factory=dict)
-    calibration: Dict[str, Any] = field(default_factory=dict)
+    safety_limits: dict[str, Any] = field(default_factory=dict)
+    calibration: dict[str, Any] = field(default_factory=dict)
 
     # Agent settings
     enabled: bool = True
@@ -62,8 +61,8 @@ class DeviceConfig:
 class LabConfig:
     """Configuration for the entire lab setup."""
 
-    devices: List[DeviceConfig] = field(default_factory=list)
-    global_settings: Dict[str, Any] = field(default_factory=dict)
+    devices: list[DeviceConfig] = field(default_factory=list)
+    global_settings: dict[str, Any] = field(default_factory=dict)
 
     # Recovery settings
     recovery_enabled: bool = True
@@ -75,7 +74,7 @@ class LabConfig:
     log_level: str = "INFO"
 
     # Safety settings
-    global_safety_limits: Dict[str, Any] = field(default_factory=dict)
+    global_safety_limits: dict[str, Any] = field(default_factory=dict)
 
 
 class ConfigManager:
@@ -84,7 +83,7 @@ class ConfigManager:
     def __init__(self, config_dir: str = "~/.exp_agent"):
         self.config_dir = Path(config_dir).expanduser()
         self.config_dir.mkdir(exist_ok=True)
-        self.current_config: Optional[LabConfig] = None
+        self.current_config: LabConfig | None = None
 
     def load_config(self, config_file: str = "lab_config.json") -> LabConfig:
         """Load configuration from file."""
@@ -95,7 +94,7 @@ class ConfigManager:
             self.current_config = self._create_default_config()
             self.save_config(self.current_config, config_file)
         else:
-            with open(config_path, "r") as f:
+            with open(config_path) as f:
                 data = json.load(f)
                 self.current_config = self._parse_config(data)
 
@@ -124,7 +123,7 @@ class ConfigManager:
             global_settings={"timezone": "UTC", "units": "celsius"},
         )
 
-    def _parse_config(self, data: Dict[str, Any]) -> LabConfig:
+    def _parse_config(self, data: dict[str, Any]) -> LabConfig:
         """Parse configuration from dictionary."""
         devices = []
         for device_data in data.get("devices", []):
@@ -141,7 +140,7 @@ class ConfigManager:
             global_safety_limits=data.get("global_safety_limits", {}),
         )
 
-    def _serialize_config(self, config: LabConfig) -> Dict[str, Any]:
+    def _serialize_config(self, config: LabConfig) -> dict[str, Any]:
         """Serialize configuration to dictionary."""
         return {
             "devices": [self._device_to_dict(device) for device in config.devices],
@@ -154,7 +153,7 @@ class ConfigManager:
             "global_safety_limits": config.global_safety_limits,
         }
 
-    def _device_to_dict(self, device: DeviceConfig) -> Dict[str, Any]:
+    def _device_to_dict(self, device: DeviceConfig) -> dict[str, Any]:
         """Convert DeviceConfig to dictionary."""
         return {
             "name": device.name,

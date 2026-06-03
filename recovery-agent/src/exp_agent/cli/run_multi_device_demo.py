@@ -14,32 +14,34 @@ handles all device types uniformly.
 Usage:
     python -m exp_agent.cli.run_multi_device_demo
 """
+import json
 import os
 import sys
 import time
-import json
 import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import datetime
 from io import StringIO
 from pathlib import Path
-from contextlib import contextmanager
-from datetime import datetime
-from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Any, Optional, Union
+from typing import Any
 
 from ..core.types import (
-    PlanStep, PlanPatch, Action, HardwareError, DeviceState,
-    ExecutionState, Decision,
+    Action,
+    Decision,
+    DeviceState,
+    ExecutionState,
+    HardwareError,
 )
-from ..devices.simulated.heater import SimHeater
-from ..devices.simulated.pump import SimPump
-from ..devices.simulated.positioner import SimPositioner
-from ..devices.simulated.spectrometer import SimSpectrometer
 from ..devices.base import Device
+from ..devices.simulated.heater import SimHeater
+from ..devices.simulated.positioner import SimPositioner
+from ..devices.simulated.pump import SimPump
+from ..devices.simulated.spectrometer import SimSpectrometer
 from ..executor.guarded_executor import GuardedExecutor
-from ..recovery.recovery_agent import RecoveryAgent
-from ..recovery.policy import classify_error, analyze_signature
 from ..recovery.classifier import ErrorClassifier
-
+from ..recovery.policy import analyze_signature, classify_error
+from ..recovery.recovery_agent import RecoveryAgent
 
 # ============================================================================
 # Suppress noisy internal prints
@@ -139,8 +141,8 @@ def simulate_mcp_call(tool: str, params: dict, result: str):
 @dataclass
 class MemoryStore:
     """Simple in-memory event store."""
-    events: List[Dict[str, Any]] = field(default_factory=list)
-    log_file: Optional[Path] = None
+    events: list[dict[str, Any]] = field(default_factory=list)
+    log_file: Path | None = None
 
     def write(self, event_type: str, correlation_id: str, data: dict):
         entry = {
@@ -162,15 +164,15 @@ class MemoryStore:
 def run_error_pipeline(
     error: HardwareError,
     dev_state: DeviceState,
-    history: List[DeviceState],
+    history: list[DeviceState],
     last_action: Action,
     stage: str,
     memory: MemoryStore,
     device: Device,
     executor: GuardedExecutor,
     state: ExecutionState,
-    recovery_agent: Optional[RecoveryAgent] = None,
-    metric: Optional[str] = None,
+    recovery_agent: RecoveryAgent | None = None,
+    metric: str | None = None,
 ) -> Decision:
     """
     Run the complete 7-stage pipeline for any device type.
@@ -190,7 +192,7 @@ def run_error_pipeline(
     section("② CLASSIFY — Error Profiling", YELLOW)
     profile = classify_error(error)
     classifier = ErrorClassifier()
-    classifier_profile = classifier.classify(error)
+    classifier.classify(error)
     log_event("error.classified", "WARNING",
               f"unsafe={profile.unsafe}  recoverable={profile.recoverable}  "
               f"strategy={profile.default_strategy}",
@@ -264,7 +266,7 @@ def run_error_pipeline(
                     executor.execute(device, act, state)
                 log_event("recovery.action.ok", "INFO",
                           f"[{i+1}/{len(decision.actions)}] {act.name} — SUCCESS", {})
-            except Exception as e:
+            except Exception:
                 log_event("recovery.action.failed", "ERROR",
                           f"[{i+1}/{len(decision.actions)}] {act.name} — FAILED", {})
             time.sleep(0.15)

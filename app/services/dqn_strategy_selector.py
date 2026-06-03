@@ -15,12 +15,12 @@ Key improvements over tabular Q-learning:
 from __future__ import annotations
 
 import logging
+import pickle
+import random
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-import random
-import pickle
-from collections import deque
 
 import numpy as np
 
@@ -228,7 +228,7 @@ class DQNAgent:
         # Experience replay (PER or uniform)
         self._use_per = config.use_per
         if self._use_per:
-            from app.services.prioritized_replay import PrioritizedReplayBuffer, PERConfig
+            from app.services.prioritized_replay import PERConfig, PrioritizedReplayBuffer
             per_config = PERConfig(
                 capacity=config.replay_capacity,
                 alpha=config.per_alpha,
@@ -318,7 +318,7 @@ class DQNAgent:
             per_indices = None
             is_weights_t = None
 
-        states, actions, rewards, next_states, dones = zip(*transitions)
+        states, actions, rewards, next_states, dones = zip(*transitions, strict=False)
 
         # Convert to tensors
         states_t = torch.FloatTensor(np.array(states))
@@ -396,7 +396,7 @@ class DQNAgent:
         """Soft update target network: θ_target = τ·θ_online + (1-τ)·θ_target."""
         tau = self.config.tau
         for target_param, online_param in zip(
-            self.target_network.parameters(), self.q_network.parameters()
+            self.target_network.parameters(), self.q_network.parameters(), strict=False
         ):
             target_param.data.copy_(
                 tau * online_param.data + (1.0 - tau) * target_param.data
@@ -482,7 +482,7 @@ class DQNAgent:
                 if isinstance(replay_data, dict):
                     if replay_data["type"] == "per" and self._use_per:
                         for transition, priority in zip(
-                            replay_data["data"], replay_data["priorities"]
+                            replay_data["data"], replay_data["priorities"], strict=False
                         ):
                             if transition is not None:
                                 self.per_buffer.add(transition, priority=priority)
@@ -524,7 +524,7 @@ class DQNStrategySelector:
     """
 
     def __init__(self, config: DQNConfig | None = None):
-        from app.services.rl_strategy_selector import RLState, ACTIONS
+        from app.services.rl_strategy_selector import ACTIONS
 
         if config is None:
             config = DQNConfig()

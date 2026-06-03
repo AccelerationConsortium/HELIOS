@@ -10,22 +10,22 @@ This module provides:
 import json
 import time
 import uuid
-from dataclasses import dataclass, field, asdict
-from datetime import datetime
-from enum import Enum
-from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional
 from collections import deque
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from enum import StrEnum
+from pathlib import Path
+from typing import Any
 
-from ..core.types import DeviceState, HardwareError, Decision, Action
+from ..core.types import Action, Decision, DeviceState, HardwareError
 from ..llm.types import LLMDecisionProposal
-
 
 # ============================================================================
 # Event Types
 # ============================================================================
 
-class EventType(str, Enum):
+class EventType(StrEnum):
     """Categories of loggable events in the pipeline."""
     # Observation events
     DEVICE_READ = "device.read"
@@ -66,7 +66,7 @@ class EventType(str, Enum):
     SHUTDOWN_COMPLETED = "shutdown.completed"
 
 
-class LogLevel(str, Enum):
+class LogLevel(StrEnum):
     """Log severity levels."""
     DEBUG = "DEBUG"
     INFO = "INFO"
@@ -97,25 +97,25 @@ class LogEvent:
     message: str
 
     # Context
-    device_name: Optional[str] = None
-    step_number: Optional[int] = None
-    correlation_id: Optional[str] = None  # Links related events
+    device_name: str | None = None
+    step_number: int | None = None
+    correlation_id: str | None = None  # Links related events
 
     # Payload (event-specific data)
-    payload: Dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
 
     # Telemetry snapshot at event time
-    telemetry_snapshot: Optional[Dict[str, Any]] = None
+    telemetry_snapshot: dict[str, Any] | None = None
 
     # Error context (if applicable)
-    error_type: Optional[str] = None
-    error_severity: Optional[str] = None
+    error_type: str | None = None
+    error_severity: str | None = None
 
     # Decision context (if applicable)
-    decision_kind: Optional[str] = None
-    decision_rationale: Optional[str] = None
+    decision_kind: str | None = None
+    decision_rationale: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {k: v for k, v in asdict(self).items() if v is not None}
 
@@ -151,12 +151,12 @@ class MemoryBackend(LogBackend):
 
     def query(
         self,
-        event_type: Optional[EventType] = None,
-        level: Optional[LogLevel] = None,
-        device: Optional[str] = None,
-        correlation_id: Optional[str] = None,
-        since: Optional[str] = None,
-    ) -> List[LogEvent]:
+        event_type: EventType | None = None,
+        level: LogLevel | None = None,
+        device: str | None = None,
+        correlation_id: str | None = None,
+        since: str | None = None,
+    ) -> list[LogEvent]:
         """Query events with filters."""
         results = []
         for e in self.events:
@@ -173,7 +173,7 @@ class MemoryBackend(LogBackend):
             results.append(e)
         return results
 
-    def get_decision_trail(self, correlation_id: str) -> List[LogEvent]:
+    def get_decision_trail(self, correlation_id: str) -> list[LogEvent]:
         """Get all events related to a decision."""
         return self.query(correlation_id=correlation_id)
 
@@ -260,9 +260,9 @@ class PipelineLogger:
 
     def __init__(self, experiment_id: str = None):
         self.experiment_id = experiment_id or f"exp_{int(time.time())}"
-        self.backends: List[LogBackend] = []
+        self.backends: list[LogBackend] = []
         self._step_number = 0
-        self._correlation_stack: List[str] = []
+        self._correlation_stack: list[str] = []
 
     def add_backend(self, backend: LogBackend) -> None:
         self.backends.append(backend)
@@ -281,7 +281,7 @@ class PipelineLogger:
             self._correlation_stack.pop()
 
     @property
-    def current_correlation(self) -> Optional[str]:
+    def current_correlation(self) -> str | None:
         return self._correlation_stack[-1] if self._correlation_stack else None
 
     def _emit(self, event: LogEvent) -> None:
@@ -295,8 +295,8 @@ class PipelineLogger:
         level: LogLevel,
         message: str,
         device_name: str = None,
-        payload: Dict[str, Any] = None,
-        telemetry: Dict[str, Any] = None,
+        payload: dict[str, Any] = None,
+        telemetry: dict[str, Any] = None,
         **kwargs
     ) -> LogEvent:
         return LogEvent(
@@ -398,7 +398,7 @@ class PipelineLogger:
     def log_error_detected(
         self,
         error: HardwareError,
-        state: Optional[DeviceState] = None
+        state: DeviceState | None = None
     ) -> str:
         """Log error detection. Returns correlation_id for tracking recovery."""
         corr_id = self.start_correlation("error")
@@ -446,7 +446,7 @@ class PipelineLogger:
         self,
         mode: str,
         confidence: float,
-        features: Dict[str, Any]
+        features: dict[str, Any]
     ) -> None:
         event = self._create_event(
             EventType.SIGNATURE_ANALYZED,
@@ -519,7 +519,7 @@ class PipelineLogger:
     # Anomaly Packaging (Phase 3 groundwork)
     # ========================================================================
 
-    def log_anomaly_packet(self, packet: Dict[str, Any], device_name: Optional[str] = None) -> None:
+    def log_anomaly_packet(self, packet: dict[str, Any], device_name: str | None = None) -> None:
         """Persist a compact anomaly packet as a log event payload."""
         event = self._create_event(
             EventType.ANOMALY_PACKET,
@@ -607,7 +607,7 @@ class PipelineLogger:
         self,
         target_temp: float,
         fault_mode: str,
-        config: Dict[str, Any] = None
+        config: dict[str, Any] = None
     ) -> None:
         event = self._create_event(
             EventType.EXPERIMENT_STARTED,
@@ -676,10 +676,10 @@ class DecisionTrail:
     signature_confidence: float
     decision_kind: str
     decision_rationale: str
-    recovery_actions: List[str]
+    recovery_actions: list[str]
     recovery_success: bool
     total_duration_ms: float
-    events: List[LogEvent]
+    events: list[LogEvent]
 
 
 class TrailAnalyzer:
@@ -688,7 +688,7 @@ class TrailAnalyzer:
     def __init__(self, backend: MemoryBackend):
         self.backend = backend
 
-    def get_trail(self, correlation_id: str) -> Optional[DecisionTrail]:
+    def get_trail(self, correlation_id: str) -> DecisionTrail | None:
         """Reconstruct a decision trail from its correlation_id."""
         events = self.backend.get_decision_trail(correlation_id)
         if not events:
@@ -729,7 +729,7 @@ class TrailAnalyzer:
             events=events
         )
 
-    def get_all_trails(self) -> List[DecisionTrail]:
+    def get_all_trails(self) -> list[DecisionTrail]:
         """Get all decision trails in the log."""
         # Find unique correlation IDs from error events
         error_events = self.backend.query(event_type=EventType.ERROR_DETECTED)
@@ -741,7 +741,7 @@ class TrailAnalyzer:
                     trails.append(trail)
         return trails
 
-    def summarize_decisions(self) -> Dict[str, Any]:
+    def summarize_decisions(self) -> dict[str, Any]:
         """Generate summary statistics of all decisions."""
         trails = self.get_all_trails()
 
@@ -757,7 +757,7 @@ class TrailAnalyzer:
             "avg_recovery_duration_ms": sum(t.total_duration_ms for t in trails) / len(trails)
         }
 
-    def _count_by(self, trails: List[DecisionTrail], key_fn: Callable) -> Dict[str, int]:
+    def _count_by(self, trails: list[DecisionTrail], key_fn: Callable) -> dict[str, int]:
         counts = {}
         for trail in trails:
             k = key_fn(trail)

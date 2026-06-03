@@ -26,17 +26,18 @@ from __future__ import annotations
 import logging
 import math
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from app.core.db import utcnow_iso
+from app.services.campaign_metrics import compute_and_store_metrics
 from app.services.candidate_gen import BatchResult, ParameterSpace, generate_batch
 from app.services.convergence import (
     ConvergenceConfig,
     ConvergenceStatus,
     detect_convergence,
 )
-from app.services.campaign_metrics import compute_and_store_metrics
 from app.services.failure_signatures import learn_from_run
 from app.services.metrics import get_run_kpis
 

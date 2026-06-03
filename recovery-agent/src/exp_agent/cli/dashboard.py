@@ -12,14 +12,14 @@ Usage:
     python -m exp_agent.cli.dashboard
     python -m exp_agent.cli.dashboard --auto  # Auto-run scenarios
 """
+import argparse
 import os
 import sys
 import time
-import argparse
-from datetime import datetime
-from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
 from collections import deque
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
 
 # ============================================================================
 # Terminal Drawing
@@ -103,27 +103,27 @@ class DeviceStatus:
     name: str
     device_type: str
     status: str = "idle"
-    telemetry: Dict[str, Any] = field(default_factory=dict)
-    last_error: Optional[str] = None
+    telemetry: dict[str, Any] = field(default_factory=dict)
+    last_error: str | None = None
     color: str = WHITE
 
 
 @dataclass
 class PipelineState:
     current_stage: int = 0  # 0-7
-    stages: List[str] = field(default_factory=lambda: [
+    stages: list[str] = field(default_factory=lambda: [
         "IDLE", "SENSE", "CLASSIFY", "ANALYZE", "DECIDE", "EXECUTE", "VERIFY", "MEMORY"
     ])
-    active_device: Optional[str] = None
-    current_decision: Optional[str] = None
+    active_device: str | None = None
+    current_decision: str | None = None
 
 
 @dataclass
 class DashboardState:
-    devices: Dict[str, DeviceStatus] = field(default_factory=dict)
+    devices: dict[str, DeviceStatus] = field(default_factory=dict)
     pipeline: PipelineState = field(default_factory=PipelineState)
     events: deque = field(default_factory=lambda: deque(maxlen=12))
-    stats: Dict[str, int] = field(default_factory=lambda: {
+    stats: dict[str, int] = field(default_factory=lambda: {
         "abort": 0, "degrade": 0, "retry": 0, "skip": 0, "total": 0
     })
     start_time: float = field(default_factory=time.time)
@@ -174,7 +174,7 @@ class Dashboard:
         devices = list(self.state.devices.values())
         positions = [(3, 1), (3, 51), (12, 1), (12, 51)]  # (row, col)
 
-        for i, (dev, (row, col)) in enumerate(zip(devices, positions)):
+        for _i, (dev, (row, col)) in enumerate(zip(devices, positions, strict=False)):
             self._draw_device_panel(dev, row, col, 48, 8)
 
     def _draw_device_panel(self, dev: DeviceStatus, row: int, col: int, width: int, height: int):
@@ -210,7 +210,6 @@ class Dashboard:
 
         # Draw pipeline stages
         stages = self.state.pipeline.stages
-        stage_width = 7
         current = self.state.pipeline.current_stage
 
         move_cursor(row + 2, col + 2)
@@ -240,7 +239,7 @@ class Dashboard:
         draw_box(row, col, width, height, "Statistics", YELLOW)
 
         stats = self.state.stats
-        total = stats["total"] or 1  # Avoid div by zero
+        stats["total"] or 1  # Avoid div by zero
 
         write_at(row + 2, col + 2, f"{RED}ABORT:  {stats['abort']:3}{RESET}  "
                                     f"{MAGENTA}DEGRADE: {stats['degrade']:3}{RESET}")
@@ -276,7 +275,7 @@ class Dashboard:
         color = colors.get(level, WHITE)
         self.state.events.appendleft(f"{DIM}{ts}{RESET} {color}[{level}]{RESET} {msg}")
 
-    def update_device(self, name: str, status: str = None, telemetry: Dict = None, error: str = None):
+    def update_device(self, name: str, status: str = None, telemetry: dict = None, error: str = None):
         """Update device state."""
         if name in self.state.devices:
             dev = self.state.devices[name]
@@ -468,8 +467,8 @@ def main():
 
     # Interactive mode
     import select
-    import tty
     import termios
+    import tty
 
     old_settings = termios.tcgetattr(sys.stdin)
     try:

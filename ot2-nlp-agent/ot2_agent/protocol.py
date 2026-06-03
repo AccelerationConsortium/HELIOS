@@ -6,7 +6,7 @@ Converts operations to executable Python protocol files.
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .operations import Operation, OperationType
 
@@ -25,7 +25,7 @@ class PipetteConfig:
     name: str
     pipette_type: str
     mount: str  # 'left' or 'right'
-    tip_rack: Optional[str] = None
+    tip_rack: str | None = None
 
 
 @dataclass
@@ -42,15 +42,15 @@ class Protocol:
     created_at: datetime = field(default_factory=datetime.now)
 
     # Configuration
-    labware: List[LabwareConfig] = field(default_factory=list)
-    pipettes: List[PipetteConfig] = field(default_factory=list)
+    labware: list[LabwareConfig] = field(default_factory=list)
+    pipettes: list[PipetteConfig] = field(default_factory=list)
 
     # Operations
-    operations: List[Operation] = field(default_factory=list)
+    operations: list[Operation] = field(default_factory=list)
 
     # Metadata
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    original_instructions: List[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    original_instructions: list[str] = field(default_factory=list)
 
     def add_labware(self, name: str, labware_type: str, slot: int):
         """Add labware to the protocol."""
@@ -64,7 +64,7 @@ class Protocol:
         """Add an operation to the protocol."""
         self.operations.append(operation)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert protocol to dictionary format."""
         return {
             "name": self.name,
@@ -210,7 +210,7 @@ def run(protocol: protocol_api.ProtocolContext):
             # Format JSON with proper indentation
             json_str = json.dumps(definition, indent=4)
             # Indent each line for the dict
-            indented = "\n".join("    " + line for line in json_str.split("\n"))
+            "\n".join("    " + line for line in json_str.split("\n"))
             lines.append(f'    "{name}": {json_str},')
 
         lines.append("}")
@@ -219,12 +219,12 @@ def run(protocol: protocol_api.ProtocolContext):
         lines.append("def load_custom_labware(protocol, name, slot):")
         lines.append('    """Load custom labware from embedded definition."""')
         lines.append("    if name not in CUSTOM_LABWARE:")
-        lines.append(f'        raise ValueError(f"Unknown custom labware: {{name}}")')
+        lines.append('        raise ValueError(f"Unknown custom labware: {name}")')
         lines.append("    return protocol.load_labware_from_definition(CUSTOM_LABWARE[name], slot)")
 
         return "\n".join(lines)
 
-    def _generate_labware_setup(self, labware: List[LabwareConfig], metadata: Dict = None) -> str:
+    def _generate_labware_setup(self, labware: list[LabwareConfig], metadata: dict = None) -> str:
         """Generate labware setup code."""
         if not labware:
             return "    # No labware configured - add labware here\n    pass"
@@ -246,7 +246,7 @@ def run(protocol: protocol_api.ProtocolContext):
                 )
         return "\n".join(lines)
 
-    def _generate_pipette_setup(self, pipettes: List[PipetteConfig]) -> str:
+    def _generate_pipette_setup(self, pipettes: list[PipetteConfig]) -> str:
         """Generate pipette setup code."""
         if not pipettes:
             return "    # No pipettes configured - add pipettes here\n    pass"
@@ -259,7 +259,7 @@ def run(protocol: protocol_api.ProtocolContext):
             )
         return "\n".join(lines)
 
-    def _generate_protocol_steps(self, operations: List[Operation]) -> str:
+    def _generate_protocol_steps(self, operations: list[Operation]) -> str:
         """Generate protocol step code."""
         if not operations:
             return "    # No operations defined\n    pass"
@@ -330,7 +330,7 @@ def run(protocol: protocol_api.ProtocolContext):
 
         return "\n".join(lines)
 
-    def generate_workflow_json(self, protocol: Protocol, version: str = "1.0") -> Dict[str, Any]:
+    def generate_workflow_json(self, protocol: Protocol, version: str = "1.0") -> dict[str, Any]:
         """
         Generate workflow JSON in the standard format for cross-platform import.
 

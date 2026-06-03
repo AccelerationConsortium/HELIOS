@@ -22,7 +22,7 @@ import json
 import logging
 import sqlite3
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from app.api.v1.schemas_init import (
@@ -385,7 +385,7 @@ def _build_round_3(session: ConversationSession) -> list[SlotPresentation]:
 
     errors = session.validation_errors
     patterns = list_patterns()
-    pattern_options = [{"id": p.id, "name": p.name, "domain": p.domain} for p in patterns]
+    [{"id": p.id, "name": p.name, "domain": p.domain} for p in patterns]
     pattern_ids = [p.id for p in patterns]
 
     # If a pattern is selected, show its steps

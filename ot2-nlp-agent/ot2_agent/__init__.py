@@ -33,22 +33,22 @@ Example (New - Planner/Compiler):
 """
 
 from .agent import OT2Agent
-from .parser import NLParser
-from .operations import OperationMapper
-from .protocol import ProtocolGenerator
-from .validator import ProtocolValidator
+from .compiler import Compiler, CompilerOutput
 from .custom_labware import (
     CustomLabwareDefinition,
     CustomLabwareManager,
     get_labware_manager,
 )
 
-# New Planner/Compiler exports
-from .planner import Planner, PlannerOutput, WorkflowDraft, ConfirmedWorkflow
-from .compiler import Compiler, CompilerOutput
-
 # IR exports
-from .ir import Intent, UnitOperation, Primitive, UOType, ActionType
+from .ir import ActionType, Intent, Primitive, UnitOperation, UOType
+from .operations import OperationMapper
+from .parser import NLParser
+
+# New Planner/Compiler exports
+from .planner import ConfirmedWorkflow, Planner, PlannerOutput, WorkflowDraft
+from .protocol import ProtocolGenerator
+from .validator import ProtocolValidator
 
 __version__ = "0.2.0"
 __all__ = [

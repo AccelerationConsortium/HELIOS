@@ -9,12 +9,13 @@ Fault modes:
 - low_signal: Signal too weak to measure (below noise floor)
 - lamp_failure: Light source fails
 """
-import time
 import math
 import random
-from typing import Literal, Optional, List
+import time
+from typing import Literal
+
+from ...core.types import Action, DeviceState, HardwareError
 from ..base import Device
-from ...core.types import DeviceState, Action, HardwareError
 
 
 class SimSpectrometer(Device):
@@ -40,7 +41,7 @@ class SimSpectrometer(Device):
         self.gain = 1.0
 
         # Measurement results
-        self.last_spectrum: List[float] = []
+        self.last_spectrum: list[float] = []
         self.peak_wavelength = 0.0
         self.peak_intensity = 0.0
 
@@ -54,7 +55,7 @@ class SimSpectrometer(Device):
         self.last_update_time = time.time()
         self.acquisition_start_time = 0.0
 
-    def _simulate_spectrum(self) -> List[float]:
+    def _simulate_spectrum(self) -> list[float]:
         """Generate a simulated spectrum with a peak."""
         n_points = 100
         spectrum = []

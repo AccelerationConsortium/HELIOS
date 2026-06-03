@@ -19,7 +19,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.agents.base import AgentPauseRejected, BaseAgent, DecisionNode
+from app.agents.base import AgentPauseRejected, BaseAgent
 from app.agents.capability_agent import CapabilitySnapshot
 from app.agents.pause import Granularity, PauseRequest, RiskAssessment
 from app.contracts.run_bundle import RunBundle, new_run_bundle_id
@@ -373,8 +373,8 @@ class ExecutionAgent(BaseAgent[ExecutionInput, ExecutionOutput]):
 
         Wraps CompilerAgent to produce a RunBundle.
         """
+
         from app.agents.compiler_agent import CompileInput, CompilerAgent
-        import hashlib
 
         try:
             compiler = CompilerAgent()

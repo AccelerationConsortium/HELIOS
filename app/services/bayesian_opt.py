@@ -22,11 +22,11 @@ import logging
 import math
 import random
 import sqlite3 as _sqlite3
-import uuid
-from dataclasses import dataclass, field
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
-from app.core.db import connection, json_dumps, parse_json, run_txn, utcnow_iso
+from app.core.db import parse_json, run_txn
 from app.services.candidate_gen import (
     ParameterSpace,
     SearchDimension,
@@ -92,7 +92,7 @@ class SurrogateModel:
 
     @staticmethod
     def _euclidean(a: tuple[float, ...], b: tuple[float, ...]) -> float:
-        return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b)))
+        return math.sqrt(sum((ai - bi) ** 2 for ai, bi in zip(a, b, strict=False)))
 
     # -- public API --
 
@@ -127,7 +127,7 @@ class SurrogateModel:
             values.append(self._obs[idx].objective)
 
         w_sum = sum(weights)
-        mean = sum(w * v for w, v in zip(weights, values)) / w_sum
+        mean = sum(w * v for w, v in zip(weights, values, strict=False)) / w_sum
 
         # Uncertainty: std of k-nearest objectives (unweighted)
         if self._k < 2:

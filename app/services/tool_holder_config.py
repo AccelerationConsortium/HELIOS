@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -162,7 +161,7 @@ def load_tool_holder_config(path: str) -> ToolHolderConfig:
     FileNotFoundError
         If the file does not exist.
     """
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
     return ToolHolderConfig(**data)
 

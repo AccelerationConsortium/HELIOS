@@ -8,9 +8,9 @@ Checks for issues like:
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Set, Any, Optional
+from typing import Any
 
-from ..ir import DeviceAction, Primitive
+from ..ir import DeviceAction
 
 
 @dataclass
@@ -20,7 +20,7 @@ class ResourceConflict:
     resource_type: str  # "device", "consumable", "capacity"
     resource_id: str
     message: str
-    affected_actions: List[str] = field(default_factory=list)
+    affected_actions: list[str] = field(default_factory=list)
     suggestion: str = ""
 
 
@@ -32,14 +32,14 @@ class ResourceChecker:
     def __init__(self):
         """Initialize resource checker."""
         # Track resource usage
-        self.device_usage: Dict[str, List[str]] = {}  # device_id -> [action_names]
-        self.consumables: Dict[str, float] = {}  # consumable -> remaining
+        self.device_usage: dict[str, list[str]] = {}  # device_id -> [action_names]
+        self.consumables: dict[str, float] = {}  # consumable -> remaining
 
     def check(
         self,
-        device_actions: List[DeviceAction],
-        available_resources: Dict[str, Any] = None
-    ) -> List[ResourceConflict]:
+        device_actions: list[DeviceAction],
+        available_resources: dict[str, Any] = None
+    ) -> list[ResourceConflict]:
         """
         Check for resource conflicts.
 
@@ -76,8 +76,8 @@ class ResourceChecker:
     def _check_device_availability(
         self,
         action: DeviceAction,
-        available: Dict
-    ) -> List[ResourceConflict]:
+        available: dict
+    ) -> list[ResourceConflict]:
         """Check if required device is available."""
         conflicts = []
         device_id = action.device_id
@@ -108,8 +108,8 @@ class ResourceChecker:
     def _check_consumables(
         self,
         action: DeviceAction,
-        available: Dict
-    ) -> List[ResourceConflict]:
+        available: dict
+    ) -> list[ResourceConflict]:
         """Check consumable availability."""
         conflicts = []
         params = action.params
@@ -138,8 +138,8 @@ class ResourceChecker:
     def _check_capacity(
         self,
         action: DeviceAction,
-        available: Dict
-    ) -> List[ResourceConflict]:
+        available: dict
+    ) -> list[ResourceConflict]:
         """Check capacity limits."""
         conflicts = []
         params = action.params
@@ -174,7 +174,7 @@ class ResourceChecker:
 
         return conflicts
 
-    def get_resource_summary(self) -> Dict[str, Any]:
+    def get_resource_summary(self) -> dict[str, Any]:
         """Get summary of resource usage."""
         return {
             "devices_used": list(self.device_usage.keys()),

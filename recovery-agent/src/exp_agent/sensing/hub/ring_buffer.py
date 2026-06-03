@@ -7,10 +7,11 @@ Used for:
 - Audit logging
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Generic, TypeVar, Iterator, Optional
 from collections import deque
+from collections.abc import Iterator
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from typing import Generic, TypeVar
 
 T = TypeVar('T')
 
@@ -32,9 +33,9 @@ class RingBuffer(Generic[T]):
     def __post_init__(self):
         self._buffer = deque(maxlen=self.max_size)
 
-    def append(self, item: T, timestamp: Optional[datetime] = None) -> None:
+    def append(self, item: T, timestamp: datetime | None = None) -> None:
         """Add an item to the buffer."""
-        ts = timestamp or datetime.now(timezone.utc)
+        ts = timestamp or datetime.now(UTC)
         self._buffer.append((ts, item))
         self._evict_old()
 
@@ -42,7 +43,7 @@ class RingBuffer(Generic[T]):
         """Remove items older than max_age_seconds."""
         if not self._buffer:
             return
-        cutoff = datetime.now(timezone.utc) - timedelta(seconds=self.max_age_seconds)
+        cutoff = datetime.now(UTC) - timedelta(seconds=self.max_age_seconds)
         while self._buffer and self._buffer[0][0] < cutoff:
             self._buffer.popleft()
 
@@ -82,7 +83,7 @@ class RingBuffer(Generic[T]):
             yield item
 
     @property
-    def oldest(self) -> Optional[T]:
+    def oldest(self) -> T | None:
         """Get the oldest item."""
         self._evict_old()
         if self._buffer:
@@ -90,7 +91,7 @@ class RingBuffer(Generic[T]):
         return None
 
     @property
-    def newest(self) -> Optional[T]:
+    def newest(self) -> T | None:
         """Get the newest item."""
         self._evict_old()
         if self._buffer:
@@ -98,7 +99,7 @@ class RingBuffer(Generic[T]):
         return None
 
     @property
-    def oldest_timestamp(self) -> Optional[datetime]:
+    def oldest_timestamp(self) -> datetime | None:
         """Get timestamp of oldest item."""
         self._evict_old()
         if self._buffer:
@@ -106,7 +107,7 @@ class RingBuffer(Generic[T]):
         return None
 
     @property
-    def newest_timestamp(self) -> Optional[datetime]:
+    def newest_timestamp(self) -> datetime | None:
         """Get timestamp of newest item."""
         self._evict_old()
         if self._buffer:

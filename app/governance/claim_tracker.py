@@ -16,9 +16,8 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from typing import Any
 
-from app.core.db import connection, json_dumps, utcnow_iso
+from app.core.db import connection, json_dumps
 from app.governance.schemas import Claim, ClaimLineage
 
 logger = logging.getLogger(__name__)
@@ -187,10 +186,9 @@ class ClaimTracker:
         self,
         campaign_id: str,
         round_number: int,
-        decision: "GovernanceDecision",  # noqa: F821 — forward ref OK at runtime
+        decision: GovernanceDecision,  # noqa: F821 — forward ref OK at runtime
     ) -> None:
         """Persist a governance decision record."""
-        from app.governance.schemas import GovernanceDecision  # local to avoid circulars
 
         try:
             with connection() as conn:

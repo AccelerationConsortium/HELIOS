@@ -9,21 +9,21 @@ Features:
 - Support for custom response injection
 """
 
-from typing import Optional, Dict, Any, List
 from datetime import datetime
+from typing import Any
 
 from exp_agent.core.safety_types import (
-    SafetyPacket,
-    SafetyGuidance,
-    ExperimentSummary,
-    GHSHazard,
-    PPERequirement,
-    MonitoringItem,
-    SafetyThreshold,
     EmergencyPlaybook,
-    SafetyConstraint,
+    ExperimentSummary,
     GateDecision,
+    GHSHazard,
     HazardSeverity,
+    MonitoringItem,
+    PPERequirement,
+    SafetyConstraint,
+    SafetyGuidance,
+    SafetyPacket,
+    SafetyThreshold,
 )
 
 
@@ -51,7 +51,7 @@ class MockSafetyAgent:
     """
 
     # Predefined chemical hazard profiles
-    CHEMICAL_PROFILES: Dict[str, GHSHazard] = {
+    CHEMICAL_PROFILES: dict[str, GHSHazard] = {
         "ethanol": GHSHazard(
             cas_number="64-17-5",
             chemical_name="Ethanol",
@@ -99,7 +99,7 @@ class MockSafetyAgent:
     }
 
     # Default PPE for different risk levels
-    DEFAULT_PPE: Dict[HazardSeverity, List[PPERequirement]] = {
+    DEFAULT_PPE: dict[HazardSeverity, list[PPERequirement]] = {
         "low": [
             PPERequirement(
                 category="eye_face",
@@ -218,17 +218,17 @@ class MockSafetyAgent:
         self.latency_ms = latency_ms
 
         # For response injection
-        self._next_packet: Optional[SafetyPacket] = None
-        self._next_guidance: Optional[SafetyGuidance] = None
+        self._next_packet: SafetyPacket | None = None
+        self._next_guidance: SafetyGuidance | None = None
 
         # For call tracking
-        self.assess_calls: List[ExperimentSummary] = []
-        self.answer_calls: List[Dict[str, Any]] = []
+        self.assess_calls: list[ExperimentSummary] = []
+        self.answer_calls: list[dict[str, Any]] = []
 
     def set_next_response(
         self,
-        packet: Optional[SafetyPacket] = None,
-        guidance: Optional[SafetyGuidance] = None
+        packet: SafetyPacket | None = None,
+        guidance: SafetyGuidance | None = None
     ) -> None:
         """Inject custom response for next call.
 
@@ -261,7 +261,7 @@ class MockSafetyAgent:
             return packet
 
         # Build response based on experiment
-        hazards: List[GHSHazard] = []
+        hazards: list[GHSHazard] = []
         risk_level = self.default_risk_level
 
         # Identify chemicals and get hazard profiles
@@ -280,9 +280,9 @@ class MockSafetyAgent:
 
         # Check temperature constraints
         temp = experiment.parameters.get("temperature")
-        constraints: List[SafetyConstraint] = []
-        thresholds: List[SafetyThreshold] = []
-        monitoring: List[MonitoringItem] = []
+        constraints: list[SafetyConstraint] = []
+        thresholds: list[SafetyThreshold] = []
+        monitoring: list[MonitoringItem] = []
 
         if temp is not None:
             # Add temperature monitoring
@@ -313,7 +313,7 @@ class MockSafetyAgent:
                 # Add constraint for flammable materials
                 constraints.append(SafetyConstraint(
                     type="temperature_limit",
-                    description=f"Temperature limited due to flammable solvent",
+                    description="Temperature limited due to flammable solvent",
                     parameter="temperature",
                     value=80,  # Below common solvent flash points
                     unit="°C",
@@ -333,7 +333,7 @@ class MockSafetyAgent:
             ))
 
         # Build emergency playbooks
-        playbooks: List[EmergencyPlaybook] = [
+        playbooks: list[EmergencyPlaybook] = [
             EmergencyPlaybook(
                 scenario="skin_contact",
                 severity="high",
@@ -421,7 +421,7 @@ class MockSafetyAgent:
     async def answer(
         self,
         question: str,
-        context: Optional[Dict[str, Any]] = None
+        context: dict[str, Any] | None = None
     ) -> SafetyGuidance:
         """Provide mock safety guidance."""
         import asyncio

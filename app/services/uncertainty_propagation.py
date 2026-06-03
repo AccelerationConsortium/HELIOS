@@ -7,7 +7,7 @@ as it flows: GP prediction → agent interpretation → experimental estimate.
 
 Key innovations:
 1. Conformal prediction for distribution-free coverage guarantees
-2. Monte Carlo dropout for agent LLM uncertainty (via temperature sampling)  
+2. Monte Carlo dropout for agent LLM uncertainty (via temperature sampling)
 3. Uncertainty accumulation across the full pipeline
 4. Calibration checking via reliability diagrams
 
@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -121,7 +121,7 @@ class ConformalPredictor:
         y_pred: np.ndarray,
         y_true: np.ndarray,
         pred_std: np.ndarray,
-    ) -> "ConformalPredictor":
+    ) -> ConformalPredictor:
         """Compute nonconformity scores on a held-out calibration set.
 
         Nonconformity score = |y_true - y_pred| / std_pred
@@ -163,7 +163,7 @@ class ConformalPredictor:
                           y_true: np.ndarray) -> float:
         """Empirically verify coverage on a test set."""
         covered = 0
-        for yp, ys, yt in zip(y_pred, pred_std, y_true):
+        for yp, ys, yt in zip(y_pred, pred_std, y_true, strict=False):
             lo, hi = self.predict_interval(float(yp), float(ys))
             if lo <= yt <= hi:
                 covered += 1
@@ -195,7 +195,7 @@ class CalibrationTracker:
         bins = np.linspace(0, 1, self._n_bins + 1)
         ece = 0.0
         n = len(self._records)
-        for lo, hi in zip(bins[:-1], bins[1:]):
+        for lo, hi in zip(bins[:-1], bins[1:], strict=False):
             bucket = [r for r in self._records if lo <= r[0] < hi]
             if not bucket:
                 continue
@@ -208,7 +208,7 @@ class CalibrationTracker:
         """Data for plotting reliability diagram (predicted vs actual coverage)."""
         bins = np.linspace(0, 1, self._n_bins + 1)
         predicted, actual = [], []
-        for lo, hi in zip(bins[:-1], bins[1:]):
+        for lo, hi in zip(bins[:-1], bins[1:], strict=False):
             bucket = [r for r in self._records if lo <= r[0] < hi]
             if bucket:
                 predicted.append(sum(r[0] for r in bucket) / len(bucket))

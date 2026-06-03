@@ -9,9 +9,10 @@ Fault modes:
 - cavitation: Unstable flow with bubbles (noisy signature)
 """
 import time
-from typing import Literal, Optional
+from typing import Literal
+
+from ...core.types import Action, DeviceState, HardwareError
 from ..base import Device
-from ...core.types import DeviceState, Action, HardwareError
 
 
 class SimPump(Device):

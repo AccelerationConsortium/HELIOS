@@ -5,7 +5,6 @@ for consistent error recovery strategies.
 """
 from typing import Any
 
-
 # Python exception to recovery-agent error type mapping
 EXCEPTION_TYPE_MAP = {
     # Connection/Network errors

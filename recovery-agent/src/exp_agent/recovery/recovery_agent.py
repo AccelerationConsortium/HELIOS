@@ -9,19 +9,23 @@ Phase 2 Safety Integration:
   SAFE_SHUTDOWN, EVACUATE, or ASK_HUMAN
 - SafetyPacket constraints inform recovery decisions
 """
-from typing import List, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
+
 from ..core.types import (
-    DeviceState, HardwareError, Decision, Action,
     CHEMICAL_SAFETY_ERRORS,
+    Action,
+    Decision,
+    DeviceState,
+    HardwareError,
 )
 from ..llm.advisor import LLMAdvisor
 from ..llm.null_advisor import NullLLMAdvisor
 from ..llm.types import LLMDecisionProposal
 from .policy import (
-    decide_recovery,
-    analyze_signature,
-    RecoveryConfig,
     RECOVERY_CONFIG,
+    RecoveryConfig,
+    analyze_signature,
+    decide_recovery,
 )
 
 if TYPE_CHECKING:
@@ -53,8 +57,8 @@ class RecoveryAgent:
 
     def __init__(
         self,
-        config: Optional[RecoveryConfig] = None,
-        llm_advisor: Optional[LLMAdvisor] = None,
+        config: RecoveryConfig | None = None,
+        llm_advisor: LLMAdvisor | None = None,
         safety_packet: Optional["SafetyPacket"] = None,
     ):
         """Initialize RecoveryAgent.
@@ -65,12 +69,12 @@ class RecoveryAgent:
             safety_packet: Optional SafetyPacket for chemical safety constraints.
         """
         self.config = config or RECOVERY_CONFIG
-        self.retry_counts: Dict[str, int] = {}
-        self.safety_packet: Optional["SafetyPacket"] = safety_packet
+        self.retry_counts: dict[str, int] = {}
+        self.safety_packet: SafetyPacket | None = safety_packet
 
         # LLM advisor is optional. Default is a no-op advisor.
         self.llm_advisor: LLMAdvisor = llm_advisor or NullLLMAdvisor()
-        self.last_llm_proposal: Optional[LLMDecisionProposal] = None
+        self.last_llm_proposal: LLMDecisionProposal | None = None
 
     def set_safety_packet(self, packet: Optional["SafetyPacket"]) -> None:
         """Update the SafetyPacket for runtime constraint checking."""
@@ -80,9 +84,9 @@ class RecoveryAgent:
         self,
         state: DeviceState,
         error: HardwareError,
-        history: List[DeviceState] = None,
-        last_action: Optional[Action] = None,
-        stage: Optional[str] = None
+        history: list[DeviceState] = None,
+        last_action: Action | None = None,
+        stage: str | None = None
     ) -> Decision:
         """
         Make a recovery decision based on current state and error.
@@ -187,7 +191,7 @@ class RecoveryAgent:
         self,
         error: HardwareError,
         state: DeviceState,
-        history: Optional[List[DeviceState]]
+        history: list[DeviceState] | None
     ) -> Decision:
         """Handle chemical safety event with SafetyAgent veto power.
 
@@ -346,7 +350,7 @@ class RecoveryAgent:
         """Get current retry count for an error type."""
         return self.retry_counts.get(error_type, 0)
 
-    def analyze_fault_signature(self, history: List[DeviceState]) -> str:
+    def analyze_fault_signature(self, history: list[DeviceState]) -> str:
         """
         Analyze fault signature from telemetry history.
 

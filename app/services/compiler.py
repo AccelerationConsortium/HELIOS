@@ -57,10 +57,9 @@ def compile_protocol(
                 )
 
     # --- cycle detection via Kahn's topological sort ---
-    adj: dict[str, list[str]] = {s["step_key"]: list(s["depends_on"]) for s in graph_steps}
     in_degree: dict[str, int] = {k: 0 for k in all_step_keys}
     for step in graph_steps:
-        for dep in step["depends_on"]:
+        for _dep in step["depends_on"]:
             in_degree[step["step_key"]] += 1
 
     queue = [k for k, d in in_degree.items() if d == 0]

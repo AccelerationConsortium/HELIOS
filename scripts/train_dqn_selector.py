@@ -15,8 +15,8 @@ from pathlib import Path
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from app.services.rl_data_collector import load_training_dataset
 from app.services.dqn_strategy_selector import DQNConfig, DQNStrategySelector
+from app.services.rl_data_collector import load_training_dataset
 from app.services.rl_strategy_selector import RLState
 from app.services.strategy_selector import compute_diagnostics
 

@@ -6,9 +6,8 @@ appropriate workflow candidates.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Set
 
-from ..ir import Intent, UnitOperation, MissingInfo
+from ..ir import Intent, UnitOperation
 from ..templates import TemplateRegistry
 
 
@@ -26,7 +25,7 @@ class DomainKnowledge(ABC):
         pass
 
     @abstractmethod
-    def get_workflow_templates(self, intent: Intent) -> List[List[UnitOperation]]:
+    def get_workflow_templates(self, intent: Intent) -> list[list[UnitOperation]]:
         """
         Get workflow templates based on intent.
 
@@ -35,12 +34,12 @@ class DomainKnowledge(ABC):
         pass
 
     @abstractmethod
-    def get_default_assumptions(self, intent: Intent) -> List[str]:
+    def get_default_assumptions(self, intent: Intent) -> list[str]:
         """Get default assumptions for this domain."""
         pass
 
     @abstractmethod
-    def get_alternatives(self, intent: Intent) -> List[str]:
+    def get_alternatives(self, intent: Intent) -> list[str]:
         """Get alternative approaches for this intent."""
         pass
 
@@ -54,7 +53,7 @@ class OERDomainKnowledge(DomainKnowledge):
     def domain_name(self) -> str:
         return "electrochemistry"
 
-    def get_workflow_templates(self, intent: Intent) -> List[List[UnitOperation]]:
+    def get_workflow_templates(self, intent: Intent) -> list[list[UnitOperation]]:
         """
         Generate OER workflow candidates based on intent.
 
@@ -74,7 +73,7 @@ class OERDomainKnowledge(DomainKnowledge):
 
         return candidates
 
-    def _get_fast_characterization_workflow(self, intent: Intent) -> List[UnitOperation]:
+    def _get_fast_characterization_workflow(self, intent: Intent) -> list[UnitOperation]:
         """Quick OER screening workflow."""
         templates = []
 
@@ -107,7 +106,7 @@ class OERDomainKnowledge(DomainKnowledge):
 
         return [t for t in templates if t is not None]
 
-    def _get_standard_characterization_workflow(self, intent: Intent) -> List[UnitOperation]:
+    def _get_standard_characterization_workflow(self, intent: Intent) -> list[UnitOperation]:
         """Standard OER characterization workflow."""
         templates = []
 
@@ -127,7 +126,7 @@ class OERDomainKnowledge(DomainKnowledge):
 
         return [t for t in templates if t is not None]
 
-    def _get_comprehensive_workflow(self, intent: Intent) -> List[UnitOperation]:
+    def _get_comprehensive_workflow(self, intent: Intent) -> list[UnitOperation]:
         """Comprehensive OER study workflow."""
         templates = []
 
@@ -149,7 +148,7 @@ class OERDomainKnowledge(DomainKnowledge):
 
         return [t for t in templates if t is not None]
 
-    def _prefill_conditions(self, templates: List[UnitOperation], intent: Intent):
+    def _prefill_conditions(self, templates: list[UnitOperation], intent: Intent):
         """Pre-fill placeholders with known conditions from intent."""
         conditions = intent.known_conditions
 
@@ -181,7 +180,7 @@ class OERDomainKnowledge(DomainKnowledge):
         text_lower = intent.original_text.lower()
         return any(kw in text_lower for kw in comprehensive_keywords)
 
-    def get_default_assumptions(self, intent: Intent) -> List[str]:
+    def get_default_assumptions(self, intent: Intent) -> list[str]:
         """Get default assumptions for OER experiments."""
         assumptions = [
             "Using three-electrode setup",
@@ -198,7 +197,7 @@ class OERDomainKnowledge(DomainKnowledge):
 
         return assumptions
 
-    def get_alternatives(self, intent: Intent) -> List[str]:
+    def get_alternatives(self, intent: Intent) -> list[str]:
         """Get alternative approaches for OER."""
         alternatives = []
 
@@ -223,13 +222,13 @@ class GeneralDomainKnowledge(DomainKnowledge):
     def domain_name(self) -> str:
         return "general"
 
-    def get_workflow_templates(self, intent: Intent) -> List[List[UnitOperation]]:
+    def get_workflow_templates(self, intent: Intent) -> list[list[UnitOperation]]:
         """Generate a basic workflow."""
         # For general domain, return empty and let user specify
         return [[]]
 
-    def get_default_assumptions(self, intent: Intent) -> List[str]:
+    def get_default_assumptions(self, intent: Intent) -> list[str]:
         return ["General experiment workflow"]
 
-    def get_alternatives(self, intent: Intent) -> List[str]:
+    def get_alternatives(self, intent: Intent) -> list[str]:
         return ["Specify experiment type for more specific workflow"]

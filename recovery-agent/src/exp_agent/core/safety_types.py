@@ -11,9 +11,9 @@ Key concepts:
 - GateDecision: Pre-flight gate decision (ALLOW, ALLOW_WITH_CONSTRAINTS, DENY)
 """
 
-from typing import Literal, Optional, List, Dict, Any
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any, Literal
 
+from pydantic import BaseModel, ConfigDict, Field
 
 # =============================================================================
 # Gate Decision Types
@@ -59,39 +59,39 @@ class GHSHazard(BaseModel):
     """
     model_config = ConfigDict(frozen=False)
 
-    cas_number: Optional[str] = Field(
+    cas_number: str | None = Field(
         default=None,
         description="CAS Registry Number of the chemical"
     )
-    chemical_name: Optional[str] = Field(
+    chemical_name: str | None = Field(
         default=None,
         description="Common or IUPAC name of the chemical"
     )
-    ghs_codes: List[str] = Field(
+    ghs_codes: list[str] = Field(
         default_factory=list,
         description="GHS hazard codes (e.g., H225, H315, H318)"
     )
-    precautionary_codes: List[str] = Field(
+    precautionary_codes: list[str] = Field(
         default_factory=list,
         description="GHS precautionary codes (e.g., P264, P280)"
     )
-    hazard_summary: Optional[str] = Field(
+    hazard_summary: str | None = Field(
         default=None,
         description="Human-readable hazard summary"
     )
-    toxicity_summary: Optional[str] = Field(
+    toxicity_summary: str | None = Field(
         default=None,
         description="Toxicity information summary"
     )
-    stability_reactivity: Optional[str] = Field(
+    stability_reactivity: str | None = Field(
         default=None,
         description="Stability and reactivity information"
     )
-    emergency_response: Optional[str] = Field(
+    emergency_response: str | None = Field(
         default=None,
         description="Emergency response guidance"
     )
-    source: Optional[str] = Field(
+    source: str | None = Field(
         default=None,
         description="Data source (e.g., PubChem, SDS)"
     )
@@ -118,7 +118,7 @@ class PPERequirement(BaseModel):
     standard: str = Field(
         description="Standard code (e.g., 'ANSI Z87.1 D3', 'EN 374-1 Type A')"
     )
-    specification: Optional[str] = Field(
+    specification: str | None = Field(
         default=None,
         description="Additional specs (e.g., 'breakthrough >60 min for acetone')"
     )
@@ -145,27 +145,27 @@ class MonitoringItem(BaseModel):
     unit: str = Field(
         description="Unit of measurement (e.g., '°C', 'bar', 'mL/min')"
     )
-    frequency: Optional[str] = Field(
+    frequency: str | None = Field(
         default=None,
         description="Monitoring frequency (e.g., 'continuous', 'every 5 min')"
     )
-    normal_range: Optional[str] = Field(
+    normal_range: str | None = Field(
         default=None,
         description="Expected normal range (e.g., '20-25°C')"
     )
-    warning_threshold: Optional[float] = Field(
+    warning_threshold: float | None = Field(
         default=None,
         description="Warning threshold value"
     )
-    critical_threshold: Optional[float] = Field(
+    critical_threshold: float | None = Field(
         default=None,
         description="Critical threshold value - requires immediate action"
     )
-    action_on_warning: Optional[str] = Field(
+    action_on_warning: str | None = Field(
         default=None,
         description="Action when warning threshold exceeded"
     )
-    action_on_critical: Optional[str] = Field(
+    action_on_critical: str | None = Field(
         default=None,
         description="Action when critical threshold exceeded"
     )
@@ -183,7 +183,7 @@ class SafetyThreshold(BaseModel):
         description="Comparison operator"
     )
     value: float = Field(description="Threshold value")
-    value_max: Optional[float] = Field(
+    value_max: float | None = Field(
         default=None,
         description="Upper bound for 'in_range' operator"
     )
@@ -192,7 +192,7 @@ class SafetyThreshold(BaseModel):
     action: str = Field(
         description="Required action if violated (e.g., 'stop_heating', 'evacuate')"
     )
-    rationale: Optional[str] = Field(
+    rationale: str | None = Field(
         default=None,
         description="Why this threshold exists"
     )
@@ -216,10 +216,10 @@ class EmergencyPlaybook(BaseModel):
         default="high",
         description="Severity of this scenario"
     )
-    immediate_actions: List[str] = Field(
+    immediate_actions: list[str] = Field(
         description="Immediate steps to take (short, actionable)"
     )
-    follow_up_actions: List[str] = Field(
+    follow_up_actions: list[str] = Field(
         default_factory=list,
         description="Follow-up actions after immediate response"
     )
@@ -235,7 +235,7 @@ class EmergencyPlaybook(BaseModel):
         default=False,
         description="Whether automated recovery is possible after this"
     )
-    notes: Optional[str] = Field(
+    notes: str | None = Field(
         default=None,
         description="Additional safety notes"
     )
@@ -254,15 +254,15 @@ class SafetyConstraint(BaseModel):
 
     type: ConstraintType = Field(description="Type of constraint")
     description: str = Field(description="Human-readable constraint description")
-    parameter: Optional[str] = Field(
+    parameter: str | None = Field(
         default=None,
         description="Parameter this constraint applies to (e.g., 'temperature')"
     )
-    value: Optional[Any] = Field(
+    value: Any | None = Field(
         default=None,
         description="Constraint value (type depends on constraint type)"
     )
-    unit: Optional[str] = Field(
+    unit: str | None = Field(
         default=None,
         description="Unit for the value"
     )
@@ -270,11 +270,11 @@ class SafetyConstraint(BaseModel):
         default=True,
         description="If True, violation blocks action; if False, warning only"
     )
-    rationale: Optional[str] = Field(
+    rationale: str | None = Field(
         default=None,
         description="Safety rationale for this constraint"
     )
-    source: Optional[str] = Field(
+    source: str | None = Field(
         default=None,
         description="Source of constraint (e.g., 'SDS', 'SOP', 'GHS')"
     )
@@ -289,10 +289,10 @@ class ChemicalInfo(BaseModel):
     model_config = ConfigDict(frozen=False)
 
     name: str = Field(description="Chemical name")
-    cas_number: Optional[str] = Field(default=None, description="CAS number")
-    smiles: Optional[str] = Field(default=None, description="SMILES notation")
-    amount: Optional[str] = Field(default=None, description="Amount with unit")
-    role: Optional[str] = Field(
+    cas_number: str | None = Field(default=None, description="CAS number")
+    smiles: str | None = Field(default=None, description="SMILES notation")
+    amount: str | None = Field(default=None, description="Amount with unit")
+    role: str | None = Field(
         default=None,
         description="Role in experiment (e.g., 'solvent', 'reagent', 'catalyst')"
     )
@@ -305,24 +305,24 @@ class ExperimentSummary(BaseModel):
     """
     model_config = ConfigDict(frozen=False)
 
-    title: Optional[str] = Field(default=None, description="Experiment title")
-    chemicals: List[ChemicalInfo] = Field(
+    title: str | None = Field(default=None, description="Experiment title")
+    chemicals: list[ChemicalInfo] = Field(
         default_factory=list,
         description="List of chemicals involved"
     )
-    procedure_steps: List[str] = Field(
+    procedure_steps: list[str] = Field(
         default_factory=list,
         description="High-level procedure steps"
     )
-    parameters: Dict[str, Any] = Field(
+    parameters: dict[str, Any] = Field(
         default_factory=dict,
         description="Key parameters (temperature, pressure, duration, etc.)"
     )
-    equipment: List[str] = Field(
+    equipment: list[str] = Field(
         default_factory=list,
         description="Equipment used (fume hood, closed system, etc.)"
     )
-    environment: Optional[str] = Field(
+    environment: str | None = Field(
         default=None,
         description="Environment description (e.g., 'fume hood', 'glovebox')"
     )
@@ -358,7 +358,7 @@ class SafetyPacket(BaseModel):
     )
 
     # Hazard information
-    hazards: List[GHSHazard] = Field(
+    hazards: list[GHSHazard] = Field(
         default_factory=list,
         description="Chemical hazards identified (GHS/H statements)"
     )
@@ -368,55 +368,55 @@ class SafetyPacket(BaseModel):
     )
 
     # PPE requirements
-    ppe: List[PPERequirement] = Field(
+    ppe: list[PPERequirement] = Field(
         default_factory=list,
         description="Required personal protective equipment"
     )
 
     # Monitoring requirements
-    monitoring: List[MonitoringItem] = Field(
+    monitoring: list[MonitoringItem] = Field(
         default_factory=list,
         description="Variables to monitor with thresholds"
     )
 
     # Safety thresholds for runtime enforcement
-    thresholds: List[SafetyThreshold] = Field(
+    thresholds: list[SafetyThreshold] = Field(
         default_factory=list,
         description="Safety thresholds for runtime checking"
     )
 
     # Emergency procedures
-    emergency_playbooks: List[EmergencyPlaybook] = Field(
+    emergency_playbooks: list[EmergencyPlaybook] = Field(
         default_factory=list,
         description="Emergency response procedures by scenario"
     )
 
     # Hard constraints
-    constraints: List[SafetyConstraint] = Field(
+    constraints: list[SafetyConstraint] = Field(
         default_factory=list,
         description="Runtime constraints for recovery actions"
     )
 
     # SOP reference (if generated)
-    sop_title: Optional[str] = Field(
+    sop_title: str | None = Field(
         default=None,
         description="Title of generated SOP"
     )
-    sop_procedure: List[str] = Field(
+    sop_procedure: list[str] = Field(
         default_factory=list,
         description="SOP procedure steps with safety limits"
     )
 
     # Metadata
-    assessed_at: Optional[str] = Field(
+    assessed_at: str | None = Field(
         default=None,
         description="ISO timestamp of assessment"
     )
-    assessment_source: Optional[str] = Field(
+    assessment_source: str | None = Field(
         default=None,
         description="Source of assessment (e.g., 'safety_sdl_agent')"
     )
-    warnings: List[str] = Field(
+    warnings: list[str] = Field(
         default_factory=list,
         description="Non-blocking warnings from assessment"
     )
@@ -436,11 +436,11 @@ class SafetyGuidance(BaseModel):
 
     query: str = Field(description="Original query")
     guidance: str = Field(description="Safety guidance response")
-    recommended_actions: List[str] = Field(
+    recommended_actions: list[str] = Field(
         default_factory=list,
         description="Recommended actions"
     )
-    prohibited_actions: List[str] = Field(
+    prohibited_actions: list[str] = Field(
         default_factory=list,
         description="Actions that should NOT be taken"
     )
@@ -454,7 +454,7 @@ class SafetyGuidance(BaseModel):
         le=1.0,
         description="Confidence in guidance"
     )
-    sources: List[str] = Field(
+    sources: list[str] = Field(
         default_factory=list,
         description="Sources for this guidance"
     )
@@ -473,15 +473,15 @@ class ActionSafetyCheck(BaseModel):
 
     action_name: str = Field(description="Name of the action being checked")
     result: SafetyCheckResult = Field(description="Check result")
-    violated_constraints: List[SafetyConstraint] = Field(
+    violated_constraints: list[SafetyConstraint] = Field(
         default_factory=list,
         description="Constraints that would be violated"
     )
-    violated_thresholds: List[SafetyThreshold] = Field(
+    violated_thresholds: list[SafetyThreshold] = Field(
         default_factory=list,
         description="Thresholds that would be violated"
     )
-    triggered_playbooks: List[str] = Field(
+    triggered_playbooks: list[str] = Field(
         default_factory=list,
         description="Emergency playbook scenarios that apply"
     )
@@ -489,7 +489,7 @@ class ActionSafetyCheck(BaseModel):
         default="",
         description="Explanation of check result"
     )
-    alternative_actions: List[str] = Field(
+    alternative_actions: list[str] = Field(
         default_factory=list,
         description="Suggested alternative actions if blocked"
     )

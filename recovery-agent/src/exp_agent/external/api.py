@@ -52,20 +52,20 @@ Examples:
 """
 import json
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from enum import StrEnum
+from typing import Any
 from urllib.parse import urljoin
 
 from .base import (
     BaseAction,
-    ExternalExecutor,
+    ExecutionError,
     ExecutionResult,
     ExecutionStatus,
-    ExecutionError,
+    ExternalExecutor,
 )
 
 
-class HTTPMethod(str, Enum):
+class HTTPMethod(StrEnum):
     """HTTP methods."""
     GET = "GET"
     POST = "POST"
@@ -97,15 +97,15 @@ class APIAction(BaseAction):
     """
     url: str = ""
     method: HTTPMethod = HTTPMethod.GET
-    headers: Dict[str, str] = field(default_factory=dict)
-    query_params: Dict[str, str] = field(default_factory=dict)
-    json_body: Optional[Dict[str, Any]] = None
-    form_data: Optional[Dict[str, Any]] = None
-    raw_body: Optional[Union[str, bytes]] = None
-    graphql_query: Optional[str] = None
-    graphql_variables: Optional[Dict[str, Any]] = None
-    expected_status: List[int] = field(default_factory=lambda: list(range(200, 300)))
-    retry_on_status: List[int] = field(default_factory=lambda: [500, 502, 503, 504])
+    headers: dict[str, str] = field(default_factory=dict)
+    query_params: dict[str, str] = field(default_factory=dict)
+    json_body: dict[str, Any] | None = None
+    form_data: dict[str, Any] | None = None
+    raw_body: str | bytes | None = None
+    graphql_query: str | None = None
+    graphql_variables: dict[str, Any] | None = None
+    expected_status: list[int] = field(default_factory=lambda: list(range(200, 300)))
+    retry_on_status: list[int] = field(default_factory=lambda: [500, 502, 503, 504])
     follow_redirects: bool = True
     verify_ssl: bool = True
 
@@ -129,13 +129,13 @@ class APIAction(BaseAction):
 class APIResponse:
     """Structured API response."""
     status_code: int
-    headers: Dict[str, str]
+    headers: dict[str, str]
     body: Any  # Parsed JSON or raw text
     raw_body: bytes
     elapsed_ms: float
 
     @property
-    def json(self) -> Optional[Dict[str, Any]]:
+    def json(self) -> dict[str, Any] | None:
         """Get body as JSON dict if possible."""
         if isinstance(self.body, dict):
             return self.body
@@ -161,10 +161,10 @@ class APIExecutor(ExternalExecutor):
     def __init__(
         self,
         name: str = "api",
-        base_url: Optional[str] = None,
-        default_headers: Optional[Dict[str, str]] = None,
-        allowed_domains: Optional[List[str]] = None,
-        http_client: Optional[Any] = None,
+        base_url: str | None = None,
+        default_headers: dict[str, str] | None = None,
+        allowed_domains: list[str] | None = None,
+        http_client: Any | None = None,
     ):
         """Initialize API executor.
 
@@ -309,9 +309,9 @@ class APIExecutor(ExternalExecutor):
         self,
         method: str,
         url: str,
-        headers: Dict[str, str],
-        params: Optional[Dict[str, str]],
-        body: Optional[Union[str, bytes]],
+        headers: dict[str, str],
+        params: dict[str, str] | None,
+        body: str | bytes | None,
         timeout: float,
         follow_redirects: bool,
         verify_ssl: bool,
@@ -397,9 +397,9 @@ class APIExecutor(ExternalExecutor):
 
         # Fall back to urllib (sync, wrapped in executor)
         import asyncio
-        from urllib.request import Request, urlopen
-        from urllib.error import HTTPError, URLError
         import ssl
+        from urllib.error import HTTPError
+        from urllib.request import Request, urlopen
 
         def make_sync_request():
             req = Request(url, method=method, headers=headers)
@@ -453,8 +453,8 @@ class APIExecutor(ExternalExecutor):
 # Convenience functions
 async def get(
     url: str,
-    headers: Optional[Dict[str, str]] = None,
-    params: Optional[Dict[str, str]] = None,
+    headers: dict[str, str] | None = None,
+    params: dict[str, str] | None = None,
     timeout: float = 30.0,
     **kwargs
 ) -> ExecutionResult:
@@ -474,8 +474,8 @@ async def get(
 
 async def post(
     url: str,
-    json_body: Optional[Dict[str, Any]] = None,
-    headers: Optional[Dict[str, str]] = None,
+    json_body: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
     timeout: float = 30.0,
     **kwargs
 ) -> ExecutionResult:
@@ -496,8 +496,8 @@ async def post(
 async def graphql(
     url: str,
     query: str,
-    variables: Optional[Dict[str, Any]] = None,
-    headers: Optional[Dict[str, str]] = None,
+    variables: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
     timeout: float = 30.0,
     **kwargs
 ) -> ExecutionResult:

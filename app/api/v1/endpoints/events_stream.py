@@ -140,7 +140,7 @@ async def _event_generator(
                 break
             try:
                 event = await asyncio.wait_for(sub.queue.get(), timeout=KEEPALIVE_INTERVAL)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Send keepalive comment
                 yield ": keepalive\n\n"
                 continue

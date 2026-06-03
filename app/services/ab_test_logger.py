@@ -5,12 +5,10 @@ statistical analysis for deciding when RL is safe to deploy.
 """
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
-from pathlib import Path
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -35,7 +33,7 @@ class ABTestRecord:
 
     def __post_init__(self) -> None:
         if not self.timestamp:
-            self.timestamp = datetime.now(timezone.utc).isoformat()
+            self.timestamp = datetime.now(UTC).isoformat()
 
 
 class ABTestLogger:

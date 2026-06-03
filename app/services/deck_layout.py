@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # Robot Type
 # ---------------------------------------------------------------------------
 
-class RobotType(str, Enum):
+class RobotType(StrEnum):
     """Supported robot platforms."""
     OT2 = "ot2"
     FLEX = "flex"

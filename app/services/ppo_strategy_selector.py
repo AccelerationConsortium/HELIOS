@@ -25,11 +25,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["PPOStrategySelector", "PPOConfig", "ActorCritic"]
-
-import numpy as np
 
 try:
     import torch
@@ -332,7 +332,7 @@ class PPOAgent:
         total_entropy = 0.0
         n_updates = 0
 
-        for epoch in range(self.config.n_epochs):
+        for _epoch in range(self.config.n_epochs):
             # Shuffle indices for mini-batching
             indices = torch.randperm(n)
 
@@ -437,7 +437,7 @@ class PPOStrategySelector:
     """
 
     def __init__(self, config: PPOConfig | None = None):
-        from app.services.rl_strategy_selector import RLState, ACTIONS
+        from app.services.rl_strategy_selector import ACTIONS
 
         if config is None:
             config = PPOConfig()

@@ -21,8 +21,12 @@ from __future__ import annotations
 
 import logging
 import re
+import sqlite3
+import uuid
 from dataclasses import dataclass
 from typing import Any
+
+from app.core.db import connection, json_dumps, parse_json, run_txn, utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -464,12 +468,6 @@ def summarize_failure_signatures(
 # Cross-run failure pattern learning layer
 # ---------------------------------------------------------------------------
 
-import sqlite3
-import uuid
-
-from app.core.db import connection, json_dumps, parse_json, run_txn, utcnow_iso
-
-
 def _ensure_failure_learning_tables(conn: sqlite3.Connection) -> None:
     """Lazily create the failure learning tables if they do not exist."""
     conn.executescript(
@@ -630,7 +628,7 @@ def record_failure_chains(
     # Sort signatures by step_key for consistent ordering.
     ordered = sorted(signatures, key=lambda s: s.step_key)
 
-    for pred, succ in zip(ordered, ordered[1:]):
+    for pred, succ in zip(ordered, ordered[1:], strict=False):
         existing = conn.execute(
             "SELECT id, co_occurrence_count "
             "FROM failure_chains "

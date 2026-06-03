@@ -24,7 +24,7 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # matterlab_opentrons is only available in the Flex lab environment.
 try:
@@ -48,7 +48,7 @@ class FlexBridge:
     def __init__(
         self,
         host_alias: str = "otflex",
-        password: Optional[str] = None,
+        password: str | None = None,
         simulation: bool = True,
         api_version: str = "2.21",
         dry_run: bool = False,
@@ -110,7 +110,7 @@ class FlexBridge:
     def _load_tip_index(self):
         """Load persistent tip index from JSON file."""
         try:
-            with open(self._tip_index_file, "r") as f:
+            with open(self._tip_index_file) as f:
                 self.tip_index = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             self.tip_index = {}
@@ -123,7 +123,7 @@ class FlexBridge:
         except OSError as exc:
             LOGGER.warning(f"[Flex] Could not save tip index: {exc}")
 
-    def reset_tip_index(self, pip_name: Optional[str] = None):
+    def reset_tip_index(self, pip_name: str | None = None):
         """Reset tip counter (all pipettes or a specific one).
 
         Args:
@@ -171,7 +171,7 @@ class FlexBridge:
     # Raw SSH  (mirrors OpenTronsControl.invoke)
     # ------------------------------------------------------------------
 
-    def invoke(self, code: str) -> Optional[str]:
+    def invoke(self, code: str) -> str | None:
         """Execute arbitrary Python code on the Flex robot via SSH.
 
         This is the low-level escape hatch that maps directly to
@@ -372,7 +372,7 @@ class FlexBridge:
     def pick_up_tip(
         self,
         pip_name: str = "p1000",
-        location: Optional[str] = None,
+        location: str | None = None,
     ) -> bool:
         """Pick up a tip from the assigned tip rack.
 
@@ -540,7 +540,7 @@ class FlexBridge:
         self,
         pip_name: str = "p1000",
         volume: float = 0,
-        push_out: Optional[float] = None,
+        push_out: float | None = None,
     ) -> bool:
         """
         Dispense liquid at the current location.
@@ -641,7 +641,7 @@ class FlexBridge:
         source_y_offset: float = 0,
         dest_x_offset: float = 0,
         dest_y_offset: float = 1,
-        push_out: Optional[float] = None,
+        push_out: float | None = None,
     ) -> bool:
         """
         High-level transfer: aspirate from source, dispense to destination.

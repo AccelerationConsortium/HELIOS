@@ -7,25 +7,25 @@ enabling the Experiment Agent to interface with real hardware devices.
 
 from .communication import (
     CommunicationInterface,
-    SerialCommunication,
     NetworkCommunication,
     RealDevice,
-)
-from .heater import (
-    RealHeater,
-    SerialHeater,
-    NetworkHeater,
-    IKAHeater,
-    create_serial_heater,
-    create_network_heater,
-    create_ika_heater,
+    SerialCommunication,
 )
 from .config import (
+    ConfigManager,
     DeviceConfig,
     LabConfig,
-    ConfigManager,
-    create_serial_heater_config,
     create_network_heater_config,
+    create_serial_heater_config,
+)
+from .heater import (
+    IKAHeater,
+    NetworkHeater,
+    RealHeater,
+    SerialHeater,
+    create_ika_heater,
+    create_network_heater,
+    create_serial_heater,
 )
 
 __all__ = [

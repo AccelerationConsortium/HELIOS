@@ -10,12 +10,14 @@ when ``pymupdf`` is not installed.
 """
 from __future__ import annotations
 
-import io
 import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.services.tool_holder_config import ToolHolderConfig
 
 logger = logging.getLogger(__name__)
 
@@ -391,7 +393,7 @@ def build_tool_holder_from_positions(
     holder_width_mm: float = 127.76,
     holder_height_mm: float = 85.48,
     holder_depth_mm: float = 60.0,
-) -> "ToolHolderConfig":
+) -> ToolHolderConfig:
     """Convert extracted PDF positions into a ToolHolderConfig.
 
     Maps each :class:`ExtractedPosition` to a well reference and offset

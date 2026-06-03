@@ -6,8 +6,8 @@ and contingency strategies.
 """
 from __future__ import annotations
 
-import uuid
 import logging
+import uuid
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
@@ -254,11 +254,11 @@ def _build_adaptive_schedule(
     (the orchestrator can override at runtime with real convergence data).
     """
     try:
+        from app.services.optimization_backends import list_backends
         from app.services.strategy_selector import (
             CampaignSnapshot,
             select_strategy,
         )
-        from app.services.optimization_backends import list_backends
 
         available = list_backends()
         n_dims = len(dimensions)

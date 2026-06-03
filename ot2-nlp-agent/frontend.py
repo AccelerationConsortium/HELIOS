@@ -9,17 +9,18 @@ Supports multiple instrument types through plugin architecture:
 - Camera (USB, SSH, IP)
 """
 
-import gradio as gr
 import json
+
+import gradio as gr
 
 # Try to import new plugin system, fall back to legacy
 try:
     from lab_automation import LabAutomationAgent
     from lab_automation.plugins import (
+        CameraPlugin,
         LiquidHandlerPlugin,
         PotentiostatPlugin,
         PumpControllerPlugin,
-        CameraPlugin,
     )
 
     # Create agent with all plugins
@@ -38,10 +39,10 @@ except ImportError:
 
 # Import Planner/Compiler types for experiment planning
 try:
-    from ot2_agent.planner import Planner, PlannerOutput, WorkflowDraft, ConfirmedWorkflow
-    from ot2_agent.compiler import Compiler, CompilerOutput
-    from ot2_agent.planner.domain_knowledge import OERDomainKnowledge
+    from ot2_agent.compiler import Compiler
     from ot2_agent.compiler.device_mapper import DeviceRegistry
+    from ot2_agent.planner import ConfirmedWorkflow, Planner
+    from ot2_agent.planner.domain_knowledge import OERDomainKnowledge
     HAS_PLANNER = True
 except ImportError:
     HAS_PLANNER = False
@@ -736,7 +737,7 @@ def create_protocol(
         # Build preview
         preview_lines = [f"Workflow: {name}", f"Description: {description}", ""]
         preview_lines.append("Parsed Steps:")
-        for i, phase in enumerate(workflow.phases):
+        for _i, phase in enumerate(workflow.phases):
             for j, step in enumerate(phase.steps):
                 preview_lines.append(f"  {j+1}. [{step.device_type}] {step.action}")
                 if step.params:
@@ -997,7 +998,7 @@ def plan_experiment(intent: str, conditions_json: str):
 
         # Format result
         result_lines = [
-            f"## Intent Analysis",
+            "## Intent Analysis",
             f"**Goal**: {output.intent.goal}",
             f"**Domain**: {output.intent.domain}",
             f"**Language**: {'Chinese' if output.intent.language == 'zh' else 'English'}",
@@ -1255,7 +1256,7 @@ with gr.Blocks(title=TITLE) as demo:
 
     # Header
     if USE_PLUGIN_SYSTEM:
-        gr.Markdown(f"""
+        gr.Markdown("""
         # Lab Automation Agent
         ### Multi-Instrument Lab Automation Platform
 

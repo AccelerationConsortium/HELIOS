@@ -14,7 +14,6 @@ from typing import Any
 
 from app.services.primitives_registry import get_registry
 
-
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------

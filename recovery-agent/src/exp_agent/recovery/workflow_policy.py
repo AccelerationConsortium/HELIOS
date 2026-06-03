@@ -5,11 +5,11 @@ This module extends the recovery system to consider workflow steps, dependencies
 and experiment loops when making recovery decisions.
 """
 
-from enum import Enum
-from typing import List, Dict, Any, Optional, Set
 from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any
 
-from ..core.types import Decision, DecisionType, HardwareError, DeviceState
+from ..core.types import Decision, DecisionType, DeviceState, HardwareError
 
 
 class WorkflowPhase(Enum):
@@ -37,13 +37,13 @@ class WorkflowStep:
 
     name: str
     phase: WorkflowPhase
-    devices: List[str]  # Devices involved in this step
+    devices: list[str]  # Devices involved in this step
     dependency: StepDependency = StepDependency.NONE
     can_skip: bool = False
     max_retries: int = 3
     timeout: float = 300.0  # 5 minutes default
-    preconditions: List[str] = field(default_factory=list)
-    postconditions: List[str] = field(default_factory=list)
+    preconditions: list[str] = field(default_factory=list)
+    postconditions: list[str] = field(default_factory=list)
 
     def is_critical(self) -> bool:
         """Check if this step is critical for the experiment."""
@@ -60,9 +60,9 @@ class ExperimentLoop:
 
     loop_id: int
     current_step_index: int = 0
-    completed_steps: Set[str] = field(default_factory=set)
-    skipped_steps: Set[str] = field(default_factory=set)
-    failed_steps: Dict[str, str] = field(
+    completed_steps: set[str] = field(default_factory=set)
+    skipped_steps: set[str] = field(default_factory=set)
+    failed_steps: dict[str, str] = field(
         default_factory=dict
     )  # step_name -> error_reason
     status: str = "running"  # running, completed, failed, aborted
@@ -94,7 +94,7 @@ class ExperimentLoop:
 
         return False
 
-    def _get_required_phases(self, current_phase: WorkflowPhase) -> List[WorkflowPhase]:
+    def _get_required_phases(self, current_phase: WorkflowPhase) -> list[WorkflowPhase]:
         """Get phases required for the current phase."""
         phase_order = [
             WorkflowPhase.SETUP,
@@ -104,7 +104,7 @@ class ExperimentLoop:
             WorkflowPhase.CLEANUP,
         ]
 
-        current_index = phase_order.index(current_phase)
+        phase_order.index(current_phase)
         if current_phase == WorkflowPhase.SAMPLE_PREP:
             return [WorkflowPhase.SETUP]
         elif current_phase == WorkflowPhase.MEASUREMENT:
@@ -121,7 +121,7 @@ class ExperimentLoop:
 
     def _get_all_previous_phases(
         self, current_phase: WorkflowPhase
-    ) -> List[WorkflowPhase]:
+    ) -> list[WorkflowPhase]:
         """Get all phases before the current one."""
         phase_order = [
             WorkflowPhase.SETUP,
@@ -139,17 +139,17 @@ class WorkflowContext:
     """Context information for workflow-aware decision making."""
 
     current_loop: ExperimentLoop
-    workflow_steps: List[WorkflowStep]
-    step_history: List[str] = field(default_factory=list)  # Recent step executions
-    loop_history: List[ExperimentLoop] = field(default_factory=list)  # Previous loops
+    workflow_steps: list[WorkflowStep]
+    step_history: list[str] = field(default_factory=list)  # Recent step executions
+    loop_history: list[ExperimentLoop] = field(default_factory=list)  # Previous loops
 
-    def get_current_step(self) -> Optional[WorkflowStep]:
+    def get_current_step(self) -> WorkflowStep | None:
         """Get the currently executing step."""
         if 0 <= self.current_loop.current_step_index < len(self.workflow_steps):
             return self.workflow_steps[self.current_loop.current_step_index]
         return None
 
-    def get_next_step(self) -> Optional[WorkflowStep]:
+    def get_next_step(self) -> WorkflowStep | None:
         """Get the next step in the workflow."""
         next_index = self.current_loop.current_step_index + 1
         if next_index < len(self.workflow_steps):
@@ -161,13 +161,13 @@ class WorkflowRecoveryPolicy:
     """Policy for workflow-aware error recovery."""
 
     def __init__(self):
-        self.step_failure_counts: Dict[str, int] = {}
-        self.phase_failure_counts: Dict[str, int] = {}
+        self.step_failure_counts: dict[str, int] = {}
+        self.phase_failure_counts: dict[str, int] = {}
 
     def make_decision(
         self,
         error: HardwareError,
-        device_states: Dict[str, DeviceState],
+        device_states: dict[str, DeviceState],
         context: WorkflowContext,
     ) -> Decision:
         """
@@ -400,7 +400,7 @@ class WorkflowRecoveryPolicy:
             actions=self._get_cleanup_actions(step.devices),
         )
 
-    def _get_cleanup_actions(self, devices: List[str]) -> List[Any]:
+    def _get_cleanup_actions(self, devices: list[str]) -> list[Any]:
         """Get cleanup actions for the specified devices."""
         from ..core.types import Action
 
@@ -411,7 +411,7 @@ class WorkflowRecoveryPolicy:
 
     def _get_degraded_actions(
         self, step: WorkflowStep, error: HardwareError
-    ) -> List[Any]:
+    ) -> list[Any]:
         """Get actions for degraded operation mode."""
         from ..core.types import Action
 

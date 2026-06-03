@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
-from ..core.types import DeviceState, Action
+
+from ..core.types import Action, DeviceState
+
 
 class Device(ABC):
     def __init__(self, name: str):

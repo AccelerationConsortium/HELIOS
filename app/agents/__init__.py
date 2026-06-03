@@ -3,24 +3,47 @@
 Individual agents follow the BaseAgent protocol. For paper-aligned
 grouping, use the four specialist swarms via SwarmFactory.
 """
+from app.agents.analyzer_agent import AnalyzerAgent, AnalyzerInput, AnalyzerOutput
 from app.agents.base import AgentResult, BaseAgent
 from app.agents.blueprint_reader_agent import BlueprintReaderAgent, BlueprintReaderInput, BlueprintReaderOutput
+from app.agents.capability_agent import (
+    CapabilityAgent,
+    CapabilityQueryInput,
+    CapabilitySnapshot,
+    PipetteInfo,
+    SlotInfo,
+)
 from app.agents.cleaning_agent import CleaningAgent, CleaningInput, CleaningOutput
 from app.agents.code_writer_agent import CodeWriterAgent, CodeWriterInput, CodeWriterOutput
-from app.agents.compiler_agent import CompilerAgent, CompileInput, CompileOutput
+from app.agents.compiler_agent import CompileInput, CompileOutput, CompilerAgent
 from app.agents.deck_layout_agent import DeckLayoutAgent, DeckLayoutInput, DeckLayoutOutput
 from app.agents.design_agent import DesignAgent, DesignInput, DesignOutput
+from app.agents.execution_agent import (
+    ExecutionAgent,
+    ExecutionInput,
+    ExecutionOutput,
+)
+from app.agents.monitor_agent import MonitorAgent, MonitorInput, MonitorOutput
 from app.agents.nlp_code_agent import NLPCodeAgent, NLPCodeInput, NLPCodeOutput
+from app.agents.observation_agent import (
+    ObservationAgent,
+    ObservationInput,
+    ObservationPacket,
+)
 from app.agents.onboarding_agent import OnboardingAgent, OnboardingInput, OnboardingOutput
+from app.agents.optimization_agent import (
+    CandidatePoint,
+    OptimizationAgent,
+    OptimizationInput,
+    OptimizationOutput,
+)
 from app.agents.orchestrator import OrchestratorAgent, OrchestratorInput, OrchestratorOutput
-from app.agents.planner_agent import PlannerAgent, PlannerInput, PlannerOutput, PlannedRound
+from app.agents.planner_agent import PlannedRound, PlannerAgent, PlannerInput, PlannerOutput
+from app.agents.query_agent import QueryAgent, QueryRequest, QueryResult
 from app.agents.recovery_agent import RecoveryAgent, RecoveryInput, RecoveryOutput
 from app.agents.safety_agent import SafetyAgent, SafetyCheckInput, SafetyCheckOutput
-from app.agents.sensing_agent import SensingAgent, SensingInput, SensingOutput, QCCheck, QCResult
+from app.agents.sensing_agent import QCCheck, QCResult, SensingAgent, SensingInput, SensingOutput
 from app.agents.simulation_agent import SimulationAgent, SimulationInput, SimulationOutput
-from app.agents.monitor_agent import MonitorAgent, MonitorInput, MonitorOutput
-from app.agents.analyzer_agent import AnalyzerAgent, AnalyzerInput, AnalyzerOutput
-from app.agents.query_agent import QueryAgent, QueryRequest, QueryResult
 from app.agents.stop_agent import StopAgent, StopInput, StopOutput
 from app.agents.swarm import (
     AnalystSwarm,
@@ -34,33 +57,10 @@ from app.agents.swarm import (
     list_swarms,
 )
 from app.agents.tool_holder_dialog_agent import ToolHolderDialogAgent, ToolHolderDialogInput, ToolHolderDialogOutput
-from app.agents.capability_agent import (
-    CapabilityAgent,
-    CapabilityQueryInput,
-    CapabilitySnapshot,
-    PipetteInfo,
-    SlotInfo,
-)
-from app.agents.execution_agent import (
-    ExecutionAgent,
-    ExecutionInput,
-    ExecutionOutput,
-)
 from app.agents.validation_agent import (
     ValidationAgent,
     ValidationInput,
     ValidationOutput,
-)
-from app.agents.observation_agent import (
-    ObservationAgent,
-    ObservationInput,
-    ObservationPacket,
-)
-from app.agents.optimization_agent import (
-    OptimizationAgent,
-    OptimizationInput,
-    OptimizationOutput,
-    CandidatePoint,
 )
 
 __all__ = [

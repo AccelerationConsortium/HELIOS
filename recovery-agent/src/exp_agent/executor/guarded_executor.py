@@ -26,7 +26,8 @@ Execution Harness Hardening (this revision):
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, List, Literal, Optional, Protocol, TYPE_CHECKING
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -76,7 +77,7 @@ class Violation(BaseModel):
     type: str
     severity: str = "high"
     message: str
-    context: Dict[str, Any] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 class Warning_(BaseModel):
@@ -87,7 +88,7 @@ class Warning_(BaseModel):
     stage: ViolationStage
     type: str
     message: str
-    context: Dict[str, Any] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 class PreflightResult(BaseModel):
@@ -103,9 +104,9 @@ class PreflightResult(BaseModel):
 
     status: ValidationStatus
     action: str
-    device: Optional[str] = None
-    violations: List[Violation] = Field(default_factory=list)
-    warnings: List[Warning_] = Field(default_factory=list)
+    device: str | None = None
+    violations: list[Violation] = Field(default_factory=list)
+    warnings: list[Warning_] = Field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -140,8 +141,8 @@ class GuardedExecutor:
 
     def __init__(
         self,
-        logger: Optional[logging.Logger] = None,
-        safety_check_fn: Optional[SafetyCheckFn] = None,
+        logger: logging.Logger | None = None,
+        safety_check_fn: SafetyCheckFn | None = None,
         max_safe_temperature: float = 130.0,
     ) -> None:
         """Args:
@@ -169,14 +170,14 @@ class GuardedExecutor:
 
     def check_preconditions(
         self, state: ExecutionState, action: Action
-    ) -> List[Violation]:
+    ) -> list[Violation]:
         """Validate that the action's declared preconditions hold.
 
         Returns a list of Violations (empty == passed). This collect-style
         return lets the pre-flight phase aggregate all problems; the execution
         phase converts the first one into a raised HardwareError.
         """
-        violations: List[Violation] = []
+        violations: list[Violation] = []
         if not action.preconditions:
             return violations
 
@@ -226,8 +227,8 @@ class GuardedExecutor:
         self,
         state: ExecutionState,
         action: Action,
-        safety_packet: Optional["SafetyPacket"] = None,
-    ) -> tuple[List[Violation], List[Warning_]]:
+        safety_packet: SafetyPacket | None = None,
+    ) -> tuple[list[Violation], list[Warning_]]:
         """Evaluate the action against the safety envelope (no side effects).
 
         Performs two kinds of checks:
@@ -239,8 +240,8 @@ class GuardedExecutor:
         verbatim. ``require_human`` outcomes are surfaced as warnings (matching
         the original non-blocking behaviour).
         """
-        violations: List[Violation] = []
-        warnings: List[Warning_] = []
+        violations: list[Violation] = []
+        warnings: list[Warning_] = []
 
         # --- 1. Built-in device safety limits ---
         if action.name == "set_temperature":
@@ -277,16 +278,16 @@ class GuardedExecutor:
         self,
         state: ExecutionState,
         action: Action,
-        packet: "SafetyPacket",
-    ) -> tuple[List[Violation], List[Warning_]]:
+        packet: SafetyPacket,
+    ) -> tuple[list[Violation], list[Warning_]]:
         """Check action against SafetyPacket constraints.
 
         Implements the runtime safety overlay from plan.md section 3(2).
         Returns collected violations/warnings rather than raising, so the
         same logic serves both the pre-flight and execution phases.
         """
-        violations: List[Violation] = []
-        warnings: List[Warning_] = []
+        violations: list[Violation] = []
+        warnings: list[Warning_] = []
 
         device_state = self._resolve_device_state(state, action)
         if device_state is None:
@@ -357,7 +358,7 @@ class GuardedExecutor:
         device: Device,
         action: Action,
         state: ExecutionState,
-        safety_packet: Optional["SafetyPacket"] = None,
+        safety_packet: SafetyPacket | None = None,
     ) -> PreflightResult:
         """Run pre-check + safety layers without dispatching to hardware.
 
@@ -377,8 +378,8 @@ class GuardedExecutor:
             },
         )
 
-        violations: List[Violation] = []
-        warnings: List[Warning_] = []
+        violations: list[Violation] = []
+        warnings: list[Warning_] = []
 
         violations.extend(self.check_preconditions(state, action))
 
@@ -439,9 +440,9 @@ class GuardedExecutor:
         device: Device,
         action: Action,
         state: ExecutionState,
-        safety_packet: Optional["SafetyPacket"] = None,
+        safety_packet: SafetyPacket | None = None,
         validate_only: bool = False,
-    ) -> Optional[PreflightResult]:
+    ) -> PreflightResult | None:
         """Execute an action on a device with guardrails.
 
         Args:
@@ -558,7 +559,7 @@ class GuardedExecutor:
     @staticmethod
     def _resolve_device_state(
         state: ExecutionState, action: Action
-    ) -> Optional[DeviceState]:
+    ) -> DeviceState | None:
         """Resolve the relevant DeviceState for an action.
 
         Prefers the action's named device; falls back to the first device in

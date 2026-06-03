@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -40,7 +40,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-class CodeConfirmationStatus(str, Enum):
+class CodeConfirmationStatus(StrEnum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"

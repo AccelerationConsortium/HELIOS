@@ -5,9 +5,10 @@ The main agent that coordinates multiple instrument plugins to
 parse natural language instructions and generate unified workflows.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
 from .plugin_base import PluginBase
-from .workflow import Workflow, Phase, Step, DeviceConfig
+from .workflow import DeviceConfig, Phase, Step, Workflow
 
 
 class LabAutomationAgent:
@@ -40,8 +41,8 @@ class LabAutomationAgent:
     """
 
     def __init__(self):
-        self._plugins: Dict[str, PluginBase] = {}
-        self._device_type_to_plugin: Dict[str, str] = {}
+        self._plugins: dict[str, PluginBase] = {}
+        self._device_type_to_plugin: dict[str, str] = {}
 
     def register_plugin(self, plugin: PluginBase):
         """
@@ -53,26 +54,26 @@ class LabAutomationAgent:
         self._plugins[plugin.name] = plugin
         self._device_type_to_plugin[plugin.device_type] = plugin.name
 
-    def get_plugin(self, name: str) -> Optional[PluginBase]:
+    def get_plugin(self, name: str) -> PluginBase | None:
         """Get a plugin by name."""
         return self._plugins.get(name)
 
-    def get_plugin_by_device_type(self, device_type: str) -> Optional[PluginBase]:
+    def get_plugin_by_device_type(self, device_type: str) -> PluginBase | None:
         """Get a plugin by device type."""
         plugin_name = self._device_type_to_plugin.get(device_type)
         if plugin_name:
             return self._plugins.get(plugin_name)
         return None
 
-    def list_plugins(self) -> List[str]:
+    def list_plugins(self) -> list[str]:
         """List all registered plugin names."""
         return list(self._plugins.keys())
 
-    def list_device_types(self) -> List[str]:
+    def list_device_types(self) -> list[str]:
         """List all supported device types."""
         return list(self._device_type_to_plugin.keys())
 
-    def parse_instruction(self, instruction: str) -> Tuple[Optional[str], Dict[str, Any]]:
+    def parse_instruction(self, instruction: str) -> tuple[str | None, dict[str, Any]]:
         """
         Parse an instruction and route to the appropriate plugin.
 
@@ -99,7 +100,7 @@ class LabAutomationAgent:
     def create_workflow(
         self,
         name: str,
-        instructions: List[str],
+        instructions: list[str],
         description: str = "",
         version: str = "1.0",
         phase_name: str = "execution",
@@ -181,7 +182,7 @@ class LabAutomationAgent:
     def create_multi_phase_workflow(
         self,
         name: str,
-        phases_config: List[Dict[str, Any]],
+        phases_config: list[dict[str, Any]],
         description: str = "",
         version: str = "1.0",
     ) -> Workflow:
@@ -214,7 +215,7 @@ class LabAutomationAgent:
             phase_name = phase_config['phase_name']
             phase_desc = phase_config.get('description', '')
             instructions = phase_config.get('instructions', [])
-            is_parallel = phase_config.get('parallel', False)
+            phase_config.get('parallel', False)
 
             all_instructions.extend(instructions)
 
@@ -258,7 +259,7 @@ class LabAutomationAgent:
 
         return workflow
 
-    def get_all_operations(self) -> Dict[str, List[Dict[str, Any]]]:
+    def get_all_operations(self) -> dict[str, list[dict[str, Any]]]:
         """
         Get all operations from all registered plugins.
 
@@ -266,7 +267,7 @@ class LabAutomationAgent:
             Dict mapping device_type to list of operation definitions
         """
         result = {}
-        for name, plugin in self._plugins.items():
+        for _name, plugin in self._plugins.items():
             ops = []
             for op_name, op_def in plugin.get_operations().items():
                 ops.append({
@@ -282,7 +283,7 @@ class LabAutomationAgent:
         """Generate help text describing available operations."""
         lines = ["# Lab Automation Agent - Available Operations\n"]
 
-        for name, plugin in self._plugins.items():
+        for _name, plugin in self._plugins.items():
             lines.append(f"## {plugin.device_type.replace('_', ' ').title()}")
             lines.append(f"*{plugin.description}*\n")
 

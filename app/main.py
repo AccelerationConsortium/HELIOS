@@ -15,14 +15,14 @@ from app.core.startup import run_startup_checks
 from app.governance.claim_tracker import init_governance_schema
 from app.governance.middleware import start_governance_listener, stop_governance_listener
 from app.services.audit import set_event_bus
-from app.services.event_bus import EventBus
-from app.services.memory import seed_initial_recipes, start_memory_listener, stop_memory_listener
-from app.services.metrics import start_metrics_listener, stop_metrics_listener
 from app.services.campaign_metrics import (
     start_campaign_metrics_listener,
     stop_campaign_metrics_listener,
 )
+from app.services.event_bus import EventBus
 from app.services.evolution import start_evolution_listener, stop_evolution_listener
+from app.services.memory import seed_initial_recipes, start_memory_listener, stop_memory_listener
+from app.services.metrics import start_metrics_listener, stop_metrics_listener
 from app.services.reviewer import start_reviewer_listener, stop_reviewer_listener
 from app.services.scheduler import OrchestratorScheduler
 

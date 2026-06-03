@@ -10,8 +10,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.core.db import utcnow_iso
-
 __all__ = [
     "CampaignPlan",
     "ResourceRequirements",

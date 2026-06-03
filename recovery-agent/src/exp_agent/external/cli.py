@@ -33,14 +33,14 @@ import shlex
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from .base import (
     BaseAction,
-    ExternalExecutor,
+    ExecutionError,
     ExecutionResult,
     ExecutionStatus,
-    ExecutionError,
+    ExternalExecutor,
 )
 
 
@@ -58,10 +58,10 @@ class CLIAction(BaseAction):
         shell: Whether to run through shell (use with caution)
     """
     command: str = ""
-    args: List[str] = field(default_factory=list)
-    env: Dict[str, str] = field(default_factory=dict)
-    working_dir: Optional[str] = None
-    stdin: Optional[str] = None
+    args: list[str] = field(default_factory=list)
+    env: dict[str, str] = field(default_factory=dict)
+    working_dir: str | None = None
+    stdin: str | None = None
     capture_stderr: bool = True
     shell: bool = False
 
@@ -98,9 +98,9 @@ class CLIExecutor(ExternalExecutor):
     def __init__(
         self,
         name: str = "cli",
-        allowed_commands: Optional[List[str]] = None,
-        default_env: Optional[Dict[str, str]] = None,
-        default_working_dir: Optional[str] = None,
+        allowed_commands: list[str] | None = None,
+        default_env: dict[str, str] | None = None,
+        default_working_dir: str | None = None,
     ):
         """Initialize CLI executor.
 
@@ -195,7 +195,7 @@ class CLIExecutor(ExternalExecutor):
                     process.communicate(input=stdin_bytes),
                     timeout=action.timeout_seconds
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Kill the process on timeout
                 process.kill()
                 await process.wait()
@@ -252,7 +252,7 @@ class CLIExecutor(ExternalExecutor):
 # Convenience functions for common patterns
 async def run_command(
     command: str,
-    args: Optional[List[str]] = None,
+    args: list[str] | None = None,
     timeout: float = 30.0,
     **kwargs
 ) -> ExecutionResult:
@@ -279,9 +279,9 @@ async def run_command(
 
 
 async def run_pipeline(
-    commands: List[Dict[str, Any]],
+    commands: list[dict[str, Any]],
     stop_on_failure: bool = True
-) -> List[ExecutionResult]:
+) -> list[ExecutionResult]:
     """Run a pipeline of CLI commands.
 
     Args:

@@ -4,9 +4,9 @@ Potentiostat Plugin
 Supports electrochemistry instruments like SquidStat, Gamry, BioLogic, Autolab.
 """
 
-from .plugin import PotentiostatPlugin
-from .parser import PotentiostatParser
 from .operations import ElectrochemOperation
+from .parser import PotentiostatParser
+from .plugin import PotentiostatPlugin
 
 __all__ = [
     'PotentiostatPlugin',

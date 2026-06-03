@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -101,7 +101,7 @@ def dominates(
     at_least_as_good = True
     strictly_better = False
 
-    for obj_a, obj_b, maximize_obj in zip(a, b, maximize):
+    for obj_a, obj_b, maximize_obj in zip(a, b, maximize, strict=False):
         if maximize_obj:
             # Maximization: A dominates if obj_a >= obj_b
             if obj_a < obj_b:

@@ -4,7 +4,6 @@ Wrapper for Opentrons API to provide simplified interface for liquid handling op
 """
 import json
 import logging
-from typing import Dict, Optional
 
 # These imports are only available when the real hardware SDK is installed.
 # In simulated / dry-run mode the module is never imported.
@@ -206,7 +205,7 @@ class OpentronsController:
                 strPipetteName=pipette_name,
                 boolDropInDisposal=True
             )
-            logging.info(f"Dropped tip in trash")
+            logging.info("Dropped tip in trash")
         else:
             # Drop in specific labware location
             if not labware_id or not well_name:
@@ -323,7 +322,7 @@ class OpentronsController:
             fltOffsetY=offset_y,
             fltOffsetZ=offset_z
         )
-        logging.info(f"Blowout successful.")
+        logging.info("Blowout successful.")
         logging.debug(f"Blowout at {labware_id}:{well_name}")
 
     def move_to_well(
@@ -335,7 +334,7 @@ class OpentronsController:
         offset_y: float = 0.0,
         offset_z: float = 0.0,
         offset_start: str = 'top',
-        speed: Optional[int] = None
+        speed: int | None = None
     ):
         """
         Move pipette to specified well position
@@ -425,7 +424,7 @@ class OpentronsController:
 
         logging.info(f"Transferred {volume}µL from {source_labware}:{source_well} to {dest_labware}:{dest_well}")
 
-    def get_labware_id(self, slot: int | str) -> Optional[str]:
+    def get_labware_id(self, slot: int | str) -> str | None:
         """
         Get labware ID for a given slot
 

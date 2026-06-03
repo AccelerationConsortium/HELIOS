@@ -12,35 +12,20 @@
 场景：反应器冷却系统故障导致温度失控
 """
 import asyncio
-import json
 import time
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Any
 
 # Core types
-from exp_agent.core.types import (
-    DeviceState, HardwareError, Action, Decision,
-    ExecutionState, PlanStep
-)
-
-# Recovery system
-from exp_agent.recovery.policy import (
-    decide_recovery, analyze_signature, RecoveryConfig
-)
+from exp_agent.core.types import Action, DeviceState, HardwareError
 
 # External executors
-from exp_agent.external.integration import (
-    ExternalDevice, ExternalAction,
-    create_cli_device, create_script_device, create_api_device,
-    create_hybrid_device
-)
-from exp_agent.external.cli import CLIExecutor, CLIAction, run_command
-from exp_agent.external.script import run_python, run_shell
-from exp_agent.external.api import APIExecutor, APIAction, HTTPMethod
+# Recovery system
+from exp_agent.recovery.policy import RecoveryConfig, analyze_signature, decide_recovery
 
 # Try to import Rust telemetry buffer
 try:
-    from exp_agent_core import TelemetryBuffer, TelemetryPoint, TelemetryStats
+    from exp_agent_core import TelemetryBuffer, TelemetryPoint
     HAS_RUST = True
 except ImportError:
     HAS_RUST = False
@@ -120,7 +105,7 @@ class SimulatedReactor:
             }
         )
 
-    def get_history(self) -> List[DeviceState]:
+    def get_history(self) -> list[DeviceState]:
         """获取历史状态用于签名分析"""
         history = []
         if HAS_RUST:
@@ -149,14 +134,14 @@ class MockExternalSystems:
     """模拟外部系统响应"""
 
     @staticmethod
-    async def emergency_shutdown(device: str) -> Dict[str, Any]:
+    async def emergency_shutdown(device: str) -> dict[str, Any]:
         """模拟紧急停机CLI命令"""
         print(f"    🛑 [CLI] labctl emergency-stop --device {device}")
         await asyncio.sleep(0.5)  # 模拟执行时间
         return {"status": "stopped", "device": device}
 
     @staticmethod
-    async def run_diagnostics(device: str) -> Dict[str, Any]:
+    async def run_diagnostics(device: str) -> dict[str, Any]:
         """模拟诊断脚本"""
         print(f"    🔍 [SCRIPT] diagnose.py --device {device}")
         await asyncio.sleep(0.3)
@@ -168,7 +153,7 @@ class MockExternalSystems:
         }
 
     @staticmethod
-    async def backup_experiment_data(experiment_id: str) -> Dict[str, Any]:
+    async def backup_experiment_data(experiment_id: str) -> dict[str, Any]:
         """模拟数据备份脚本"""
         print(f"    💾 [SCRIPT] backup_data.py --exp {experiment_id}")
         await asyncio.sleep(0.2)
@@ -179,9 +164,9 @@ class MockExternalSystems:
         }
 
     @staticmethod
-    async def report_to_lims(incident: Dict[str, Any]) -> Dict[str, Any]:
+    async def report_to_lims(incident: dict[str, Any]) -> dict[str, Any]:
         """模拟LIMS API调用"""
-        print(f"    📡 [API] POST https://lims.lab.com/api/v1/incidents")
+        print("    📡 [API] POST https://lims.lab.com/api/v1/incidents")
         await asyncio.sleep(0.2)
         return {
             "incident_id": f"INC-{int(time.time())}",
@@ -190,9 +175,9 @@ class MockExternalSystems:
         }
 
     @staticmethod
-    async def send_alert(message: str, severity: str) -> Dict[str, Any]:
+    async def send_alert(message: str, severity: str) -> dict[str, Any]:
         """模拟告警通知API"""
-        print(f"    📱 [API] POST https://alerts.lab.com/notify")
+        print("    📱 [API] POST https://alerts.lab.com/notify")
         await asyncio.sleep(0.1)
         return {"delivered": True, "channels": ["slack", "email", "sms"]}
 
@@ -208,15 +193,15 @@ class DisasterRecoveryCoordinator:
         self.reactor = reactor
         self.external = MockExternalSystems()
         self.recovery_config = RecoveryConfig()
-        self.retry_counts: Dict[str, int] = {}
-        self.incident_log: List[Dict[str, Any]] = []
+        self.retry_counts: dict[str, int] = {}
+        self.incident_log: list[dict[str, Any]] = []
 
         # 安全阈值
         self.TEMP_WARNING = 160.0
         self.TEMP_CRITICAL = 175.0
         self.TEMP_EMERGENCY = 190.0
 
-    def log_event(self, event_type: str, message: str, data: Dict[str, Any] = None):
+    def log_event(self, event_type: str, message: str, data: dict[str, Any] = None):
         """记录事件"""
         entry = {
             "timestamp": datetime.now().isoformat(),

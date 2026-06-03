@@ -122,7 +122,7 @@ class ToolHolderDialogAgent(BaseAgent[ToolHolderDialogInput, ToolHolderDialogOut
         if input_data.phase == "start":
             if not input_data.holder_name:
                 errors.append("holder_name is required for start phase")
-            from app.services.deck_layout import valid_slot, RobotType
+            from app.services.deck_layout import RobotType, valid_slot
             rt = RobotType(getattr(input_data, 'robot_type', 'ot2') or 'ot2')
             if not valid_slot(input_data.slot_number, rt):
                 errors.append(f"slot_number {input_data.slot_number} is invalid for {rt.value}")

@@ -103,7 +103,7 @@ class CampaignSummary:
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "CampaignSummary":
+    def from_dict(cls, d: dict[str, Any]) -> CampaignSummary:
         return cls(
             campaign_id=str(d["campaign_id"]),
             domain_features=dict(d.get("domain_features", {})),
@@ -379,7 +379,7 @@ class TransferGP:
 
     # -- training --
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> "TransferGP":
+    def fit(self, X: np.ndarray, y: np.ndarray) -> TransferGP:
         """Fit the target GP and compute RGPE source weights.
 
         ``X`` is ``(n, d)`` normalised parameters, ``y`` the KPI values for the
@@ -424,7 +424,7 @@ class TransferGP:
         if sims.size == 0 or sims.sum() <= 0:
             return {s.campaign_id: 0.0 for s in self.sources}
         norm = sims / sims.sum()
-        return {s.campaign_id: float(w) for s, w in zip(self.sources, norm)}
+        return {s.campaign_id: float(w) for s, w in zip(self.sources, norm, strict=False)}
 
     @staticmethod
     def _cold_target_weight(n_target: int) -> float:
@@ -539,7 +539,7 @@ class TransferGP:
         variances: list[np.ndarray] = []
         weights: list[float] = []
 
-        for gp, src in zip(self._source_gps, self.sources):
+        for gp, src in zip(self._source_gps, self.sources, strict=False):
             w = self._weights.get(src.campaign_id, 0.0)
             if w <= 0.0:
                 continue
@@ -713,7 +713,7 @@ class AcquisitionFunctionSelector:
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "AcquisitionFunctionSelector":
+    def from_dict(cls, d: dict[str, Any]) -> AcquisitionFunctionSelector:
         obj = cls(list(d.get("arms", [])), exploration_c=float(d.get("exploration_c", 1.4)))
         obj._sum = {k: float(v) for k, v in d.get("sum", {}).items()}
         obj._n = {k: int(v) for k, v in d.get("n", {}).items()}
@@ -813,7 +813,7 @@ class CampaignTransferManager:
             all_params = parse_json(row["all_params_json"], [])
 
             observations: list[tuple[list[float], float]] = []
-            for params, kpi in zip(all_params, all_kpis):
+            for params, kpi in zip(all_params, all_kpis, strict=False):
                 if kpi is None or not isinstance(params, list):
                     continue
                 try:

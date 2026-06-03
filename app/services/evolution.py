@@ -24,7 +24,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from app.core.db import connection, json_dumps, parse_json, run_txn, utcnow_iso
+from app.core.db import json_dumps, parse_json, run_txn, utcnow_iso
 from app.services.audit import record_event
 
 logger = logging.getLogger(__name__)
@@ -133,9 +133,9 @@ def evolve_priors(run_id: str, review_data: dict[str, Any]) -> list[str]:
         return []
 
     # Find improvements with category "parameter" to identify target params
-    improvements = review_data.get("improvements", [])
+    review_data.get("improvements", [])
     # Also look at failure_attributions for primitives we can tighten
-    attributions = review_data.get("failure_attributions", [])
+    review_data.get("failure_attributions", [])
 
     # Gather all primitives from the run's steps
     run_data = _get_run_steps(run_id)

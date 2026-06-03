@@ -7,8 +7,7 @@ A reading is out of range if:
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -16,12 +15,12 @@ class RangeBounds:
     """Valid range bounds for a sensor."""
 
     sensor_id: str
-    valid_min: Optional[float] = None
-    valid_max: Optional[float] = None
+    valid_min: float | None = None
+    valid_max: float | None = None
 
     # Soft limits for warnings (before hard limits)
-    warn_min: Optional[float] = None
-    warn_max: Optional[float] = None
+    warn_min: float | None = None
+    warn_max: float | None = None
 
 
 @dataclass
@@ -29,11 +28,11 @@ class RangeState:
     """Tracked state for range detection."""
 
     sensor_id: str
-    last_value: Optional[float] = None
-    last_check: Optional[datetime] = None
+    last_value: float | None = None
+    last_check: datetime | None = None
     is_out_of_range: bool = False
     is_in_warning: bool = False
-    out_of_range_since: Optional[datetime] = None
+    out_of_range_since: datetime | None = None
     out_of_range_count: int = 0
 
 
@@ -54,10 +53,10 @@ class OutOfRangeDetector:
     def set_bounds(
         self,
         sensor_id: str,
-        valid_min: Optional[float] = None,
-        valid_max: Optional[float] = None,
-        warn_min: Optional[float] = None,
-        warn_max: Optional[float] = None,
+        valid_min: float | None = None,
+        valid_max: float | None = None,
+        warn_min: float | None = None,
+        warn_max: float | None = None,
     ) -> None:
         """Set valid range bounds for a sensor."""
         self._bounds[sensor_id] = RangeBounds(
@@ -74,7 +73,7 @@ class OutOfRangeDetector:
         self,
         sensor_id: str,
         value: float,
-        timestamp: Optional[datetime] = None,
+        timestamp: datetime | None = None,
     ) -> bool:
         """
         Check if a value is out of range.
@@ -85,7 +84,7 @@ class OutOfRangeDetector:
             return False  # No bounds set = in range
 
         bounds = self._bounds[sensor_id]
-        now = timestamp or datetime.now(timezone.utc)
+        now = timestamp or datetime.now(UTC)
 
         # Ensure state exists
         if sensor_id not in self._states:
@@ -163,11 +162,11 @@ class OutOfRangeDetector:
             if state.is_in_warning and not state.is_out_of_range
         ]
 
-    def get_state(self, sensor_id: str) -> Optional[RangeState]:
+    def get_state(self, sensor_id: str) -> RangeState | None:
         """Get the range state for a sensor."""
         return self._states.get(sensor_id)
 
-    def get_bounds(self, sensor_id: str) -> Optional[RangeBounds]:
+    def get_bounds(self, sensor_id: str) -> RangeBounds | None:
         """Get the bounds for a sensor."""
         return self._bounds.get(sensor_id)
 

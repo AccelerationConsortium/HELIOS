@@ -14,8 +14,6 @@ import logging
 import time
 from typing import Any
 
-from pydantic import BaseModel
-
 from app.agents.base import BaseAgent
 from app.contracts.query_contract import (
     ColumnSpec,
@@ -142,7 +140,7 @@ class QueryAgent(BaseAgent[QueryRequest, QueryResult]):
 
         # ── Slow path: NL → LLM → SQL ─────────────────────────────────────
         # 1. Schema introspection (cached)
-        schema = get_schema()
+        get_schema()
         schema_ver = get_schema_version()
         known_tables = set(get_table_names())
 

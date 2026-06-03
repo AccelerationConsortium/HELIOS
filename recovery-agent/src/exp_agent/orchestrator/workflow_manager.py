@@ -6,20 +6,20 @@ step dependencies, and coordination between recovery policies and execution.
 """
 
 import time
-from typing import List, Dict, Any, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import Any
 
-from ..recovery.workflow_policy import (
-    WorkflowContext,
-    ExperimentLoop,
-    WorkflowStep,
-    WorkflowPhase,
-    StepDependency,
-    WorkflowRecoveryPolicy,
-)
-from ..core.types import Decision, HardwareError, DeviceState, Action
-from ..recovery.recovery_agent import RecoveryAgent
+from ..core.types import Action, HardwareError
 from ..executor.guarded_executor import GuardedExecutor
+from ..recovery.recovery_agent import RecoveryAgent
+from ..recovery.workflow_policy import (
+    ExperimentLoop,
+    StepDependency,
+    WorkflowContext,
+    WorkflowPhase,
+    WorkflowRecoveryPolicy,
+    WorkflowStep,
+)
 
 
 @dataclass
@@ -28,11 +28,11 @@ class LoopResult:
 
     loop_id: int
     status: str  # "completed", "failed", "aborted", "skipped"
-    completed_steps: List[str]
-    failed_steps: Dict[str, str]
-    skipped_steps: List[str]
+    completed_steps: list[str]
+    failed_steps: dict[str, str]
+    skipped_steps: list[str]
     duration: float
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 class WorkflowManager:
@@ -40,8 +40,8 @@ class WorkflowManager:
 
     def __init__(
         self,
-        workflow_steps: List[WorkflowStep],
-        recovery_policy: Optional[WorkflowRecoveryPolicy] = None,
+        workflow_steps: list[WorkflowStep],
+        recovery_policy: WorkflowRecoveryPolicy | None = None,
     ):
         self.workflow_steps = workflow_steps
         self.recovery_policy = recovery_policy or WorkflowRecoveryPolicy()
@@ -49,8 +49,8 @@ class WorkflowManager:
         self.basic_recovery = RecoveryAgent()
 
         # Loop management
-        self.current_loop: Optional[ExperimentLoop] = None
-        self.loop_history: List[LoopResult] = []
+        self.current_loop: ExperimentLoop | None = None
+        self.loop_history: list[LoopResult] = []
         self.max_loops = 10  # Maximum experiment loops
 
         # Context
@@ -58,7 +58,7 @@ class WorkflowManager:
             current_loop=ExperimentLoop(loop_id=0), workflow_steps=workflow_steps
         )
 
-    def run_experiment(self, max_loops: int = 5) -> List[LoopResult]:
+    def run_experiment(self, max_loops: int = 5) -> list[LoopResult]:
         """
         Run the complete experiment with multiple loops.
 
@@ -97,7 +97,7 @@ class WorkflowManager:
                 print("Experiment completed successfully!")
                 break
 
-        print(f"\n=== Experiment Finished ===")
+        print("\n=== Experiment Finished ===")
         print(f"Total loops executed: {len(results)}")
         successful_loops = sum(1 for r in results if r.status == "completed")
         print(f"Successful loops: {successful_loops}")
@@ -161,7 +161,7 @@ class WorkflowManager:
                         # This shouldn't happen, but handle gracefully
                         print(f"✗ Step '{step.name}' failed: Unknown error")
                         loop.failed_steps[step.name] = "Unknown error"
-                        from ..core.types import Decision, DecisionType
+                        from ..core.types import Decision
 
                         decision = Decision(
                             kind="abort", rationale="Unknown error occurred", actions=[]
@@ -227,7 +227,7 @@ class WorkflowManager:
             duration=duration,
         )
 
-    def _execute_step(self, step: WorkflowStep) -> tuple[bool, Optional[HardwareError]]:
+    def _execute_step(self, step: WorkflowStep) -> tuple[bool, HardwareError | None]:
         """Execute a single workflow step."""
         try:
             # Here we would execute the actual step actions
@@ -274,8 +274,8 @@ class WorkflowManager:
             return False, error
 
     def _execute_degraded_step(
-        self, step: WorkflowStep, recovery_actions: List[Action]
-    ) -> tuple[bool, Optional[HardwareError]]:
+        self, step: WorkflowStep, recovery_actions: list[Action]
+    ) -> tuple[bool, HardwareError | None]:
         """Execute a step in degraded mode."""
         try:
             print(f"  Executing degraded step '{step.name}'...")
@@ -319,7 +319,7 @@ class WorkflowManager:
 
         return successful_loops > 0 or completion_rate > 0.3
 
-    def get_workflow_status(self) -> Dict[str, Any]:
+    def get_workflow_status(self) -> dict[str, Any]:
         """Get current workflow status."""
         return {
             "current_loop": self.current_loop.loop_id if self.current_loop else None,
@@ -330,7 +330,7 @@ class WorkflowManager:
 
 
 # Example workflow definition
-def create_sample_prep_workflow() -> List[WorkflowStep]:
+def create_sample_prep_workflow() -> list[WorkflowStep]:
     """Create a sample preparation workflow."""
     return [
         WorkflowStep(

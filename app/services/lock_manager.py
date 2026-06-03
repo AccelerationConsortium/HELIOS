@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from app.core.db import utcnow_iso
@@ -20,7 +20,7 @@ def acquire_lock(
     run_id: str,
     ttl_seconds: int,
 ) -> dict[str, Any] | None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     lease_until = (now + timedelta(seconds=ttl_seconds)).isoformat()
 
     row = conn.execute(

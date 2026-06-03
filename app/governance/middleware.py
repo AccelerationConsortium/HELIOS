@@ -36,8 +36,8 @@ from app.governance.circuit_breaker import CircuitBreaker
 from app.governance.claim_tracker import ClaimTracker
 from app.governance.saga_coordinator import SagaCoordinator
 from app.governance.schemas import (
-    Claim,
     CircuitBreakerState,
+    Claim,
     GovernanceDecision,
     RevisionRequest,
     SagaStep,

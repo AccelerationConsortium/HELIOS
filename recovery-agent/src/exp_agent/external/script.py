@@ -33,26 +33,23 @@ Examples:
         script_type=ScriptType.PYTHON
     ))
 """
-import asyncio
 import os
 import sys
 import tempfile
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 from .base import (
     BaseAction,
-    ExternalExecutor,
-    ExecutionResult,
-    ExecutionStatus,
     ExecutionError,
+    ExecutionResult,
+    ExternalExecutor,
 )
-from .cli import CLIExecutor, CLIAction
+from .cli import CLIAction, CLIExecutor
 
 
-class ScriptType(str, Enum):
+class ScriptType(StrEnum):
     """Supported script types."""
     PYTHON = "python"
     SHELL = "shell"
@@ -85,14 +82,14 @@ class ScriptAction(BaseAction):
         stdin: Input to send to script's stdin
         python_path: Additional Python path entries
     """
-    script_path: Optional[str] = None
+    script_path: str | None = None
     script_type: ScriptType = ScriptType.PYTHON
-    inline_code: Optional[str] = None
-    args: List[str] = field(default_factory=list)
-    env: Dict[str, str] = field(default_factory=dict)
-    working_dir: Optional[str] = None
-    stdin: Optional[str] = None
-    python_path: List[str] = field(default_factory=list)
+    inline_code: str | None = None
+    args: list[str] = field(default_factory=list)
+    env: dict[str, str] = field(default_factory=dict)
+    working_dir: str | None = None
+    stdin: str | None = None
+    python_path: list[str] = field(default_factory=list)
 
     def validate(self) -> None:
         super().validate()
@@ -125,9 +122,9 @@ class ScriptExecutor(ExternalExecutor):
     def __init__(
         self,
         name: str = "script",
-        python_venv: Optional[str] = None,
-        allowed_paths: Optional[List[str]] = None,
-        default_working_dir: Optional[str] = None,
+        python_venv: str | None = None,
+        allowed_paths: list[str] | None = None,
+        default_working_dir: str | None = None,
     ):
         """Initialize script executor.
 
@@ -256,9 +253,9 @@ class ScriptExecutor(ExternalExecutor):
 # Convenience functions
 async def run_python(
     code_or_path: str,
-    args: Optional[List[str]] = None,
+    args: list[str] | None = None,
     timeout: float = 30.0,
-    venv: Optional[str] = None,
+    venv: str | None = None,
     **kwargs
 ) -> ExecutionResult:
     """Run Python code or script.
@@ -300,7 +297,7 @@ async def run_python(
 
 async def run_shell(
     code_or_path: str,
-    args: Optional[List[str]] = None,
+    args: list[str] | None = None,
     timeout: float = 30.0,
     **kwargs
 ) -> ExecutionResult:

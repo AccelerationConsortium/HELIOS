@@ -3,13 +3,13 @@ Enhanced CLI for running the Experiment Agent with real or simulated devices.
 """
 
 import argparse
-import sys
 import random
+import sys
 from pathlib import Path
 
-from ..orchestrator.supervisor import Supervisor
 from ..devices.factory import DeviceFactory
-from ..devices.real.config import ConfigManager, LabConfig
+from ..devices.real.config import ConfigManager
+from ..orchestrator.supervisor import Supervisor
 
 
 def main():

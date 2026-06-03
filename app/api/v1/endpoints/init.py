@@ -8,12 +8,12 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.api.v1.schemas_init import (
-    InjectionPack,
     RoundPresentation,
     RoundResponse,
     RoundResult,
     SessionStatus,
 )
+from app.services.contract_bridge import injection_pack_to_task_contract
 from app.services.conversation_engine import (
     confirm_and_build,
     get_all_kpis,
@@ -24,7 +24,6 @@ from app.services.conversation_engine import (
     start_session,
     submit_round,
 )
-from app.services.contract_bridge import injection_pack_to_task_contract
 from app.services.injection_pack import (
     build_diff_summary,
     create_campaign_from_pack,

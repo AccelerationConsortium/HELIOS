@@ -5,16 +5,16 @@ Supports English and Chinese instructions.
 
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
-from .operations import Operation, OperationMapper, OperationType
+from .operations import OperationMapper, OperationType
 
 
 @dataclass
 class ParsedIntent:
     """Parsed user intent from natural language."""
-    operation_type: Optional[OperationType]
-    params: Dict[str, Any]
+    operation_type: OperationType | None
+    params: dict[str, Any]
     original_text: str
     confidence: float
     language: str  # 'en' or 'zh'
@@ -179,7 +179,7 @@ class NLParser:
             language=language
         )
 
-    def parse_multi_step(self, text: str) -> List[ParsedIntent]:
+    def parse_multi_step(self, text: str) -> list[ParsedIntent]:
         """
         Parse multi-step instructions.
 
@@ -223,7 +223,7 @@ class NLParser:
         # No multi-step markers found, treat as single step
         return [self.parse(text)]
 
-    def _extract_volume(self, text: str) -> Optional[Tuple[float, str]]:
+    def _extract_volume(self, text: str) -> tuple[float, str] | None:
         """Extract volume and unit from text."""
         for pattern, unit in self.VOLUME_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -231,7 +231,7 @@ class NLParser:
                 return (float(match.group(1)), unit)
         return None
 
-    def _extract_wells(self, text: str) -> List[str]:
+    def _extract_wells(self, text: str) -> list[str]:
         """Extract well positions from text."""
         wells = []
         for pattern in self.WELL_PATTERNS:
@@ -245,7 +245,7 @@ class NLParser:
                     wells.append(well)
         return wells
 
-    def _extract_well_range(self, text: str) -> Optional[Dict[str, str]]:
+    def _extract_well_range(self, text: str) -> dict[str, str] | None:
         """Extract well range (e.g., A1-A12) from text."""
         for pattern in self.WELL_RANGE_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -256,7 +256,7 @@ class NLParser:
                 }
         return None
 
-    def _extract_slot(self, text: str) -> Optional[int]:
+    def _extract_slot(self, text: str) -> int | None:
         """Extract slot number from text."""
         for pattern in self.SLOT_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -266,7 +266,7 @@ class NLParser:
                     return slot
         return None
 
-    def _extract_time(self, text: str) -> Optional[Tuple[float, str]]:
+    def _extract_time(self, text: str) -> tuple[float, str] | None:
         """Extract time duration from text."""
         for pattern, unit in self.TIME_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -274,7 +274,7 @@ class NLParser:
                 return (float(match.group(1)), unit)
         return None
 
-    def _extract_repetitions(self, text: str) -> Optional[int]:
+    def _extract_repetitions(self, text: str) -> int | None:
         """Extract repetition count from text."""
         for pattern in self.REPETITION_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -282,7 +282,7 @@ class NLParser:
                 return int(match.group(1))
         return None
 
-    def _extract_temperature(self, text: str) -> Optional[float]:
+    def _extract_temperature(self, text: str) -> float | None:
         """Extract temperature from text."""
         for pattern in self.TEMPERATURE_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)

@@ -7,13 +7,13 @@ Components:
 """
 
 from exp_agent.sensing.simulator.fault_injector import (
+    FaultConfig,
     FaultInjector,
     FaultType,
-    FaultConfig,
 )
 from exp_agent.sensing.simulator.replay import (
-    ReplayDriver,
     ReplayConfig,
+    ReplayDriver,
 )
 
 __all__ = [

@@ -150,8 +150,8 @@ class DeckLayoutAgent(BaseAgent[DeckLayoutInput, DeckLayoutOutput]):
 
     def _handle_parse(self, input_data: DeckLayoutInput) -> DeckLayoutOutput:
         from app.services.deck_parser import (
-            parse_deck_description,
             build_deck_plan_from_description,
+            parse_deck_description,
         )
 
         rt = input_data.robot_type

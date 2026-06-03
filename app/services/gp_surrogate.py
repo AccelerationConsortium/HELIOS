@@ -304,13 +304,13 @@ class ProductKernel(Kernel):
 
     def __call__(self, x1: np.ndarray, x2: np.ndarray) -> np.ndarray:
         out = np.ones((x1.shape[0], x2.shape[0]), dtype=float)
-        for kern, cols in zip(self.kernels, self.column_blocks):
+        for kern, cols in zip(self.kernels, self.column_blocks, strict=False):
             out = out * kern(x1[:, cols], x2[:, cols])
         return out
 
     def diag(self, x: np.ndarray) -> np.ndarray:
         out = np.ones(x.shape[0], dtype=float)
-        for kern, cols in zip(self.kernels, self.column_blocks):
+        for kern, cols in zip(self.kernels, self.column_blocks, strict=False):
             out = out * kern.diag(x[:, cols])
         return out
 
@@ -320,10 +320,10 @@ class ProductKernel(Kernel):
         # Precompute each factor's Gram matrix.
         factors = [
             kern(x1[:, cols], x2[:, cols])
-            for kern, cols in zip(self.kernels, self.column_blocks)
+            for kern, cols in zip(self.kernels, self.column_blocks, strict=False)
         ]
         grads: dict[str, np.ndarray] = {}
-        for i, (kern, cols) in enumerate(zip(self.kernels, self.column_blocks)):
+        for i, (kern, cols) in enumerate(zip(self.kernels, self.column_blocks, strict=False)):
             # Product of all other factors (so dK/dtheta_i scales by them).
             other = np.ones_like(factors[0])
             for j, fac in enumerate(factors):
@@ -488,7 +488,7 @@ class GPSurrogate:
     # -- fitting ---------------------------------------------------------
 
     def _gram_noisy(self, X: np.ndarray) -> np.ndarray:
-        n = X.shape[0]
+        X.shape[0]
         K = self.kernel(X, X)
         K[np.diag_indices_from(K)] += self.noise_variance + self.jitter
         return K
@@ -509,7 +509,7 @@ class GPSurrogate:
         K = (V * w) @ V.T
         return np.linalg.cholesky(K)
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> "GPSurrogate":
+    def fit(self, X: np.ndarray, y: np.ndarray) -> GPSurrogate:
         """Condition the GP on training data ``X`` (n, d) and targets ``y`` (n,)."""
         X = np.atleast_2d(np.asarray(X, dtype=float))
         y = np.asarray(y, dtype=float).ravel()
@@ -630,7 +630,7 @@ class GPSurrogate:
         kgrads = self.kernel.gradient_wrt_params(X, X)
         grad_parts: list[float] = []
         # Iterate in the same key order as get_log_params -> flatten.
-        for name, val in self.kernel.get_log_params().items():
+        for name, _val in self.kernel.get_log_params().items():
             g = kgrads[name]
             if g.ndim == 3:  # per-dimension stack
                 for d in range(g.shape[0]):
@@ -645,7 +645,7 @@ class GPSurrogate:
         grad = np.asarray(grad_parts, dtype=float)
         return -lml, -grad
 
-    def optimize_hyperparameters(self, n_restarts: int = 3) -> "GPSurrogate":
+    def optimize_hyperparameters(self, n_restarts: int = 3) -> GPSurrogate:
         """Maximize the log marginal likelihood with random restarts.
 
         Uses L-BFGS-B (SciPy) when available, otherwise a numpy gradient-descent
@@ -735,7 +735,7 @@ def _project(theta: np.ndarray, bounds: list[tuple[float, float]]) -> np.ndarray
 
 
 def _gp_gradient_descent(
-    gp: "GPSurrogate",
+    gp: GPSurrogate,
     start: np.ndarray,
     bounds: list[tuple[float, float]],
     X: np.ndarray,
@@ -1020,8 +1020,8 @@ def _observations_to_arrays(
     X_rows: list[tuple[float, ...]] = []
     y_vals: list[float] = []
     for obs in observations:
-        params = getattr(obs, "params")
-        objective = getattr(obs, "objective")
+        params = obs.params
+        objective = obs.objective
         if isinstance(params, dict):
             params = _normalize_params(params, space)
         else:
@@ -1030,7 +1030,7 @@ def _observations_to_arrays(
             if any(v < -0.05 or v > 1.05 for v in vals):
                 # Raw values — normalize using dimension bounds
                 normed: list[float] = []
-                for v, dim in zip(vals, space.dimensions):
+                for v, dim in zip(vals, space.dimensions, strict=False):
                     normed.append(max(0.0, min(1.0, _value_to_unit(v, dim))))
                 params = tuple(normed)
             else:
@@ -1188,7 +1188,7 @@ def feature_relevance(
 
     # Resolve the ARD-bearing kernel and its column mapping.
     if isinstance(kernel, ProductKernel):
-        for sub, cols in zip(kernel.kernels, kernel.column_blocks):
+        for sub, cols in zip(kernel.kernels, kernel.column_blocks, strict=False):
             if isinstance(sub, (ARDSquaredExponential, MaternKernel)):
                 rel = sub.relevance()
                 return {

@@ -11,27 +11,27 @@ This module provides:
 - Integration with SafetyChecker/RecoveryAgent
 """
 
-from exp_agent.sensing.protocol.sensor_event import (
-    SensorEvent,
-    QualityStatus,
-    SensorQuality,
-    SensorMeta,
-    SensorType,
+from exp_agent.sensing.integration import (
+    SafetyVeto,
+    SafetyVetoReason,
+    SensingIntegration,
+    SensingInterlockConfig,
 )
 from exp_agent.sensing.protocol.health_event import (
-    SensorHealthEvent,
-    HealthStatus,
     HealthMetrics,
+    HealthStatus,
+    SensorHealthEvent,
+)
+from exp_agent.sensing.protocol.sensor_event import (
+    QualityStatus,
+    SensorEvent,
+    SensorMeta,
+    SensorQuality,
+    SensorType,
 )
 from exp_agent.sensing.protocol.snapshot import (
     SensorSnapshot,
     SystemSnapshot,
-)
-from exp_agent.sensing.integration import (
-    SensingIntegration,
-    SensingInterlockConfig,
-    SafetyVeto,
-    SafetyVetoReason,
 )
 
 __all__ = [

@@ -6,7 +6,7 @@ without specifying how to achieve it.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -20,10 +20,10 @@ class MissingInfo:
     parameter: str                          # Parameter name/key
     question: str                           # Question in English
     question_zh: str                        # Question in Chinese
-    options: Optional[List[str]] = None     # Suggested values (if applicable)
-    default: Optional[Any] = None           # Default value
+    options: list[str] | None = None     # Suggested values (if applicable)
+    default: Any | None = None           # Default value
     required: bool = True                   # Whether this is required
-    unit: Optional[str] = None              # Unit (e.g., "mA/cm²", "°C")
+    unit: str | None = None              # Unit (e.g., "mA/cm²", "°C")
     value_type: str = "string"              # Expected type: string, number, boolean, list
 
     def get_question(self, language: str = "en") -> str:
@@ -32,7 +32,7 @@ class MissingInfo:
             return self.question_zh
         return self.question
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "parameter": self.parameter,
@@ -46,7 +46,7 @@ class MissingInfo:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "MissingInfo":
+    def from_dict(cls, data: dict[str, Any]) -> "MissingInfo":
         """Create from dictionary."""
         return cls(
             parameter=data["parameter"],
@@ -69,20 +69,20 @@ class PlanningContext:
     and any constraints the user has specified.
     """
     # Available equipment
-    devices: List[str] = field(default_factory=list)  # e.g., ["ot2", "potentiostat"]
-    labware: List[str] = field(default_factory=list)  # e.g., ["96_wellplate", "reservoir"]
+    devices: list[str] = field(default_factory=list)  # e.g., ["ot2", "potentiostat"]
+    labware: list[str] = field(default_factory=list)  # e.g., ["96_wellplate", "reservoir"]
 
     # Materials and samples
-    materials: Dict[str, Any] = field(default_factory=dict)  # e.g., {"electrode": "NiFe", "electrolyte": "1M KOH"}
-    samples: List[str] = field(default_factory=list)  # Sample identifiers
+    materials: dict[str, Any] = field(default_factory=dict)  # e.g., {"electrode": "NiFe", "electrolyte": "1M KOH"}
+    samples: list[str] = field(default_factory=list)  # Sample identifiers
 
     # Constraints
-    constraints: Dict[str, Any] = field(default_factory=dict)  # e.g., {"max_temperature": 60}
+    constraints: dict[str, Any] = field(default_factory=dict)  # e.g., {"max_temperature": 60}
 
     # Previous workflow state (for multi-step experiments)
-    previous_state: Dict[str, Any] = field(default_factory=dict)
+    previous_state: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "devices": self.devices,
@@ -94,7 +94,7 @@ class PlanningContext:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "PlanningContext":
+    def from_dict(cls, data: dict[str, Any]) -> "PlanningContext":
         """Create from dictionary."""
         return cls(
             devices=data.get("devices", []),
@@ -130,18 +130,18 @@ class Intent:
     language: str = "en"                        # Detected language: "en" or "zh"
 
     # What the user wants to measure/achieve
-    target_metrics: List[str] = field(default_factory=list)
+    target_metrics: list[str] = field(default_factory=list)
 
     # Known conditions extracted from user input
-    known_conditions: Dict[str, Any] = field(default_factory=dict)
+    known_conditions: dict[str, Any] = field(default_factory=dict)
 
     # Confidence in intent extraction (0.0-1.0)
     confidence: float = 0.0
 
     # Sub-intents for complex requests
-    sub_intents: List["Intent"] = field(default_factory=list)
+    sub_intents: list["Intent"] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "goal": self.goal,
@@ -155,7 +155,7 @@ class Intent:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Intent":
+    def from_dict(cls, data: dict[str, Any]) -> "Intent":
         """Create from dictionary."""
         return cls(
             goal=data["goal"],

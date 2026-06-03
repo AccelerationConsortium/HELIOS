@@ -4,8 +4,8 @@ Potentiostat Plugin
 Main plugin class for electrochemistry instruments.
 """
 
-from typing import Dict, List
-from ...core.plugin_base import PluginBase, ParserBase
+
+from ...core.plugin_base import ParserBase, PluginBase
 from .operations import ELECTROCHEM_OPERATIONS, ElectrochemOperation
 from .parser import PotentiostatParser
 
@@ -41,18 +41,18 @@ class PotentiostatPlugin(PluginBase):
 
     def _register_operations(self):
         """Register all electrochemistry operations."""
-        for op_type, op_def in ELECTROCHEM_OPERATIONS.items():
+        for _op_type, op_def in ELECTROCHEM_OPERATIONS.items():
             self.register_operation(op_def)
 
     def _create_parser(self) -> ParserBase:
         """Create the potentiostat parser."""
         return PotentiostatParser()
 
-    def get_supported_operations(self) -> List[str]:
+    def get_supported_operations(self) -> list[str]:
         """Get list of supported operation names."""
         return [op.value for op in ElectrochemOperation]
 
-    def get_keywords(self, language: str = "en") -> Dict[str, List[str]]:
+    def get_keywords(self, language: str = "en") -> dict[str, list[str]]:
         """Get all keywords organized by operation."""
         result = {}
         for op_type, op_def in ELECTROCHEM_OPERATIONS.items():

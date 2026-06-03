@@ -102,7 +102,6 @@ class InverseDesignAgent(BaseAgent[InverseDesignInput, InverseDesignOutput]):
     def _process_with_knowledge_base(self, input_data: InverseDesignInput) -> InverseDesignOutput:
         """Use built-in electrocatalyst knowledge for recommendations."""
         from app.services.electrocatalyst_knowledge import (
-            CatalystSystem,
             get_precursors_for_elements,
             infer_reaction_from_objective,
             recommend_systems,
@@ -162,7 +161,7 @@ class InverseDesignAgent(BaseAgent[InverseDesignInput, InverseDesignOutput]):
                 unique_precursors.append(p)
 
         # Build DesignAgent-compatible dimensions
-        max_wells = input_data.lab_capabilities.get("max_wells", 24)
+        input_data.lab_capabilities.get("max_wells", 24)
         dimensions = self._build_dimensions(list(all_elements), unique_precursors)
 
         # Build protocol template

@@ -10,18 +10,17 @@ Supported fault types:
 - Out of Range: Force value outside valid bounds
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from enum import Enum
-from typing import Callable, Optional
 import random
-import math
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
 
 from exp_agent.sensing.drivers.mock_driver import MockSensorDriver
 from exp_agent.sensing.protocol.sensor_event import QualityStatus
 
 
-class FaultType(str, Enum):
+class FaultType(StrEnum):
     """Types of faults that can be injected."""
 
     DROPOUT = "dropout"           # Stop reporting
@@ -41,8 +40,8 @@ class FaultConfig:
     sensor_id: str
 
     # Duration (None = permanent until cleared)
-    duration_ms: Optional[float] = None
-    start_time: Optional[datetime] = None
+    duration_ms: float | None = None
+    start_time: datetime | None = None
 
     # Fault-specific parameters
     # For DROPOUT:
@@ -52,7 +51,7 @@ class FaultConfig:
     noise_multiplier: float = 10.0         # Multiply existing noise by this
 
     # For STUCK:
-    stuck_value: Optional[float] = None    # Value to stick at (None = use last value)
+    stuck_value: float | None = None    # Value to stick at (None = use last value)
 
     # For DRIFT:
     drift_rate: float = 0.1                # Units per second
@@ -62,7 +61,7 @@ class FaultConfig:
     spike_probability: float = 0.1         # Probability of spike per reading
 
     # For OUT_OF_RANGE:
-    out_of_range_value: Optional[float] = None  # Specific value, or None for auto
+    out_of_range_value: float | None = None  # Specific value, or None for auto
 
     # For QUALITY_DEGRADE:
     degraded_quality: QualityStatus = QualityStatus.SUSPECT
@@ -73,8 +72,8 @@ class ActiveFault:
     """An active fault being injected."""
 
     config: FaultConfig
-    start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    last_value: Optional[float] = None
+    start_time: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_value: float | None = None
 
 
 class FaultInjector:
@@ -99,7 +98,7 @@ class FaultInjector:
     def inject(self, config: FaultConfig) -> None:
         """Inject a fault into a sensor."""
         if config.start_time is None:
-            config.start_time = datetime.now(timezone.utc)
+            config.start_time = datetime.now(UTC)
 
         fault = ActiveFault(config=config, start_time=config.start_time)
         self._active_faults[config.sensor_id] = fault
@@ -112,17 +111,18 @@ class FaultInjector:
         config = fault.config
         sensor_id = config.sensor_id
 
-        value_override: Optional[Callable[[], Optional[float]]] = None
-        quality_override: Optional[Callable[[], Optional[QualityStatus]]] = None
+        value_override: Callable[[], float | None] | None = None
+        quality_override: Callable[[], QualityStatus | None] | None = None
 
         if config.fault_type == FaultType.DROPOUT:
             # Return None (skip) with given probability
-            def dropout_value() -> Optional[float]:
+            def dropout_value() -> float | None:
                 if random.random() < config.dropout_probability:
                     return None  # Signal to skip this reading
                 return None  # Let normal value through
             value_override = dropout_value
-            quality_override = lambda: QualityStatus.DROPPED
+            def quality_override():
+                return QualityStatus.DROPPED
 
         elif config.fault_type == FaultType.STUCK:
             # Return the same value every time
@@ -130,12 +130,13 @@ class FaultInjector:
             if stuck_val is None:
                 # Use last known value
                 stuck_val = fault.last_value or 25.0
-            value_override = lambda: stuck_val
+            def value_override():
+                return stuck_val
 
         elif config.fault_type == FaultType.DRIFT:
             # Return drifting value
             def drift_value() -> float:
-                elapsed = (datetime.now(timezone.utc) - fault.start_time).total_seconds()
+                elapsed = (datetime.now(UTC) - fault.start_time).total_seconds()
                 return config.drift_rate * elapsed
             # Note: This adds drift on top of base value
             # The driver handles this in its drift_rate parameter
@@ -144,7 +145,7 @@ class FaultInjector:
 
         elif config.fault_type == FaultType.SPIKE:
             # Random spikes
-            def spike_value() -> Optional[float]:
+            def spike_value() -> float | None:
                 if random.random() < config.spike_probability:
                     return (fault.last_value or 25.0) + config.spike_magnitude * random.choice([-1, 1])
                 return None
@@ -152,12 +153,15 @@ class FaultInjector:
 
         elif config.fault_type == FaultType.OUT_OF_RANGE:
             # Force out of range
-            value_override = lambda: config.out_of_range_value or 999.9
-            quality_override = lambda: QualityStatus.OUT_OF_RANGE
+            def value_override():
+                return config.out_of_range_value or 999.9
+            def quality_override():
+                return QualityStatus.OUT_OF_RANGE
 
         elif config.fault_type == FaultType.QUALITY_DEGRADE:
             # Just degrade quality, not value
-            quality_override = lambda: config.degraded_quality
+            def quality_override():
+                return config.degraded_quality
 
         elif config.fault_type == FaultType.NOISE:
             # Noise is handled by modifying the sensor profile
@@ -183,13 +187,13 @@ class FaultInjector:
         for sensor_id in list(self._active_faults.keys()):
             self.clear(sensor_id)
 
-    def update(self, now: Optional[datetime] = None) -> list[str]:
+    def update(self, now: datetime | None = None) -> list[str]:
         """
         Check for expired faults and clear them.
 
         Returns list of sensor IDs where faults were cleared.
         """
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         cleared = []
 
         for sensor_id, fault in list(self._active_faults.items()):
@@ -217,7 +221,7 @@ class FaultInjector:
     def simulate_sensor_failure(
         self,
         sensor_id: str,
-        duration_ms: Optional[float] = None,
+        duration_ms: float | None = None,
     ) -> None:
         """Simulate complete sensor failure (dropout)."""
         self.inject(FaultConfig(
@@ -231,7 +235,7 @@ class FaultInjector:
         self,
         sensor_id: str,
         dropout_rate: float = 0.3,
-        duration_ms: Optional[float] = None,
+        duration_ms: float | None = None,
     ) -> None:
         """Simulate intermittent connection."""
         self.inject(FaultConfig(
@@ -245,7 +249,7 @@ class FaultInjector:
         self,
         sensor_id: str,
         rate: float = 5.0,  # Degrees per second
-        duration_ms: Optional[float] = None,
+        duration_ms: float | None = None,
     ) -> None:
         """Simulate thermal runaway (rapid temperature increase)."""
         self.inject(FaultConfig(
@@ -258,7 +262,7 @@ class FaultInjector:
     def simulate_hood_failure(
         self,
         sensor_id: str,
-        duration_ms: Optional[float] = None,
+        duration_ms: float | None = None,
     ) -> None:
         """Simulate fume hood airflow failure (zero airflow)."""
         self.inject(FaultConfig(
@@ -273,7 +277,7 @@ class FaultInjector:
         sensor_id: str,
         magnitude: float = 50.0,
         probability: float = 0.2,
-        duration_ms: Optional[float] = None,
+        duration_ms: float | None = None,
     ) -> None:
         """Simulate pressure spikes."""
         self.inject(FaultConfig(

@@ -48,10 +48,9 @@ Usage (agent/chat)::
 from __future__ import annotations
 
 import logging
-import re
 import textwrap
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -63,7 +62,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class CommunicationType(str, Enum):
+class CommunicationType(StrEnum):
     """How the instrument physically connects."""
 
     USB = "usb"
@@ -148,7 +147,7 @@ class InstrumentSpec:
 # ---------------------------------------------------------------------------
 
 
-class ConfirmationType(str, Enum):
+class ConfirmationType(StrEnum):
     """Categories of items requiring human confirmation."""
 
     SAFETY_CLASSIFICATION = "safety_classification"

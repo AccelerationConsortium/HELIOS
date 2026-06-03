@@ -1,7 +1,8 @@
 """Core types for exp-agent using Pydantic v2."""
 
-from typing import Literal, Optional, Any, List, Dict
-from pydantic import BaseModel, Field, model_validator, ConfigDict
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # Type aliases
 Effect = Literal["read", "write"]
@@ -83,7 +84,7 @@ class DeviceState(BaseModel):
 
     name: str
     status: DeviceStatus = "idle"
-    telemetry: Dict[str, Any] = Field(default_factory=dict)
+    telemetry: dict[str, Any] = Field(default_factory=dict)
 
 
 class HardwareError(Exception):
@@ -100,8 +101,8 @@ class HardwareError(Exception):
         severity: Severity,
         message: str,
         when: str = "",
-        action: Optional[str] = None,
-        context: Optional[Dict[str, Any]] = None
+        action: str | None = None,
+        context: dict[str, Any] | None = None
     ):
         self.device = device
         self.type = type
@@ -121,7 +122,7 @@ class HardwareError(Exception):
     def __str__(self) -> str:
         return f"HardwareError({self.device}): [{self.severity}] {self.type} - {self.message}"
 
-    def model_dump(self) -> Dict[str, Any]:
+    def model_dump(self) -> dict[str, Any]:
         """Pydantic-compatible serialization."""
         return {
             "device": self.device,
@@ -140,12 +141,12 @@ class Action(BaseModel):
 
     name: str
     effect: Effect
-    params: Dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(default_factory=dict)
     irreversible: bool = False
-    preconditions: List[str] = Field(default_factory=list)
-    postconditions: List[str] = Field(default_factory=list)
-    safety_constraints: List[str] = Field(default_factory=list)
-    device: Optional[str] = None
+    preconditions: list[str] = Field(default_factory=list)
+    postconditions: list[str] = Field(default_factory=list)
+    safety_constraints: list[str] = Field(default_factory=list)
+    device: str | None = None
 
 
 class Decision(BaseModel):
@@ -154,7 +155,7 @@ class Decision(BaseModel):
 
     kind: DecisionType
     rationale: str
-    actions: List[Action] = Field(default_factory=list)
+    actions: list[Action] = Field(default_factory=list)
 
     @model_validator(mode='after')
     def validate_abort_has_rationale(self) -> 'Decision':
@@ -168,10 +169,10 @@ class ExecutionState(BaseModel):
     """Current state of experiment execution."""
     model_config = ConfigDict(frozen=False, arbitrary_types_allowed=True)
 
-    devices: Dict[str, DeviceState] = Field(default_factory=dict)
-    irreversible_actions: List[str] = Field(default_factory=list)
-    hazards: List[str] = Field(default_factory=list)
-    last_error: Optional[Any] = None  # HardwareError (not a BaseModel)
+    devices: dict[str, DeviceState] = Field(default_factory=dict)
+    irreversible_actions: list[str] = Field(default_factory=list)
+    hazards: list[str] = Field(default_factory=list)
+    last_error: Any | None = None  # HardwareError (not a BaseModel)
 
 
 # ============================================================================
@@ -199,15 +200,15 @@ class PlanPatch(BaseModel):
     model_config = ConfigDict(frozen=False)
 
     # Parameter overrides: step_id -> {param_name: new_value}
-    overrides: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
+    overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
     # Postcondition relaxations: step_id -> list of new postcondition strings
-    relaxations: Dict[str, List[str]] = Field(default_factory=dict)
+    relaxations: dict[str, list[str]] = Field(default_factory=dict)
     # Human-readable notes about the degradation
-    notes: List[str] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
     # The original target that was degraded
-    original_target: Optional[float] = None
+    original_target: float | None = None
     # The new degraded target
-    degraded_target: Optional[float] = None
+    degraded_target: float | None = None
 
 
 # ============================================================================
@@ -222,7 +223,7 @@ class ErrorProfile(BaseModel):
     recoverable: bool
     default_strategy: DecisionType
     safe_shutdown_required: bool = False
-    diagnostics: List[str] = Field(default_factory=list)
+    diagnostics: list[str] = Field(default_factory=list)
 
     @model_validator(mode='after')
     def validate_safety_consistency(self) -> 'ErrorProfile':
@@ -238,7 +239,7 @@ class SignatureResult(BaseModel):
 
     mode: Literal["drift", "oscillation", "stall", "noisy", "stable", "unknown"]
     confidence: float = Field(ge=0.0, le=1.0)
-    details: Dict[str, Any] = Field(default_factory=dict)
+    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class RecoveryDecision(BaseModel):
@@ -247,8 +248,8 @@ class RecoveryDecision(BaseModel):
 
     kind: DecisionType
     rationale: str
-    actions: List[Action] = Field(default_factory=list)
-    error_profile: Optional[ErrorProfile] = None
-    signature: Optional[SignatureResult] = None
-    degraded_target: Optional[float] = None
+    actions: list[Action] = Field(default_factory=list)
+    error_profile: ErrorProfile | None = None
+    signature: SignatureResult | None = None
+    degraded_target: float | None = None
     sample_status: Literal["intact", "compromised", "destroyed", "anomalous"] = "intact"

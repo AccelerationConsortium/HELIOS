@@ -12,28 +12,29 @@ Three scenarios:
 Usage:
     python -m exp_agent.cli.run_narrative_demo
 """
-import os
+import json
 import sys
 import time
-import json
 import uuid
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from io import StringIO
 from pathlib import Path
-from contextlib import contextmanager
-from datetime import datetime
-from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 from ..core.types import (
-    PlanStep, PlanPatch, Action, HardwareError, DeviceState,
-    ExecutionState, Decision,
+    Action,
+    Decision,
+    DeviceState,
+    ExecutionState,
+    HardwareError,
 )
 from ..devices.simulated.heater import SimHeater
 from ..executor.guarded_executor import GuardedExecutor
-from ..recovery.recovery_agent import RecoveryAgent
-from ..recovery.policy import classify_error, analyze_signature
 from ..recovery.classifier import ErrorClassifier
-
+from ..recovery.policy import analyze_signature, classify_error
+from ..recovery.recovery_agent import RecoveryAgent
 
 # ============================================================================
 # Suppress noisy internal prints from policy/executor/heater modules
@@ -121,12 +122,12 @@ class MemoryRecord:
     timestamp: str
     correlation_id: str
     event_type: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
 
 class MemoryStore:
     """Simulates agent's persistent memory / audit database."""
     def __init__(self):
-        self.records: List[MemoryRecord] = []
+        self.records: list[MemoryRecord] = []
         self.file_path = Path("logs/narrative_demo_audit.jsonl")
 
     def write(self, event_type: str, correlation_id: str, payload: dict):
@@ -182,14 +183,14 @@ def simulate_mcp_call(tool_name: str, params: dict, result: str):
 def run_error_pipeline(
     error: HardwareError,
     dev_state: DeviceState,
-    history: List[DeviceState],
+    history: list[DeviceState],
     last_action: Action,
     stage: str,
     memory: MemoryStore,
     device: SimHeater,
     executor: GuardedExecutor,
     state: ExecutionState,
-    recovery_agent: Optional[RecoveryAgent] = None,
+    recovery_agent: RecoveryAgent | None = None,
 ) -> Decision:
     """
     Run the complete CLASSIFY → ANALYZE → DECIDE → EXECUTE → VERIFY → MEMORY
@@ -391,7 +392,7 @@ def run_scenario_1(memory: MemoryStore):
         state = ExecutionState(devices={device.name: device.read_state()})
 
     # Build some normal history first
-    history: List[DeviceState] = []
+    history: list[DeviceState] = []
     with suppress_internal_prints():
         for _ in range(3):
             device.tick()
@@ -424,7 +425,7 @@ def run_scenario_1(memory: MemoryStore):
                          device="probe_tip_1",
                          params={"z_step": -0.1, "speed": "slow"})
 
-    decision = run_error_pipeline(
+    run_error_pipeline(
         error=error, dev_state=history[-1], history=history,
         last_action=last_action, stage="approach",
         memory=memory, device=device, executor=executor, state=state,
@@ -466,7 +467,7 @@ def run_scenario_2(memory: MemoryStore):
         state = ExecutionState(devices={device.name: device.read_state()})
 
     # Build a drifting history (simulating overshoot)
-    history: List[DeviceState] = []
+    history: list[DeviceState] = []
     temps = [25.0, 60.0, 95.0, 115.0, 125.0, 132.0, 135.0]
     for t in temps:
         ds = DeviceState(
@@ -523,17 +524,17 @@ def run_scenario_2(memory: MemoryStore):
 
         print(f"  {MAGENTA}{BOLD}↓ DEGRADE{RESET} — Lowering target from 120°C to {degraded_target}°C")
         print(f"\n  {BOLD}PlanPatch generated:{RESET}")
-        print(f"    original_target: 120.0°C")
+        print("    original_target: 120.0°C")
         print(f"    degraded_target: {degraded_target}°C")
-        print(f"    overrides:")
+        print("    overrides:")
         print(f"      hold.temperature: 120.0 → {degraded_target}")
         print(f"      measure.temperature: 120.0 → {degraded_target}")
-        print(f"    relaxations:")
+        print("    relaxations:")
         print(f"      hold.postcondition: '~= 120.0 +/- 2.0' → '~= {degraded_target} +/- 2.0'")
         print(f"      measure.postcondition: '~= 120.0 +/- 3.0' → '~= {degraded_target} +/- 3.0'")
-        print(f"    notes:")
+        print("    notes:")
         print(f"      - Degraded from 120°C to {degraded_target}°C at step preheat")
-        print(f"      - Downstream postconditions relaxed. Results may be compromised.")
+        print("      - Downstream postconditions relaxed. Results may be compromised.")
 
         simulate_mcp_call(
             "plan_manager.apply_patch",
@@ -582,7 +583,7 @@ def run_scenario_3(memory: MemoryStore):
     shared_agent = RecoveryAgent()
 
     # Build stable-but-slightly-varying history (avoids "stall" signature)
-    history: List[DeviceState] = []
+    history: list[DeviceState] = []
     for t in [119.8, 120.1, 119.9, 120.2, 120.0]:
         ds = DeviceState(
             name="heater_1", status="running",
@@ -692,8 +693,8 @@ def main():
     memory = MemoryStore()
 
     print(f"\n{BOLD}{'═' * 70}")
-    print(f"  EXP-AGENT: Recovery-Aware Execution Agent")
-    print(f"  Full Decision Pipeline Demo")
+    print("  EXP-AGENT: Recovery-Aware Execution Agent")
+    print("  Full Decision Pipeline Demo")
     print(f"{'═' * 70}{RESET}")
     print(f"""
   This demo shows the agent's complete decision loop:
@@ -728,7 +729,7 @@ def main():
     memory.print_summary()
 
     print(f"\n{BOLD}{'═' * 70}")
-    print(f"  DEMO COMPLETE — 3 scenarios, 4 decision types demonstrated")
+    print("  DEMO COMPLETE — 3 scenarios, 4 decision types demonstrated")
     print(f"{'═' * 70}{RESET}")
     print(f"""
   {RED}✗ ABORT{RESET}   — Sensor failure → unsafe + non-recoverable → safe shutdown

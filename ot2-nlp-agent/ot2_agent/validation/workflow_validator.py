@@ -6,12 +6,11 @@ a single comprehensive validation result.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from ..ir import UnitOperation, DeviceAction
+from ..ir import DeviceAction, UnitOperation
 from ..protocol import Protocol
-from ..validator import ProtocolValidator, ValidationResult, ValidationIssue
-
+from ..validator import ProtocolValidator, ValidationIssue, ValidationResult
 from .resource_checker import ResourceChecker, ResourceConflict
 from .topology_checker import TopologyChecker, TopologyIssue
 
@@ -23,7 +22,7 @@ class Checkpoint:
     step_name: str
     message: str
     message_zh: str = ""
-    checklist: List[str] = field(default_factory=list)
+    checklist: list[str] = field(default_factory=list)
     is_critical: bool = False
 
 
@@ -35,10 +34,10 @@ class EnhancedValidationResult:
     Extends the basic ValidationResult with resource and topology info.
     """
     is_valid: bool
-    issues: List[ValidationIssue] = field(default_factory=list)
-    resource_conflicts: List[ResourceConflict] = field(default_factory=list)
-    topology_issues: List[TopologyIssue] = field(default_factory=list)
-    checkpoints: List[Checkpoint] = field(default_factory=list)
+    issues: list[ValidationIssue] = field(default_factory=list)
+    resource_conflicts: list[ResourceConflict] = field(default_factory=list)
+    topology_issues: list[TopologyIssue] = field(default_factory=list)
+    checkpoints: list[Checkpoint] = field(default_factory=list)
 
     @property
     def error_count(self) -> int:
@@ -56,7 +55,7 @@ class EnhancedValidationResult:
         count += sum(1 for t in self.topology_issues if t.severity == "warning")
         return count
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "is_valid": self.is_valid,
@@ -116,9 +115,9 @@ class WorkflowValidator:
     def validate(
         self,
         protocol: Protocol,
-        unit_operations: List[UnitOperation] = None,
-        device_actions: List[DeviceAction] = None,
-        available_resources: Dict[str, Any] = None
+        unit_operations: list[UnitOperation] = None,
+        device_actions: list[DeviceAction] = None,
+        available_resources: dict[str, Any] = None
     ) -> EnhancedValidationResult:
         """
         Perform comprehensive validation.
@@ -172,7 +171,7 @@ class WorkflowValidator:
 
         return result
 
-    def _identify_checkpoints(self, device_actions: List[DeviceAction]) -> List[Checkpoint]:
+    def _identify_checkpoints(self, device_actions: list[DeviceAction]) -> list[Checkpoint]:
         """Identify required human checkpoints."""
         checkpoints = []
 

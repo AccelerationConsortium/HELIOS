@@ -20,6 +20,8 @@ from typing import Any
 from app.services.convergence import (
     ConvergenceConfig,
     ConvergenceStatus,
+)
+from app.services.convergence import (
     detect_convergence as basic_detect_convergence,
 )
 
@@ -434,7 +436,7 @@ def estimate_convergence_round(
     # Use recent trend (last 5 observations)
     recent = values[-5:] if len(values) >= 5 else values
 
-    from app.services.convergence import _linear_regression_slope, _mean
+    from app.services.convergence import _linear_regression_slope
 
     slope = _linear_regression_slope(recent)
 

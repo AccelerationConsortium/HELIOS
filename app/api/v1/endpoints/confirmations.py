@@ -10,7 +10,6 @@ from pydantic import BaseModel
 
 from app.services.code_confirmation import (
     CodeConfirmationResponse,
-    CodeConfirmationStatus,
     get_confirmation_status,
     get_pending_confirmation,
     list_pending_confirmations,

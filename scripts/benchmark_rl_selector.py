@@ -184,7 +184,7 @@ def main():
 
     # Define selector functions
     def rl_selector_fn(snapshot, diagnostics):
-        state = RLState.from_snapshot(snapshot, diagnostics)
+        RLState.from_snapshot(snapshot, diagnostics)
         action, backend = rl_selector.select_action(snapshot, diagnostics, explore=False)
         return action, backend
 
@@ -221,7 +221,7 @@ def main():
     kpi_improvement = (rl_metrics['avg_final_kpi'] - rule_metrics['avg_final_kpi']) / abs(rule_metrics['avg_final_kpi']) * 100 if rule_metrics['avg_final_kpi'] != 0 else 0
     rounds_reduction = (rule_metrics['avg_rounds'] - rl_metrics['avg_rounds']) / rule_metrics['avg_rounds'] * 100 if rule_metrics['avg_rounds'] != 0 else 0
 
-    print(f"\n📊 Improvement Summary:")
+    print("\n📊 Improvement Summary:")
     print(f"  • KPI improvement: {kpi_improvement:+.2f}%")
     print(f"  • Rounds reduction: {rounds_reduction:+.2f}%")
 

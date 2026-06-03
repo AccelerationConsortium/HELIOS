@@ -23,7 +23,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.agents.base import BaseAgent, AgentResult
+from app.agents.base import BaseAgent
 from app.services.instrument_onboarding import (
     CommunicationType,
     ConfirmationItem,

@@ -7,7 +7,7 @@ Detailed Event Emitter for Frontend UI
 from __future__ import annotations
 
 import time
-from typing import Any, Callable
+from collections.abc import Callable
 
 
 class DetailedEventEmitter:
@@ -153,7 +153,7 @@ async def emit_detailed_round_execution(
     )
 
     # 1. PlannerAgent决策
-    step_id = emitter.emit_agent_start(
+    emitter.emit_agent_start(
         "planner",
         "Selecting optimization strategy",
         {"round": round_num}
@@ -174,7 +174,7 @@ async def emit_detailed_round_execution(
         emitter.emit_agent_decision(
             "planner",
             f"Strategy: {strategy.upper()}",
-            f"Sufficient data available, switching to surrogate-based optimization"
+            "Sufficient data available, switching to surrogate-based optimization"
         )
 
     if simulate:
@@ -183,7 +183,7 @@ async def emit_detailed_round_execution(
     emitter.emit_agent_result("planner", True, f"Strategy selected: {strategy}")
 
     # 2. CandidateGenerator生成候选
-    step_id = emitter.emit_agent_start(
+    emitter.emit_agent_start(
         "candidate_gen",
         f"Generating candidate using {strategy}",
         {"strategy": strategy}
@@ -212,7 +212,7 @@ async def emit_detailed_round_execution(
     )
 
     # 3. SafetyAgent验证
-    step_id = emitter.emit_agent_start(
+    emitter.emit_agent_start(
         "safety",
         "Pre-execution safety validation",
         {}
@@ -239,7 +239,7 @@ async def emit_detailed_round_execution(
     emitter.emit_agent_result("safety", True, "All safety checks passed ✅")
 
     # 4. CompilerAgent生成协议
-    step_id = emitter.emit_agent_start(
+    emitter.emit_agent_start(
         "compiler",
         "Generating OT-2 protocol",
         {}
@@ -279,7 +279,7 @@ async def emit_detailed_round_execution(
     emitter.emit_agent_result("compiler", True, "Protocol compiled (450 lines)")
 
     # 5. Executor - 硬件执行
-    step_id = emitter.emit_agent_start(
+    emitter.emit_agent_start(
         "executor",
         "Executing on OT-2 hardware",
         {}
@@ -361,7 +361,7 @@ async def emit_detailed_round_execution(
     emitter.emit_agent_result("executor", True, f"Execution complete, η10 = {eta10} mV")
 
     # 6. SensingAgent QC
-    step_id = emitter.emit_agent_start(
+    emitter.emit_agent_start(
         "sensing",
         "QC validation",
         {}

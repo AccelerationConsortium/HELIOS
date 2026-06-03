@@ -5,7 +5,7 @@ Defines all electrochemistry operations supported by potentiostats.
 """
 
 from enum import Enum
-from typing import Dict
+
 from ...core.plugin_base import OperationDef
 
 
@@ -25,7 +25,7 @@ class ElectrochemOperation(Enum):
 
 
 # Operation definitions with multilingual keywords
-ELECTROCHEM_OPERATIONS: Dict[ElectrochemOperation, OperationDef] = {
+ELECTROCHEM_OPERATIONS: dict[ElectrochemOperation, OperationDef] = {
     ElectrochemOperation.OCV: OperationDef(
         name="ocv",
         action="potentiostat.ocv",
@@ -205,6 +205,6 @@ def get_operation(op_type: ElectrochemOperation) -> OperationDef:
     return ELECTROCHEM_OPERATIONS[op_type]
 
 
-def get_all_operations() -> Dict[ElectrochemOperation, OperationDef]:
+def get_all_operations() -> dict[ElectrochemOperation, OperationDef]:
     """Get all operation definitions."""
     return ELECTROCHEM_OPERATIONS.copy()

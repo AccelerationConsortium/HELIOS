@@ -4,7 +4,7 @@ Operation definitions and mapping for OT-2 robot commands.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class OperationType(Enum):
@@ -39,15 +39,15 @@ class OperationType(Enum):
 class Operation:
     """A single OT-2 operation."""
     type: OperationType
-    params: Dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
     description: str = ""
-    line_number: Optional[int] = None
+    line_number: int | None = None
 
     def to_python(self) -> str:
         """Convert operation to Python code."""
         return OPERATION_TEMPLATES.get(self.type, lambda p: f"# {self.type}")(self.params)
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """Validate operation parameters. Returns list of errors."""
         errors = []
         required = REQUIRED_PARAMS.get(self.type, [])
@@ -213,11 +213,11 @@ class OperationMapper:
         """Build inverted index for fast keyword lookup."""
         self._keyword_index = {}
         for op_type, lang_keywords in self.KEYWORDS.items():
-            for lang, keywords in lang_keywords.items():
+            for _lang, keywords in lang_keywords.items():
                 for keyword in keywords:
                     self._keyword_index[keyword.lower()] = op_type
 
-    def detect_operation_type(self, text: str) -> Optional[OperationType]:
+    def detect_operation_type(self, text: str) -> OperationType | None:
         """Detect operation type from text."""
         text_lower = text.lower()
         for keyword, op_type in self._keyword_index.items():
@@ -238,7 +238,7 @@ class OperationMapper:
     def create_operation(
         self,
         op_type: OperationType,
-        params: Dict[str, Any],
+        params: dict[str, Any],
         description: str = ""
     ) -> Operation:
         """Create an Operation object."""

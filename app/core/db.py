@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import sqlite3
-from typing import Any, Callable, Iterator, TypeVar
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
+from typing import Any, TypeVar
 
 from app.core.config import get_settings
 
@@ -13,7 +13,7 @@ T = TypeVar("T")
 
 
 def utcnow_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _connect() -> sqlite3.Connection:

@@ -5,9 +5,10 @@ Parses natural language instructions for liquid handling operations.
 """
 
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
+
 from ...core.plugin_base import ParserBase
-from .operations import LiquidOperation, LIQUID_OPERATIONS
+from .operations import LIQUID_OPERATIONS, LiquidOperation
 
 
 class LiquidHandlerParser(ParserBase):
@@ -47,7 +48,7 @@ class LiquidHandlerParser(ParserBase):
     def __init__(self):
         self._operations = LIQUID_OPERATIONS
 
-    def parse(self, instruction: str) -> Dict[str, Any]:
+    def parse(self, instruction: str) -> dict[str, Any]:
         """
         Parse a natural language instruction.
 
@@ -58,7 +59,7 @@ class LiquidHandlerParser(ParserBase):
             Dict with operation, action, params, confidence, language
         """
         language = self.detect_language(instruction)
-        text_lower = instruction.lower()
+        instruction.lower()
 
         # Find matching operation
         best_match = None
@@ -99,7 +100,7 @@ class LiquidHandlerParser(ParserBase):
         instruction: str,
         op_type: LiquidOperation,
         language: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Extract parameters from instruction based on operation type."""
         params = {}
 
@@ -163,7 +164,7 @@ class LiquidHandlerParser(ParserBase):
 
         return params
 
-    def _extract_volume(self, text: str) -> Optional[float]:
+    def _extract_volume(self, text: str) -> float | None:
         """Extract volume in microliters."""
         for pattern in self.VOLUME_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -175,7 +176,7 @@ class LiquidHandlerParser(ParserBase):
                 return value
         return None
 
-    def _extract_time(self, text: str) -> Optional[float]:
+    def _extract_time(self, text: str) -> float | None:
         """Extract time in seconds."""
         for pattern in self.TIME_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -187,7 +188,7 @@ class LiquidHandlerParser(ParserBase):
                 return value
         return None
 
-    def _extract_repetitions(self, text: str) -> Optional[int]:
+    def _extract_repetitions(self, text: str) -> int | None:
         """Extract number of repetitions."""
         for pattern in self.REP_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -199,7 +200,7 @@ class LiquidHandlerParser(ParserBase):
         self,
         text: str,
         language: str
-    ) -> Tuple[Optional[str], Optional[str]]:
+    ) -> tuple[str | None, str | None]:
         """Extract source and destination wells for transfer."""
         source = None
         dest = None

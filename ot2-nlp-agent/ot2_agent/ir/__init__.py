@@ -8,8 +8,8 @@ Three-layer IR architecture:
 """
 
 from .intent import Intent, MissingInfo, PlanningContext
-from .unit_operations import UnitOperation, UOType, Placeholder
-from .primitives import Primitive, ActionType, DeviceAction
+from .primitives import ActionType, DeviceAction, Primitive
+from .unit_operations import Placeholder, UnitOperation, UOType
 
 __all__ = [
     # Intent layer

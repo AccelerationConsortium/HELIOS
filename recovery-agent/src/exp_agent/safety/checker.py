@@ -7,15 +7,16 @@ Based on plan.md section 3(2):
 - RecoveryAction 检查器: action + SafetyPacket + current_state → ALLOW/BLOCK/REQUIRE_HUMAN
 """
 
-from typing import Dict, Any, List, Optional
-from exp_agent.core.types import Action, DeviceState
+from typing import Any
+
 from exp_agent.core.safety_types import (
-    SafetyPacket,
-    SafetyConstraint,
-    SafetyThreshold,
     ActionSafetyCheck,
     SafetyCheckResult,
+    SafetyConstraint,
+    SafetyPacket,
+    SafetyThreshold,
 )
+from exp_agent.core.types import Action, DeviceState
 
 
 def check_action_safety(
@@ -44,15 +45,14 @@ def check_action_safety(
         - If "spill/exposure" event detected:
             - Jump to EVACUATE (safety agent's emergency scenario)
     """
-    violated_constraints: List[SafetyConstraint] = []
-    violated_thresholds: List[SafetyThreshold] = []
-    triggered_playbooks: List[str] = []
-    rationale_parts: List[str] = []
+    violated_constraints: list[SafetyConstraint] = []
+    violated_thresholds: list[SafetyThreshold] = []
+    triggered_playbooks: list[str] = []
+    rationale_parts: list[str] = []
 
     # Extract telemetry
     telemetry = state.telemetry or {}
-    action_name = action.name.lower()
-    action_params = action.params or {}
+    action.name.lower()
 
     # --- Check against constraints ---
     for constraint in packet.constraints:
@@ -79,7 +79,7 @@ def check_action_safety(
 
     # --- Determine result ---
     result: SafetyCheckResult = "allow"
-    alternative_actions: List[str] = []
+    alternative_actions: list[str] = []
 
     # Critical violations → BLOCK
     if any(c.mandatory for c in violated_constraints):
@@ -129,8 +129,8 @@ def check_action_safety(
 def _check_constraint(
     constraint: SafetyConstraint,
     action: Action,
-    telemetry: Dict[str, Any]
-) -> Optional[str]:
+    telemetry: dict[str, Any]
+) -> str | None:
     """Check if an action violates a constraint. Returns violation message or None."""
 
     action_name = action.name.lower()
@@ -185,8 +185,8 @@ def _check_constraint(
 def _check_threshold(
     threshold: SafetyThreshold,
     action: Action,
-    telemetry: Dict[str, Any]
-) -> Optional[str]:
+    telemetry: dict[str, Any]
+) -> str | None:
     """Check if current telemetry violates a threshold. Returns violation message or None.
 
     Threshold semantics:
@@ -254,7 +254,7 @@ def _check_threshold(
 def _triggers_emergency(
     scenario: str,
     action: Action,
-    telemetry: Dict[str, Any],
+    telemetry: dict[str, Any],
     state: DeviceState
 ) -> bool:
     """Check if current state matches an emergency scenario."""
@@ -281,7 +281,7 @@ def _triggers_emergency(
 
     if scenario == "overheat":
         # Check for thermal runaway
-        temp = telemetry.get("temperature", 0)
+        telemetry.get("temperature", 0)
         temp_rate = telemetry.get("temperature_rate", 0)  # °C/min
         if temp_rate > 10:  # Rapid temperature rise
             return True
@@ -291,11 +291,11 @@ def _triggers_emergency(
 
 def _suggest_alternatives(
     action: Action,
-    violated_constraints: List[SafetyConstraint]
-) -> List[str]:
+    violated_constraints: list[SafetyConstraint]
+) -> list[str]:
     """Suggest alternative actions based on violated constraints."""
 
-    alternatives: List[str] = []
+    alternatives: list[str] = []
     action_name = action.name.lower()
 
     for constraint in violated_constraints:
@@ -327,9 +327,9 @@ def _suggest_alternatives(
 
 def check_chemical_safety_event(
     error_type: str,
-    telemetry: Dict[str, Any],
+    telemetry: dict[str, Any],
     packet: SafetyPacket
-) -> Optional[str]:
+) -> str | None:
     """Check if an error is a chemical safety event requiring immediate action.
 
     Chemical safety events give SafetyAgent FINAL VETO POWER.

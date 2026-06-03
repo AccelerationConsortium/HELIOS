@@ -13,14 +13,14 @@ Health checks:
 - Dropout: Communication failures
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Optional
 import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
 
 
-class HealthStatus(str, Enum):
+class HealthStatus(StrEnum):
     """Overall health status of a sensor."""
 
     HEALTHY = "HEALTHY"             # Normal operation
@@ -35,9 +35,9 @@ class HealthMetrics:
     """Detailed health metrics for a sensor."""
 
     # Timing metrics
-    last_seen: Optional[datetime] = None
+    last_seen: datetime | None = None
     expected_period_ms: float = 1000.0      # Expected update interval
-    actual_period_ms: Optional[float] = None  # Measured update interval
+    actual_period_ms: float | None = None  # Measured update interval
 
     # Reliability metrics
     dropout_rate: float = 0.0               # 0.0 - 1.0, fraction of missed readings
@@ -47,17 +47,17 @@ class HealthMetrics:
     # Value metrics
     stuck_duration_ms: float = 0.0          # How long value hasn't changed
     stuck_threshold_ms: float = 30000.0     # When to consider "stuck"
-    last_value: Optional[float] = None
+    last_value: float | None = None
 
     # Statistical metrics (optional, for drift detection)
-    baseline_value: Optional[float] = None
-    current_mean: Optional[float] = None
-    current_variance: Optional[float] = None
-    drift_from_baseline: Optional[float] = None
+    baseline_value: float | None = None
+    current_mean: float | None = None
+    current_variance: float | None = None
+    drift_from_baseline: float | None = None
 
     # Range metrics
-    valid_min: Optional[float] = None
-    valid_max: Optional[float] = None
+    valid_min: float | None = None
+    valid_max: float | None = None
     out_of_range_count: int = 0
 
     @property
@@ -65,7 +65,7 @@ class HealthMetrics:
         """Check if sensor is stale (no recent readings)."""
         if self.last_seen is None:
             return True
-        age_ms = (datetime.now(timezone.utc) - self.last_seen).total_seconds() * 1000
+        age_ms = (datetime.now(UTC) - self.last_seen).total_seconds() * 1000
         return age_ms > (self.expected_period_ms * 2)
 
     @property
@@ -120,11 +120,11 @@ class SensorHealthEvent:
     """
 
     event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    ts: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    ts: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     sensor_id: str = ""
     status: HealthStatus = HealthStatus.UNKNOWN
-    previous_status: Optional[HealthStatus] = None
+    previous_status: HealthStatus | None = None
 
     # Why did status change?
     reason: str = ""
@@ -135,7 +135,7 @@ class SensorHealthEvent:
     def __post_init__(self):
         """Ensure ts is timezone-aware."""
         if self.ts.tzinfo is None:
-            object.__setattr__(self, 'ts', self.ts.replace(tzinfo=timezone.utc))
+            object.__setattr__(self, 'ts', self.ts.replace(tzinfo=UTC))
 
     @property
     def is_status_change(self) -> bool:
@@ -160,7 +160,7 @@ class SensorHealthEvent:
         metrics_data = data.get("metrics", {})
         return cls(
             event_id=data.get("event_id", str(uuid.uuid4())),
-            ts=datetime.fromisoformat(data["ts"]) if isinstance(data.get("ts"), str) else datetime.now(timezone.utc),
+            ts=datetime.fromisoformat(data["ts"]) if isinstance(data.get("ts"), str) else datetime.now(UTC),
             sensor_id=data.get("sensor_id", ""),
             status=HealthStatus(data.get("status", "UNKNOWN")),
             previous_status=HealthStatus(data["previous_status"]) if data.get("previous_status") else None,

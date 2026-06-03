@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from datetime import UTC
 from typing import Any
 
 from app.core.db import connection, json_dumps, parse_json, run_txn, utcnow_iso
@@ -85,11 +86,11 @@ def save_pause(
     expires_in_s: float,
 ) -> str:
     """Persist a new pause request.  Returns the pause_id."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     now = utcnow_iso()
     expires_at = (
-        datetime.now(timezone.utc) + timedelta(seconds=expires_in_s)
+        datetime.now(UTC) + timedelta(seconds=expires_in_s)
     ).isoformat()
 
     def _txn(conn: sqlite3.Connection) -> str:

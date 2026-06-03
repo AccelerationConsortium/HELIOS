@@ -22,9 +22,7 @@ Current version: Phase 1 (Q-learning baseline)
 """
 from __future__ import annotations
 
-import json
 import logging
-import math
 import pickle
 import random
 from collections import defaultdict, deque
@@ -39,6 +37,8 @@ from app.services.strategy_selector import (
     DiagnosticSignals,
     StrategyDecision,
     compute_diagnostics,
+)
+from app.services.strategy_selector import (
     select_strategy as rule_based_select_strategy,
 )
 
@@ -740,7 +740,7 @@ def train_rl_selector_offline(
         # Convert snapshots to states
         states = []
         for snap in snapshots:
-            diag = compute_diagnostic_signals(snap)
+            diag = compute_diagnostics(snap)
             state = RLState.from_snapshot(snap, diag)
             states.append(state)
 

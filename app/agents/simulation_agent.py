@@ -29,7 +29,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from app.agents.base import BaseAgent, DecisionNode
-from app.services.simulation import SimulationResult, SimulationViolation, simulate_protocol
+from app.services.simulation import SimulationResult, simulate_protocol
 
 logger = logging.getLogger(__name__)
 

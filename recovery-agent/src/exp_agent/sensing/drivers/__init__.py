@@ -10,14 +10,14 @@ Each driver is responsible for:
 Drivers are pluggable - the SensorHub doesn't care where data comes from.
 """
 
-from exp_agent.sensing.drivers.base import SensorDriver, DriverConfig
+from exp_agent.sensing.drivers.base import DriverConfig, SensorDriver
 from exp_agent.sensing.drivers.mock_driver import (
-    MockSensorDriver,
+    AirflowProfile,
     MockSensorConfig,
+    MockSensorDriver,
+    PressureProfile,
     SensorProfile,
     TemperatureProfile,
-    AirflowProfile,
-    PressureProfile,
     create_lab_sensor_set,
 )
 

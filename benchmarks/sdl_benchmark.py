@@ -24,9 +24,10 @@ from __future__ import annotations
 import math
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 
@@ -147,7 +148,7 @@ def _params_to_vector(params: dict[str, Any], names: list[str]) -> np.ndarray:
 
 
 def _vector_to_params(vec: np.ndarray, names: list[str]) -> dict[str, Any]:
-    return {n: float(v) for n, v in zip(names, vec)}
+    return {n: float(v) for n, v in zip(names, vec, strict=False)}
 
 
 # ---------------------------------------------------------------------------
@@ -642,15 +643,15 @@ class CoscientistLikeBaseline(BaselineOptimizer):
         return out
 
 
-_EXTRA_BASELINES: list["BaselineOptimizer"] = []
+_EXTRA_BASELINES: list[BaselineOptimizer] = []
 
 
-def register_baseline(optimizer: "BaselineOptimizer") -> None:
+def register_baseline(optimizer: BaselineOptimizer) -> None:
     """Register a custom optimizer instance for use in run_benchmark lookups."""
     _EXTRA_BASELINES.append(optimizer)
 
 
-def get_all_baselines() -> list["BaselineOptimizer"]:
+def get_all_baselines() -> list[BaselineOptimizer]:
     """Return one fresh instance of every baseline optimizer plus any extras."""
     return [
         RandomBaseline(),

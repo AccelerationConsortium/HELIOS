@@ -23,9 +23,9 @@ from pydantic import BaseModel, Field
 
 from app.agents.base import BaseAgent
 from app.agents.sensing_agent import (
+    _PRIMITIVE_QC_MAP,
     QCCheck,
     QCResult,
-    _PRIMITIVE_QC_MAP,
     _check_current_range,
     _check_step_duration,
     _check_temperature_stability,

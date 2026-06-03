@@ -6,15 +6,18 @@ Replaces scattered if-else logic in RecoveryAgent and ErrorClassifier.
 
 Now using Pydantic v2 for type-safe configuration and validation.
 """
-from typing import List, Optional, Literal, Dict, Any
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..core.types import (
-    DeviceState, HardwareError, Action,
-    ErrorProfile, SignatureResult, RecoveryDecision,
-    DecisionType
+    Action,
+    DeviceState,
+    ErrorProfile,
+    HardwareError,
+    RecoveryDecision,
+    SignatureResult,
 )
-
 
 # ============================================================================
 # Configuration (Pydantic models - ready for YAML loading)
@@ -47,7 +50,7 @@ class RecoveryConfig(BaseModel):
     model_config = ConfigDict(frozen=False)
 
     # Backoff timing (seconds)
-    backoff_schedule: List[float] = Field(default=[0, 2, 5, 10])
+    backoff_schedule: list[float] = Field(default=[0, 2, 5, 10])
     max_backoff: float = Field(default=10.0, ge=0)
 
     # Degradation
@@ -78,9 +81,9 @@ SignatureMode = Literal["drift", "oscillation", "stall", "noisy", "stable", "unk
 
 
 def analyze_signature(
-    history: List[DeviceState],
+    history: list[DeviceState],
     config: SignatureConfig = SIGNATURE_CONFIG,
-    metric: Optional[str] = None
+    metric: str | None = None
 ) -> SignatureResult:
     """
     Analyze telemetry history to detect fault signature.
@@ -130,7 +133,7 @@ def analyze_signature(
     # Use 'values' instead of 'temps' for the rest of the analysis
     temps = values  # Keep variable name for minimal changes below
 
-    details: Dict[str, Any] = {}
+    details: dict[str, Any] = {}
 
     # Calculate basic statistics
     n = len(temps)
@@ -474,7 +477,7 @@ def wait_action(seconds: float) -> Action:
 
 
 def compute_degraded_target(
-    target: Optional[float],
+    target: float | None,
     mode: SignatureMode,
     config: RecoveryConfig = RECOVERY_CONFIG
 ) -> float:
@@ -524,7 +527,7 @@ def determine_sample_status(
     profile: ErrorProfile,
     mode: SignatureMode,
     decision_kind: str,
-    stage: Optional[str] = None
+    stage: str | None = None
 ) -> SampleStatus:
     """Determine sample status after recovery decision."""
     if decision_kind == "abort" and profile.unsafe:
@@ -544,10 +547,10 @@ def determine_sample_status(
 def decide_recovery(
     state: DeviceState,
     error: HardwareError,
-    history: List[DeviceState],
-    retry_counts: Dict[str, int],
-    last_action: Optional[Action] = None,
-    stage: Optional[str] = None,
+    history: list[DeviceState],
+    retry_counts: dict[str, int],
+    last_action: Action | None = None,
+    stage: str | None = None,
     config: RecoveryConfig = RECOVERY_CONFIG
 ) -> RecoveryDecision:
     """

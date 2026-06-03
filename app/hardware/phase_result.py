@@ -6,8 +6,8 @@ without raising exceptions, enabling graceful error recovery and loop continuati
 
 Enhanced for parallel thread execution with structured failure reporting.
 """
-from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -24,7 +24,7 @@ class ThreadFailure:
     failure_class: str  # OT2_ALARM, INPUT_DATA, AUX_STREAM, NETWORK, UNKNOWN
     recoverable: bool  # Policy decision - can this be recovered from?
     suggested_recovery: str  # e.g., "SKIP_LOOP_AND_HOME", "DEGRADED_COMPLETE"
-    step_id: Optional[str] = None  # Step where failure occurred
+    step_id: str | None = None  # Step where failure occurred
 
     def __str__(self) -> str:
         return (f"ThreadFailure(thread={self.thread_name}, "
@@ -43,13 +43,13 @@ class PhaseResult:
 
     phase_name: str
     success: bool
-    error_type: Optional[str] = None
-    error_message: Optional[str] = None
-    error_details: Dict[str, Any] = field(default_factory=dict)
+    error_type: str | None = None
+    error_message: str | None = None
+    error_details: dict[str, Any] = field(default_factory=dict)
     skipped: bool = False
 
     # Parallel thread execution results
-    thread_failures: List[ThreadFailure] = field(default_factory=list)
+    thread_failures: list[ThreadFailure] = field(default_factory=list)
     cancelled: bool = False  # Was execution cancelled?
     timed_out: bool = False  # Did execution timeout?
 
@@ -74,7 +74,7 @@ class PhaseResult:
 
     @classmethod
     def failure_result(cls, phase_name: str, error: Exception,
-                      error_details: Optional[Dict[str, Any]] = None) -> 'PhaseResult':
+                      error_details: dict[str, Any] | None = None) -> 'PhaseResult':
         """Create a failed phase result from an exception"""
         return cls(
             phase_name=phase_name,
@@ -96,7 +96,7 @@ class PhaseResult:
 
     @classmethod
     def parallel_failure_result(cls, phase_name: str,
-                               thread_failures: List[ThreadFailure],
+                               thread_failures: list[ThreadFailure],
                                cancelled: bool = False,
                                timed_out: bool = False) -> 'PhaseResult':
         """Create a failed phase result from parallel thread failures"""

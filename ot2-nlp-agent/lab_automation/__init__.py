@@ -41,13 +41,13 @@ Example:
 
 from .core import (
     LabAutomationAgent,
-    PluginBase,
     OperationDef,
     ParserBase,
-    Workflow,
     Phase,
+    PluginBase,
     Step,
     StepParams,
+    Workflow,
 )
 
 __version__ = "2.0.0"

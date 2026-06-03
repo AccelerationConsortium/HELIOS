@@ -31,11 +31,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["RewardModel", "RewardModelTrainer", "RewardModelConfig"]
-
-import numpy as np
 
 try:
     import torch
@@ -294,7 +294,7 @@ class RewardModelTrainer:
         else:
             outcome_label = self.config.failure_penalty
 
-        for state, action, reward, next_state, done in transitions:
+        for state, action, reward, next_state, _done in transitions:
             labeled = LabeledTransition(
                 state=state,
                 action=action,
@@ -338,7 +338,7 @@ class RewardModelTrainer:
         total_loss = 0.0
         n_batches = 0
 
-        for epoch in range(self.config.n_epochs_per_campaign):
+        for _epoch in range(self.config.n_epochs_per_campaign):
             random.shuffle(self._buffer)
 
             for i in range(0, len(self._buffer) - self.config.batch_size + 1, self.config.batch_size):

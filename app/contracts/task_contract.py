@@ -15,7 +15,6 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
 
-from app.core.db import utcnow_iso
 from app.contracts.versioning import BaseVersionedContract
 
 __all__ = [

@@ -5,8 +5,9 @@ We keep these separate from core Decision so:
 - LLM output can be logged/audited without affecting execution
 """
 
-from typing import Literal, List, Optional, Dict, Any
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..core.types import Action, DecisionType
 
@@ -21,12 +22,12 @@ class LLMDecisionProposal(BaseModel):
 
     kind: DecisionType
     rationale: str
-    actions: List[Action] = Field(default_factory=list)
+    actions: list[Action] = Field(default_factory=list)
 
     # Optional metadata for debugging/auditing
-    confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
-    model: Optional[str] = None
-    provider: Optional[str] = None
-    notes: Dict[str, Any] = Field(default_factory=dict)
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    model: str | None = None
+    provider: str | None = None
+    notes: dict[str, Any] = Field(default_factory=dict)
 
     source: Literal["llm"] = "llm"

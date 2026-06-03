@@ -10,8 +10,8 @@ Key components:
 """
 
 from exp_agent.safety.agent import SafetyAgent
-from exp_agent.safety.mock_agent import MockSafetyAgent
 from exp_agent.safety.checker import check_action_safety
+from exp_agent.safety.mock_agent import MockSafetyAgent
 
 __all__ = [
     "SafetyAgent",

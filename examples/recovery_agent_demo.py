@@ -7,6 +7,7 @@ This script demonstrates RecoveryAgent capabilities:
 4. Integration patterns for orchestrator
 """
 import asyncio
+
 from app.agents import RecoveryAgent, RecoveryInput
 
 
@@ -70,7 +71,7 @@ async def demo_chemical_safety():
         print(f"🚨 Chemical Safety Event: {result.output.chemical_safety_event}")
         print(f"⛔ Decision: {result.output.decision}")
         print(f"📝 Rationale: {result.output.rationale}")
-        print(f"🛡️  SafetyAgent veto power: ACTIVE")
+        print("🛡️  SafetyAgent veto power: ACTIVE")
         if result.output.actions:
             print(f"🔧 Actions: {len(result.output.actions)} emergency actions")
             for action in result.output.actions:
@@ -131,8 +132,8 @@ async def demo_sensor_drift():
         print(f"✅ Decision: {result.output.decision}")
         print(f"📝 Rationale: {result.output.rationale}")
         print(f"📊 History analyzed: {len(input_data.history)} data points")
-        print(f"🌡️  Temperature drift: 25°C → 45°C (+20°C)")
-        print(f"📈 Drift rate: 2.5°C/step")
+        print("🌡️  Temperature drift: 25°C → 45°C (+20°C)")
+        print("📈 Drift rate: 2.5°C/step")
     else:
         print(f"❌ Recovery failed: {result.errors}")
 
@@ -179,22 +180,22 @@ async def demo_orchestrator_pattern():
                     return await simulate_execution_with_recovery(attempt + 1)
 
                 elif decision == "abort":
-                    print(f"   ⛔ Aborting execution")
+                    print("   ⛔ Aborting execution")
                     return None
 
                 elif decision == "degrade":
-                    print(f"   ⚠️  Continuing in degraded mode")
+                    print("   ⚠️  Continuing in degraded mode")
                     return {"kpi": 85.0, "degraded": True}
 
                 else:  # skip
-                    print(f"   ⏭️  Skipping this execution")
+                    print("   ⏭️  Skipping this execution")
                     return None
             else:
                 print(f"   ❌ Recovery agent failed: {recovery_result.errors}")
                 return None
 
         else:
-            print(f"   ✅ Execution successful")
+            print("   ✅ Execution successful")
             return {"kpi": 95.0, "degraded": False}
 
     # Simulate orchestrator execution loop
@@ -203,7 +204,7 @@ async def demo_orchestrator_pattern():
     if result:
         print(f"\n🎉 Final result: KPI={result['kpi']}, degraded={result['degraded']}")
     else:
-        print(f"\n❌ Execution failed after recovery attempts")
+        print("\n❌ Execution failed after recovery attempts")
 
 
 async def main():

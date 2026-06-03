@@ -39,7 +39,7 @@ import itertools
 import logging
 import math
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 
@@ -133,7 +133,7 @@ def _g_test(x: np.ndarray, y: np.ndarray) -> float:
     table = np.zeros((len(xs), len(ys)))
     xi = {v: i for i, v in enumerate(xs)}
     yi = {v: i for i, v in enumerate(ys)}
-    for a, b in zip(x, y):
+    for a, b in zip(x, y, strict=False):
         table[xi[a], yi[b]] += 1.0
     n = table.sum()
     if n <= 0:
@@ -283,7 +283,7 @@ class CausalGraph:
             if len(path) < 2:
                 continue
             prod = 1.0
-            for s, t in zip(path[:-1], path[1:]):
+            for s, t in zip(path[:-1], path[1:], strict=False):
                 edge = self.get_edge(s, t)
                 if edge is None:
                     prod = 0.0
@@ -377,7 +377,7 @@ class CausalDiscovery:
 
     def fit(
         self,
-        observations: "pd.DataFrame | dict[str, list]",
+        observations: pd.DataFrame | dict[str, list],
         interventions: dict[str, list] | None = None,
         known_edges: list[tuple[str, str]] | None = None,
     ) -> CausalGraph:
@@ -703,7 +703,7 @@ class InterventionPlanner:
         # Propagate variance from edge CIs along the dominant path.
         var = 0.0
         for path in self.graph.all_paths(intervention_var, outcome_var):
-            for s, t in zip(path[:-1], path[1:]):
+            for s, t in zip(path[:-1], path[1:], strict=False):
                 edge = self.graph.get_edge(s, t)
                 if edge is not None:
                     half = (edge.effect_ci[1] - edge.effect_ci[0]) / (2 * 1.96)

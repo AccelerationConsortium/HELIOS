@@ -9,13 +9,11 @@ Eviction: LRU by last_used, max entries configurable.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import unicodedata
 
 from app.contracts.query_contract import QueryPlan
 from app.core.db import connection, json_dumps, parse_json, run_txn, utcnow_iso
-
 
 # ---------------------------------------------------------------------------
 # Configuration

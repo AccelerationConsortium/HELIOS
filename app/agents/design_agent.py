@@ -208,7 +208,7 @@ class DesignAgent(BaseAgent[DesignInput, DesignOutput]):
                 and all_low_confidence
                 and candidate_confidence
             ):
-                pause_result = await self.request_pause(PauseRequest(
+                await self.request_pause(PauseRequest(
                     reason=(
                         f"All {len(candidates)} candidates are in unexplored "
                         f"parameter territory — no similar past experiments found"

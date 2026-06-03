@@ -296,7 +296,7 @@ class OptimizationAgent(BaseAgent[OptimizationInput, OptimizationOutput]):
             itertools.product(*grids), batch_size
         ):
             params = {}
-            for dim, val in zip(dimensions, combo):
+            for dim, val in zip(dimensions, combo, strict=False):
                 params[dim.param_name] = val
 
             candidates.append(CandidatePoint(

@@ -10,22 +10,22 @@ structured logging, enabling:
 """
 import time
 from pathlib import Path
-from typing import Literal, Optional, List
+from typing import Literal
 
-from ..core.types import Action, ExecutionState, HardwareError, Decision, DeviceState
+from ..core.types import Action, Decision, DeviceState, ExecutionState, HardwareError
 from ..devices.simulated.heater import SimHeater
 from ..executor.guarded_executor import GuardedExecutor
-from ..recovery.recovery_agent import RecoveryAgent
-from ..recovery.policy import classify_error, analyze_signature
-from ..logging.pipeline import (
-    PipelineLogger,
-    MemoryBackend,
-    FileBackend,
-    ConsoleBackend,
-    TrailAnalyzer,
-    LogLevel,
-)
 from ..logging.anomaly import AnomalyPacket
+from ..logging.pipeline import (
+    ConsoleBackend,
+    FileBackend,
+    LogLevel,
+    MemoryBackend,
+    PipelineLogger,
+    TrailAnalyzer,
+)
+from ..recovery.policy import analyze_signature, classify_error
+from ..recovery.recovery_agent import RecoveryAgent
 
 
 class InstrumentedSupervisor:
@@ -65,7 +65,7 @@ class InstrumentedSupervisor:
         # Retry management
         self.retry_counts = {}
         self.MAX_RETRIES = 3
-        self.history: List[DeviceState] = []
+        self.history: list[DeviceState] = []
 
         # Logging pipeline
         self.logger = PipelineLogger(experiment_id=experiment_id)
@@ -317,7 +317,7 @@ class InstrumentedSupervisor:
                 duration_ms = (time.time() - action_start) * 1000
                 self.logger.log_recovery_action(action, i, total, True, duration_ms)
 
-            except HardwareError as e:
+            except HardwareError:
                 duration_ms = (time.time() - action_start) * 1000
                 self.logger.log_recovery_action(action, i, total, False, duration_ms)
                 success = False
@@ -354,10 +354,10 @@ class InstrumentedSupervisor:
             )
         ]
 
-        for i, action in enumerate(actions):
+        for _i, action in enumerate(actions):
             try:
                 self.executor.execute(self.device, action, self.state)
-            except Exception as e:
+            except Exception:
                 pass  # Best effort
 
         final_state = self.device.read_state()
@@ -417,7 +417,7 @@ def run_instrumented_experiment():
     trails = analyzer.get_all_trails()
 
     if trails:
-        print(f"\n--- First Decision Trail ---")
+        print("\n--- First Decision Trail ---")
         trail = trails[0]
         print(f"Correlation ID: {trail.correlation_id}")
         print(f"Error: {trail.error_type} ({trail.error_severity})")

@@ -27,6 +27,29 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.services.optimization_backends import (
+    Observation,
+    get_backend,
+    list_backends,
+)
+from app.services.strategy_actions import (
+    generate_action_candidates,
+    generate_explanation,
+    predict_next_round,
+)
+from app.services.strategy_diagnostics import (  # noqa: F401
+    _calibrate_uncertainty,
+    _compute_batch_spread,
+    _compute_drift_score,
+    _compute_ei_decay,
+    _compute_local_smoothness,
+    _compute_model_uncertainty,
+    _compute_noise_ratio,
+    _compute_replicate_need,
+    _extract_numeric_vecs,
+    compute_diagnostics,
+)
+
 # --- Re-export all public types from sub-modules for backward compat ---
 from app.services.strategy_models import (  # noqa: F401
     ActionCandidate,
@@ -39,35 +62,12 @@ from app.services.strategy_models import (  # noqa: F401
     StrategyDecision,
     WeightsUsed,
 )
-from app.services.strategy_diagnostics import (  # noqa: F401
-    compute_diagnostics,
-    _calibrate_uncertainty,
-    _compute_batch_spread,
-    _compute_drift_score,
-    _compute_ei_decay,
-    _compute_local_smoothness,
-    _compute_model_uncertainty,
-    _compute_noise_ratio,
-    _compute_replicate_need,
-    _extract_numeric_vecs,
-)
 from app.services.strategy_scoring import (
     build_stabilize_spec,
     compute_confidence,
     compute_evidence,
     compute_phase_posterior,
     schedule_weights,
-    _cap_stabilize_budget,
-)
-from app.services.strategy_actions import (
-    generate_action_candidates,
-    generate_explanation,
-    predict_next_round,
-)
-from app.services.optimization_backends import (
-    Observation,
-    get_backend,
-    list_backends,
 )
 
 logger = logging.getLogger(__name__)
@@ -192,7 +192,7 @@ def select_strategy(
                     _var_names = _numeric_keys + ["kpi"]
                     _causal_data = [
                         [float(p.get(k, 0)) for k in _numeric_keys] + [kpi]
-                        for p, kpi in zip(snapshot.all_params, snapshot.all_kpis)
+                        for p, kpi in zip(snapshot.all_params, snapshot.all_kpis, strict=False)
                     ]
 
             # Try to get a campaign_id from snapshot metadata (best-effort)

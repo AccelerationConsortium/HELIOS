@@ -1,14 +1,14 @@
 """
 Base classes for external execution.
 """
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
-from enum import Enum
-import time
+from enum import StrEnum
+from typing import Any
 
 
-class ExecutionStatus(str, Enum):
+class ExecutionStatus(StrEnum):
     """Status of an external execution."""
     SUCCESS = "success"
     FAILED = "failed"
@@ -30,16 +30,16 @@ class ExecutionResult:
     """
     status: ExecutionStatus
     output: Any = None
-    error: Optional[str] = None
-    exit_code: Optional[int] = None
+    error: str | None = None
+    exit_code: int | None = None
     duration_ms: float = 0.0
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @property
     def success(self) -> bool:
         return self.status == ExecutionStatus.SUCCESS
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status.value,
             "output": self.output,
@@ -56,8 +56,8 @@ class ExecutionError(Exception):
     def __init__(
         self,
         message: str,
-        result: Optional[ExecutionResult] = None,
-        cause: Optional[Exception] = None
+        result: ExecutionResult | None = None,
+        cause: Exception | None = None
     ):
         super().__init__(message)
         self.result = result
@@ -115,8 +115,8 @@ class ExternalExecutor(ABC):
         """
         action.validate()
 
-        last_error: Optional[Exception] = None
-        last_result: Optional[ExecutionResult] = None
+        last_error: Exception | None = None
+        last_result: ExecutionResult | None = None
 
         for attempt in range(action.retries + 1):
             self._execution_count += 1

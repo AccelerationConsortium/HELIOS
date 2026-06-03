@@ -1,25 +1,26 @@
 from dataclasses import dataclass, field
-from typing import Literal, List, Optional
-from ..core.types import HardwareError, Action
+from typing import Literal
+
+from ..core.types import HardwareError
 
 Recoverability = Literal["recoverable", "non_recoverable", "unsafe"]
 
 @dataclass
 class ErrorProfile:
     recoverability: Recoverability
-    recommended_actions: List[str] # names of actions e.g. "cool_down", "retry"
+    recommended_actions: list[str] # names of actions e.g. "cool_down", "retry"
     safe_shutdown_required: bool = False
-    diagnostics: List[str] = field(default_factory=list) # names of diagnostic actions
+    diagnostics: list[str] = field(default_factory=list) # names of diagnostic actions
 
 class ErrorClassifier:
     def classify(self, error: HardwareError) -> ErrorProfile:
         """Maps raw hardware errors to actionable profiles."""
-        
+
         # 1. Safety Violations (Critical)
         if error.type in ["safety_violation", "overshoot"]:
             return ErrorProfile(
                 recoverability="recoverable", # Technically we can recover by cooling, but it's a "violation"
-                # Actually, overshoot usually requires degrade or abort. 
+                # Actually, overshoot usually requires degrade or abort.
                 # Let's say it's recoverable-via-degrade.
                 recommended_actions=["cool_down", "degrade"],
                 safe_shutdown_required=True # If recovery fails, must shutdown
@@ -41,7 +42,7 @@ class ErrorClassifier:
                 safe_shutdown_required=False,
                 diagnostics=["read_state"] # Check if it was just a blip
             )
-            
+
         # 4. Logic Errors
         if error.type == "postcondition_failed":
             # Action didn't work. Try again?
@@ -54,7 +55,7 @@ class ErrorClassifier:
 
         # Default
         return ErrorProfile(
-            recoverability="unsafe", 
-            recommended_actions=["cool_down", "abort"], 
+            recoverability="unsafe",
+            recommended_actions=["cool_down", "abort"],
             safe_shutdown_required=True
         )

@@ -6,13 +6,11 @@ Uses the same caching pattern as primitives_registry.py.
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
 from app.core.db import connection
-
 
 # ---------------------------------------------------------------------------
 # Data model

@@ -16,15 +16,18 @@ the caller (candidate_gen / design_agent) persists.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
-import math
 import random
+import time as _time
+from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol, runtime_checkable
+from threading import Lock as _Lock
+from typing import Any, Protocol, runtime_checkable
 
 from app.services.candidate_gen import (
     ParameterSpace,
-    SearchDimension,
     _unit_to_value,
     sample_lhs,
     sample_random,
@@ -167,6 +170,8 @@ class BuiltInBO:
     ) -> list[dict[str, Any]]:
         from app.services.bayesian_opt import (
             Observation as BOObs,
+        )
+        from app.services.bayesian_opt import (
             normalize_params,
             sample_bo,
         )
@@ -382,7 +387,6 @@ class ScipyDE:
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         from scipy.optimize import differential_evolution
-        from scipy.stats.qmc import LatinHypercube
 
         # Build bounds for continuous dimensions
         bounds = []
@@ -399,7 +403,8 @@ class ScipyDE:
 
         # Build surrogate from observations for the objective
         if observations:
-            from app.services.bayesian_opt import SurrogateModel, Observation as BOObs
+            from app.services.bayesian_opt import Observation as BOObs
+            from app.services.bayesian_opt import SurrogateModel
 
             bo_obs = [
                 BOObs(
@@ -471,8 +476,8 @@ class PymooNSGA2:
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
         import numpy as np
-        from pymoo.core.problem import ElementwiseProblem
         from pymoo.algorithms.soo.nonconvex.ga import GA
+        from pymoo.core.problem import ElementwiseProblem
         from pymoo.operators.crossover.sbx import SBX
         from pymoo.operators.mutation.pm import PM
         from pymoo.operators.sampling.lhs import LHS as PymooLHS
@@ -485,7 +490,8 @@ class PymooNSGA2:
         if not observations:
             return sample_lhs(space, n, seed=seed)
 
-        from app.services.bayesian_opt import SurrogateModel, Observation as BOObs
+        from app.services.bayesian_opt import Observation as BOObs
+        from app.services.bayesian_opt import SurrogateModel
 
         bo_obs = [
             BOObs(
@@ -548,8 +554,8 @@ class PymooNSGA2:
     @staticmethod
     def is_available() -> bool:
         try:
-            import pymoo  # noqa: F401
             import numpy  # noqa: F401
+            import pymoo  # noqa: F401
             return True
         except ImportError:
             return False
@@ -619,11 +625,6 @@ class RandomBackend:
 # ``incremental_observe()`` -- without waiting for the next ``suggest()`` call
 # and without a DB round-trip.  Both BO and RL implementations share the same
 # interface so ``strategy_router`` can route by phase through one object.
-
-import asyncio
-import time as _time
-from abc import ABC, abstractmethod
-from threading import Lock as _Lock
 
 # Action -> backend mapping is owned by the RL module; import lazily inside
 # RLOptimizer to avoid a hard import cycle (rl_strategy_selector imports from

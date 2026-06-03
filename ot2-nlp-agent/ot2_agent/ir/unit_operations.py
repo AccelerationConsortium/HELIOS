@@ -8,7 +8,7 @@ device-agnostic.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .intent import MissingInfo
 
@@ -59,12 +59,12 @@ class Placeholder:
     parameter: str                          # Parameter key
     question: str                           # English question
     question_zh: str                        # Chinese question
-    default: Optional[Any] = None           # Default value
+    default: Any | None = None           # Default value
     required: bool = True                   # Is this required?
-    options: Optional[List[str]] = None     # Allowed values
-    unit: Optional[str] = None              # Unit string
+    options: list[str] | None = None     # Allowed values
+    unit: str | None = None              # Unit string
     value_type: str = "string"              # Expected type
-    validation: Optional[str] = None        # Validation rule (regex or range)
+    validation: str | None = None        # Validation rule (regex or range)
 
     def to_missing_info(self) -> MissingInfo:
         """Convert to MissingInfo for planner output."""
@@ -79,7 +79,7 @@ class Placeholder:
             value_type=self.value_type,
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "parameter": self.parameter,
@@ -132,25 +132,25 @@ class UnitOperation:
     description_zh: str = ""                        # Chinese description
 
     # Input/output definitions
-    inputs: Dict[str, Any] = field(default_factory=dict)    # Required inputs
-    outputs: Dict[str, Any] = field(default_factory=dict)   # Produced outputs
+    inputs: dict[str, Any] = field(default_factory=dict)    # Required inputs
+    outputs: dict[str, Any] = field(default_factory=dict)   # Produced outputs
 
     # Fixed parameters (determined by template)
-    parameters: Dict[str, Any] = field(default_factory=dict)
+    parameters: dict[str, Any] = field(default_factory=dict)
 
     # Parameters needing user input
-    placeholders: Dict[str, Placeholder] = field(default_factory=dict)
+    placeholders: dict[str, Placeholder] = field(default_factory=dict)
 
     # Conditions
-    preconditions: List[str] = field(default_factory=list)   # Must be true before execution
-    postconditions: List[str] = field(default_factory=list)  # Will be true after execution
+    preconditions: list[str] = field(default_factory=list)   # Must be true before execution
+    postconditions: list[str] = field(default_factory=list)  # Will be true after execution
 
     # Timing
-    estimated_duration_s: Optional[float] = None    # Estimated duration in seconds
+    estimated_duration_s: float | None = None    # Estimated duration in seconds
 
     # Metadata
     domain: str = "general"                         # Domain this UO belongs to
-    template_id: Optional[str] = None               # Template ID if from template
+    template_id: str | None = None               # Template ID if from template
 
     def get_description(self, language: str = "en") -> str:
         """Get description in specified language."""
@@ -158,7 +158,7 @@ class UnitOperation:
             return self.description_zh
         return self.description
 
-    def get_missing_info(self) -> List[MissingInfo]:
+    def get_missing_info(self) -> list[MissingInfo]:
         """Get list of MissingInfo for unfilled placeholders."""
         return [ph.to_missing_info() for ph in self.placeholders.values()]
 
@@ -170,7 +170,7 @@ class UnitOperation:
             return True
         return False
 
-    def fill_placeholders(self, values: Dict[str, Any]) -> List[str]:
+    def fill_placeholders(self, values: dict[str, Any]) -> list[str]:
         """Fill multiple placeholders. Returns list of unfilled required parameters."""
         unfilled = []
         for param, placeholder in list(self.placeholders.items()):
@@ -189,7 +189,7 @@ class UnitOperation:
                 return False
         return True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "name": self.name,
@@ -208,7 +208,7 @@ class UnitOperation:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UnitOperation":
+    def from_dict(cls, data: dict[str, Any]) -> "UnitOperation":
         """Create from dictionary."""
         placeholders = {}
         for k, v in data.get("placeholders", {}).items():

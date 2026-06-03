@@ -5,20 +5,19 @@ Combines multiple detectors to produce a unified health status
 for each sensor. Emits SensorHealthEvents when status changes.
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Callable, Optional
-from enum import Enum
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
-from exp_agent.sensing.protocol.sensor_event import SensorEvent, SensorType
-from exp_agent.sensing.protocol.health_event import (
-    SensorHealthEvent,
-    HealthStatus,
-    HealthMetrics,
-)
-from exp_agent.sensing.health.detectors.stale import StaleDetector, StaleConfig
-from exp_agent.sensing.health.detectors.stuck import StuckDetector, StuckConfig
 from exp_agent.sensing.health.detectors.out_of_range import OutOfRangeDetector
+from exp_agent.sensing.health.detectors.stale import StaleConfig, StaleDetector
+from exp_agent.sensing.health.detectors.stuck import StuckConfig, StuckDetector
+from exp_agent.sensing.protocol.health_event import (
+    HealthMetrics,
+    HealthStatus,
+    SensorHealthEvent,
+)
+from exp_agent.sensing.protocol.sensor_event import SensorEvent, SensorType
 
 
 @dataclass
@@ -32,10 +31,10 @@ class SensorHealthConfig:
     expected_period_ms: float = 1000.0
 
     # Valid range
-    valid_min: Optional[float] = None
-    valid_max: Optional[float] = None
-    warn_min: Optional[float] = None
-    warn_max: Optional[float] = None
+    valid_min: float | None = None
+    valid_max: float | None = None
+    warn_min: float | None = None
+    warn_max: float | None = None
 
     # Stuck detection
     stuck_threshold_ms: float = 30000.0
@@ -69,7 +68,7 @@ class HealthMonitor:
     Produces SensorHealthEvents when status changes.
     """
 
-    def __init__(self, config: Optional[HealthMonitorConfig] = None):
+    def __init__(self, config: HealthMonitorConfig | None = None):
         self.config = config or HealthMonitorConfig()
 
         # Detectors
@@ -132,7 +131,7 @@ class HealthMonitor:
         """Add a callback for health status changes."""
         self._health_callbacks.append(callback)
 
-    def process_event(self, event: SensorEvent) -> Optional[SensorHealthEvent]:
+    def process_event(self, event: SensorEvent) -> SensorHealthEvent | None:
         """
         Process a sensor event and update health status.
 
@@ -157,7 +156,7 @@ class HealthMonitor:
         self._stuck_detector.update(sensor_id, event.value, now)
 
         # Check range
-        is_out_of_range = self._range_detector.check(sensor_id, event.value, now)
+        self._range_detector.check(sensor_id, event.value, now)
 
         # Update metrics
         metrics.last_seen = now
@@ -252,20 +251,20 @@ class HealthMonitor:
     def check_health(
         self,
         sensor_id: str,
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
     ) -> HealthStatus:
         """Get current health status for a sensor."""
         if sensor_id not in self._health_status:
             return HealthStatus.UNKNOWN
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         return self._calculate_status(sensor_id, now)
 
     def check_all_health(
         self,
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
     ) -> dict[str, HealthStatus]:
         """Get health status for all sensors."""
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         return {
             sensor_id: self._calculate_status(sensor_id, now)
             for sensor_id in self._sensor_configs
@@ -273,7 +272,7 @@ class HealthMonitor:
 
     def get_unhealthy_sensors(
         self,
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
     ) -> list[str]:
         """Get list of unhealthy sensor IDs."""
         statuses = self.check_all_health(now)
@@ -283,7 +282,7 @@ class HealthMonitor:
             if status in (HealthStatus.UNHEALTHY, HealthStatus.OFFLINE)
         ]
 
-    def get_metrics(self, sensor_id: str) -> Optional[HealthMetrics]:
+    def get_metrics(self, sensor_id: str) -> HealthMetrics | None:
         """Get health metrics for a sensor."""
         return self._health_metrics.get(sensor_id)
 
@@ -291,9 +290,9 @@ class HealthMonitor:
         """Get health metrics for all sensors."""
         return dict(self._health_metrics)
 
-    def get_summary(self, now: Optional[datetime] = None) -> dict:
+    def get_summary(self, now: datetime | None = None) -> dict:
         """Get a summary of all sensor health."""
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         statuses = self.check_all_health(now)
 
         return {

@@ -6,9 +6,7 @@ an LLM proposal so you can validate the plumbing/UI.
 
 from __future__ import annotations
 
-from typing import List, Optional, Dict
-
-from ..core.types import DeviceState, HardwareError, Action, Decision
+from ..core.types import Action, Decision, DeviceState, HardwareError
 from .types import LLMDecisionProposal
 
 
@@ -21,12 +19,12 @@ class EchoBaselineAdvisor:
         *,
         state: DeviceState,
         error: HardwareError,
-        history: List[DeviceState],
-        retry_counts: Dict[str, int],
-        last_action: Optional[Action],
-        stage: Optional[str],
+        history: list[DeviceState],
+        retry_counts: dict[str, int],
+        last_action: Action | None,
+        stage: str | None,
         baseline_decision: Decision,
-    ) -> Optional[LLMDecisionProposal]:
+    ) -> LLMDecisionProposal | None:
         return LLMDecisionProposal(
             kind=baseline_decision.kind,
             rationale=f"(LLM stub) {baseline_decision.rationale}",

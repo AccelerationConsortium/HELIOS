@@ -14,7 +14,6 @@ from typing import Any
 
 from app.core.db import connection, json_dumps, parse_json, run_txn, utcnow_iso
 
-
 # ---------------------------------------------------------------------------
 # QC Flags
 # ---------------------------------------------------------------------------

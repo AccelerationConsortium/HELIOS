@@ -5,9 +5,8 @@ Validates protocols before execution to catch errors early.
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Optional, Set
 
-from .operations import Operation, OperationType
+from .operations import OperationType
 from .protocol import Protocol
 
 
@@ -23,8 +22,8 @@ class ValidationIssue:
     """A single validation issue."""
     severity: ValidationSeverity
     message: str
-    step: Optional[int] = None
-    suggestion: Optional[str] = None
+    step: int | None = None
+    suggestion: str | None = None
 
     def __str__(self):
         step_str = f"Step {self.step}: " if self.step else ""
@@ -39,7 +38,7 @@ class ValidationIssue:
 class ValidationResult:
     """Result of protocol validation."""
     is_valid: bool
-    issues: List[ValidationIssue]
+    issues: list[ValidationIssue]
     warnings_count: int
     errors_count: int
 
@@ -122,10 +121,10 @@ class ProtocolValidator:
             errors_count=errors,
         )
 
-    def _validate_labware(self, protocol: Protocol) -> List[ValidationIssue]:
+    def _validate_labware(self, protocol: Protocol) -> list[ValidationIssue]:
         """Validate labware configuration."""
         issues = []
-        used_slots: Set[int] = set()
+        used_slots: set[int] = set()
 
         if not protocol.labware:
             issues.append(ValidationIssue(
@@ -140,7 +139,7 @@ class ProtocolValidator:
                 issues.append(ValidationIssue(
                     severity=ValidationSeverity.ERROR,
                     message=f"Invalid slot {lw.slot} for labware '{lw.name}'",
-                    suggestion=f"Use slot numbers 1-11"
+                    suggestion="Use slot numbers 1-11"
                 ))
 
             # Check for slot conflicts
@@ -154,10 +153,10 @@ class ProtocolValidator:
 
         return issues
 
-    def _validate_pipettes(self, protocol: Protocol) -> List[ValidationIssue]:
+    def _validate_pipettes(self, protocol: Protocol) -> list[ValidationIssue]:
         """Validate pipette configuration."""
         issues = []
-        used_mounts: Set[str] = set()
+        used_mounts: set[str] = set()
 
         if not protocol.pipettes:
             issues.append(ValidationIssue(
@@ -186,7 +185,7 @@ class ProtocolValidator:
 
         return issues
 
-    def _validate_operations(self, protocol: Protocol) -> List[ValidationIssue]:
+    def _validate_operations(self, protocol: Protocol) -> list[ValidationIssue]:
         """Validate individual operations."""
         issues = []
 
@@ -218,7 +217,7 @@ class ProtocolValidator:
 
         return issues
 
-    def _validate_volume(self, volume: float, step: int) -> List[ValidationIssue]:
+    def _validate_volume(self, volume: float, step: int) -> list[ValidationIssue]:
         """Validate volume is within reasonable limits."""
         issues = []
 
@@ -245,7 +244,7 @@ class ProtocolValidator:
 
         return issues
 
-    def _validate_well(self, well: str, step: int) -> List[ValidationIssue]:
+    def _validate_well(self, well: str, step: int) -> list[ValidationIssue]:
         """Validate well coordinate format."""
         issues = []
 
@@ -287,7 +286,7 @@ class ProtocolValidator:
 
         return issues
 
-    def _validate_tip_management(self, protocol: Protocol) -> List[ValidationIssue]:
+    def _validate_tip_management(self, protocol: Protocol) -> list[ValidationIssue]:
         """Validate tip pick-up and drop patterns."""
         issues = []
         has_tip = False

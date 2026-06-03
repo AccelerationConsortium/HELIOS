@@ -20,7 +20,6 @@ from app.adapters.base import InstrumentAdapter
 from app.core.db import run_txn
 from app.services.action_contracts import LEGACY_SAFETY_MAP, SafetyClass
 from app.services.audit import record_event
-from app.services.error_policy import classify_step_safety
 from app.services.memory import get_repair_recipes, increment_recipe_hit_count
 from app.services.run_context import RunContext
 from app.services.safety import evaluate_runtime_step

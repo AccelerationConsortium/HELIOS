@@ -7,7 +7,7 @@ calibrate operations.
 """
 import logging
 import time
-from typing import Any, Optional
+from typing import Any
 
 # The pHAnalyzer import is only available when the real hardware SDK is installed.
 # In simulated / dry-run mode the module is never imported.
@@ -105,8 +105,8 @@ class PhSensorController:
     def read_ph(
         self,
         well: str = "A1",
-        repeat: Optional[int] = None,
-        settle_time: Optional[float] = None,
+        repeat: int | None = None,
+        settle_time: float | None = None,
     ) -> dict[str, Any]:
         """
         Read pH value from the indicator strip.

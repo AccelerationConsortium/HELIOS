@@ -14,11 +14,12 @@ import asyncio
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
-from app.core.db import connection, json_dumps, parse_json, run_txn, utcnow_iso
+from app.core.db import json_dumps, parse_json, run_txn, utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -737,7 +738,7 @@ def extract_and_store_kpis(run_id: str) -> list[KpiValue]:
                 artifact_payload = None
                 if artifact is not None:
                     try:
-                        with open(artifact["uri"], "r") as f:
+                        with open(artifact["uri"]) as f:
                             artifact_payload = json.load(f)
                     except Exception:
                         pass

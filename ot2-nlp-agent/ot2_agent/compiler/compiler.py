@@ -6,16 +6,14 @@ executable code and JSON.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from ..ir import UnitOperation, Primitive, DeviceAction
-from ..protocol import Protocol, ProtocolGenerator
-from ..validator import ValidationResult, ProtocolValidator
-from ..validation.workflow_validator import WorkflowValidator, EnhancedValidationResult
+from ..ir import DeviceAction, Primitive
 from ..planner import ConfirmedWorkflow
-
-from .uo_expander import UOExpander
+from ..protocol import Protocol, ProtocolGenerator
+from ..validation.workflow_validator import EnhancedValidationResult, WorkflowValidator
 from .device_mapper import DeviceMapper, DeviceRegistry
+from .uo_expander import UOExpander
 
 
 @dataclass
@@ -29,10 +27,10 @@ class CompilerOutput:
     python_code: str
     workflow_json: str
     validation_result: EnhancedValidationResult
-    device_actions: List[DeviceAction] = field(default_factory=list)
-    primitives: List[Primitive] = field(default_factory=list)
+    device_actions: list[DeviceAction] = field(default_factory=list)
+    primitives: list[Primitive] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "protocol": self.protocol.to_dict(),
@@ -110,7 +108,7 @@ class Compiler:
     def _build_protocol(
         self,
         workflow: ConfirmedWorkflow,
-        device_actions: List[DeviceAction]
+        device_actions: list[DeviceAction]
     ) -> Protocol:
         """
         Build a Protocol object from device actions.
@@ -153,7 +151,7 @@ class Compiler:
 
         return protocol
 
-    def compile_from_dict(self, workflow_dict: Dict[str, Any]) -> CompilerOutput:
+    def compile_from_dict(self, workflow_dict: dict[str, Any]) -> CompilerOutput:
         """
         Compile from a dictionary representation.
 

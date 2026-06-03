@@ -10,7 +10,6 @@ References:
 from __future__ import annotations
 
 import logging
-import math
 import random
 from dataclasses import dataclass
 from typing import Any
@@ -211,7 +210,7 @@ class PrioritizedReplayBuffer:
         if isinstance(td_errors, list):
             td_errors = np.array(td_errors)
 
-        for idx, td_err in zip(indices, td_errors):
+        for idx, td_err in zip(indices, td_errors, strict=False):
             priority = (abs(float(td_err)) + self.config.epsilon)
             priority = min(priority, self.config.max_priority_clip)
             self.max_priority = max(self.max_priority, priority)

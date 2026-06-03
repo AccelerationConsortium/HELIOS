@@ -41,12 +41,13 @@ import asyncio
 import json
 import logging
 import sqlite3
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, AsyncIterator, Awaitable, Callable, Iterator
+from typing import Any
 
-from app.services.strategy_models import CampaignSnapshot
 from app.services.rl_reward import RewardConfig
+from app.services.strategy_models import CampaignSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -696,7 +697,7 @@ def load_training_dataset(
 
     Deserializes snapshot dicts back to CampaignSnapshot objects.
     """
-    with open(input_path, "r") as f:
+    with open(input_path) as f:
         serialized_traces = json.load(f)
 
     traces = []
@@ -718,7 +719,7 @@ async def stream_training_dataset(
     on-disk dataset without holding every trace in memory simultaneously.
     """
     def _load() -> list[dict[str, Any]]:
-        with open(input_path, "r") as f:
+        with open(input_path) as f:
             return json.load(f)
 
     serialized_traces = await asyncio.to_thread(_load)

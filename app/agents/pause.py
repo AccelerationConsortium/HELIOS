@@ -17,11 +17,11 @@ Lifecycle::
 """
 from __future__ import annotations
 
-import asyncio
 import enum
 import logging
 import uuid
-from typing import Any, Callable, Awaitable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class Granularity(str, enum.Enum):
+class Granularity(enum.StrEnum):
     """Execution granularity level chosen by an agent at runtime."""
 
     FINE = "fine"          # Step-by-step with confirmations

@@ -5,10 +5,8 @@ exercises real C2-C5 code paths, and collects results + acceptance checks.
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
-import random
 import statistics
 import tempfile
 import time
@@ -231,8 +229,8 @@ class BenchmarkRunner:
         tmpdir, env = self._make_env(scenario)
         self._setup_db(env)
 
-        from benchmarks.simlab import SimAdapter, SimWorld
         from benchmarks.fault_injector import FaultInjector
+        from benchmarks.simlab import SimAdapter, SimWorld
 
         metrics: dict[str, Any] = {}
         extraction_times: list[float] = []
@@ -282,7 +280,7 @@ class BenchmarkRunner:
                     kpi_values.setdefault(name, []).append(float(val))
 
         max_stddev = 0.0
-        for name, values in kpi_values.items():
+        for _name, values in kpi_values.items():
             if len(values) >= 2:
                 sd = statistics.stdev(values)
                 max_stddev = max(max_stddev, sd)
@@ -502,7 +500,6 @@ class BenchmarkRunner:
         tmpdir, env = self._make_env(scenario)
         self._setup_db(env)
 
-        from benchmarks.simlab import SimAdapter, SimWorld
 
         metrics: dict[str, Any] = {}
 
@@ -615,8 +612,8 @@ class BenchmarkRunner:
         tmpdir, env = self._make_env(scenario)
         self._setup_db(env)
 
-        from benchmarks.simlab import SimAdapter, SimWorld
         from benchmarks.fault_injector import FaultInjector
+        from benchmarks.simlab import SimAdapter, SimWorld
 
         metrics: dict[str, Any] = {
             "recovery_rate": 0.0,
@@ -817,7 +814,7 @@ class BenchmarkRunner:
 
     def _insert_dummy_run(self, run_id: str) -> None:
         """Insert a minimal run record for testing."""
-        from app.core.db import connection, json_dumps, utcnow_iso
+        from app.core.db import connection, utcnow_iso
 
         now = utcnow_iso()
         with connection() as conn:

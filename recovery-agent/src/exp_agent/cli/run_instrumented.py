@@ -11,8 +11,8 @@ import argparse
 import sys
 from pathlib import Path
 
-from ..orchestrator.instrumented_supervisor import InstrumentedSupervisor
 from ..logging.pipeline import LogLevel
+from ..orchestrator.instrumented_supervisor import InstrumentedSupervisor
 
 
 def main():

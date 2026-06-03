@@ -15,10 +15,10 @@ from typing import Any
 
 from app.contracts.query_contract import ColumnSpec, QueryConstraints, QueryPlan, new_query_plan_id
 from app.contracts.query_dsl import (
+    _VALID_COLUMNS,
     ENTITY_SOURCE,
     AggSpec,
     ExperimentQuery,
-    _VALID_COLUMNS,
     is_valid_column,
 )
 from app.core.db import utcnow_iso

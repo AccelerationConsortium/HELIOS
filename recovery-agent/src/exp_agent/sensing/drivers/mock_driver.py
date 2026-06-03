@@ -8,19 +8,18 @@ Features:
 - Replay mode for reproducing incidents from logs
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Callable, Optional
 import random
-import math
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 
-from exp_agent.sensing.drivers.base import SensorDriver, DriverConfig
+from exp_agent.sensing.drivers.base import DriverConfig, SensorDriver
 from exp_agent.sensing.protocol.sensor_event import (
-    SensorEvent,
-    SensorType,
-    SensorQuality,
-    SensorMeta,
     QualityStatus,
+    SensorEvent,
+    SensorMeta,
+    SensorQuality,
+    SensorType,
 )
 
 
@@ -39,15 +38,15 @@ class SensorProfile:
     unit: str = ""
 
     # Valid range (for OUT_OF_RANGE detection)
-    valid_min: Optional[float] = None
-    valid_max: Optional[float] = None
+    valid_min: float | None = None
+    valid_max: float | None = None
 
     # Update behavior
     update_interval_ms: float = 1000.0    # How often this sensor updates
 
     # Fault injection hooks (set by FaultInjector)
-    fault_override: Optional[Callable[[], Optional[float]]] = None
-    quality_override: Optional[Callable[[], Optional[QualityStatus]]] = None
+    fault_override: Callable[[], float | None] | None = None
+    quality_override: Callable[[], QualityStatus | None] | None = None
 
 
 @dataclass
@@ -94,7 +93,7 @@ class MockSensorConfig(DriverConfig):
 
     # Simulation behavior
     time_acceleration: float = 1.0         # Speed up time for testing
-    start_time: Optional[datetime] = None  # Fixed start time (for replay)
+    start_time: datetime | None = None  # Fixed start time (for replay)
 
 
 class MockSensorDriver(SensorDriver):
@@ -111,7 +110,7 @@ class MockSensorDriver(SensorDriver):
         self.mock_config = config
         self._sensors: dict[str, SensorProfile] = {}
         self._sequence_nums: dict[str, int] = {}
-        self._start_time = config.start_time or datetime.now(timezone.utc)
+        self._start_time = config.start_time or datetime.now(UTC)
         self._current_values: dict[str, float] = {}
 
         # Initialize sensors
@@ -132,7 +131,7 @@ class MockSensorDriver(SensorDriver):
     async def read(self) -> list[SensorEvent]:
         """Generate readings for all configured sensors."""
         events = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for sensor_id, profile in self._sensors.items():
             event = self._generate_reading(sensor_id, profile, now)
@@ -236,8 +235,8 @@ class MockSensorDriver(SensorDriver):
     def inject_fault(
         self,
         sensor_id: str,
-        value_override: Optional[Callable[[], Optional[float]]] = None,
-        quality_override: Optional[Callable[[], Optional[QualityStatus]]] = None,
+        value_override: Callable[[], float | None] | None = None,
+        quality_override: Callable[[], QualityStatus | None] | None = None,
     ) -> None:
         """Inject a fault into a sensor."""
         if sensor_id in self._sensors:

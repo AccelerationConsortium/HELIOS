@@ -8,10 +8,11 @@ This file is intentionally lightweight: it focuses on data shape, not policy.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, ConfigDict
+from typing import Any
 
-from ..core.types import DeviceState, Decision, SignatureResult, Action
+from pydantic import BaseModel, ConfigDict, Field
+
+from ..core.types import Decision, DeviceState, SignatureResult
 from ..llm.types import LLMDecisionProposal
 
 
@@ -23,16 +24,16 @@ class AnomalyPacket(BaseModel):
     packet_id: str
 
     # What happened
-    error: Dict[str, Any]
-    signature: Optional[SignatureResult] = None
+    error: dict[str, Any]
+    signature: SignatureResult | None = None
 
     # What we decided
     baseline_decision: Decision
-    llm_proposal: Optional[LLMDecisionProposal] = None
+    llm_proposal: LLMDecisionProposal | None = None
 
     # Evidence
-    telemetry_window: List[DeviceState] = Field(default_factory=list)
+    telemetry_window: list[DeviceState] = Field(default_factory=list)
 
     # Notes for future agents
-    tags: List[str] = Field(default_factory=list)
-    notes: Dict[str, Any] = Field(default_factory=dict)
+    tags: list[str] = Field(default_factory=list)
+    notes: dict[str, Any] = Field(default_factory=dict)

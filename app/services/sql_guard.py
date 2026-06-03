@@ -22,7 +22,6 @@ from pydantic import BaseModel
 
 from app.contracts.query_contract import QueryConstraints
 
-
 # ---------------------------------------------------------------------------
 # Result model
 # ---------------------------------------------------------------------------

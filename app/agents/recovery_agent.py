@@ -39,8 +39,10 @@ def _import_recovery_agent():
         if recovery_path.exists() and str(recovery_path) not in sys.path:
             sys.path.insert(0, str(recovery_path))
 
+        from exp_agent.core.types import Action as _A
+        from exp_agent.core.types import DeviceState as _DS
+        from exp_agent.core.types import HardwareError as _HE
         from exp_agent.recovery.recovery_agent import RecoveryAgent as _RA
-        from exp_agent.core.types import DeviceState as _DS, HardwareError as _HE, Action as _A
 
         _RecoveryAgent = _RA
         _DeviceState = _DS

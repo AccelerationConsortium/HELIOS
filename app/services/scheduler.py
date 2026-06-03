@@ -90,7 +90,7 @@ class OrchestratorScheduler:
         self._active_workers.clear()
 
         # Cancel active orchestrator tasks
-        for campaign_id, task in list(self._orchestrator_tasks.items()):
+        for _campaign_id, task in list(self._orchestrator_tasks.items()):
             if not task.done():
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

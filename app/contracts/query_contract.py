@@ -11,9 +11,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.core.db import utcnow_iso
 from app.contracts.query_dsl import ExperimentQuery
-
+from app.core.db import utcnow_iso
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -99,7 +98,7 @@ class QueryRequest(BaseModel):
     snapshot_name: str | None = None
 
     @model_validator(mode="after")
-    def _require_prompt_or_dsl(self) -> "QueryRequest":
+    def _require_prompt_or_dsl(self) -> QueryRequest:
         if not self.prompt.strip() and self.dsl_query is None:
             raise ValueError("Either 'prompt' or 'dsl_query' must be provided")
         return self

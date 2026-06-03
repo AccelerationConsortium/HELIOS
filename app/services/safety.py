@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from app.services.action_contracts import (
     ActionContract,
-    Effect,
-    Precondition,
-    SafetyClass,
     _apply_effect_dict,
     _evaluate_predicate_dict,
 )
-
 
 # All primitives supported by the battery-lab hardware + original OTbot primitives
 BATTERY_LAB_PRIMITIVES: list[str] = [

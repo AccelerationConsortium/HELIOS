@@ -17,7 +17,7 @@ worker consults when a step raises.  It also provides the upgraded 4-tier
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from app.services.action_contracts import (
@@ -25,7 +25,6 @@ from app.services.action_contracts import (
     ActionContract,
     SafetyClass,
 )
-
 
 # ---------------------------------------------------------------------------
 # Primitive → severity mapping (legacy, preserved for backward compatibility)

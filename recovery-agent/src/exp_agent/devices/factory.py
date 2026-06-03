@@ -2,9 +2,8 @@
 Device factory for creating device instances from configuration.
 """
 
-from typing import Dict, Any, Type
 from ..base import Device
-from ..real import RealHeater, SerialHeater, NetworkHeater, IKAHeater, DeviceConfig
+from ..real import DeviceConfig, IKAHeater, NetworkHeater, SerialHeater
 from ..simulated.heater import SimHeater
 
 
@@ -12,7 +11,7 @@ class DeviceFactory:
     """Factory for creating device instances."""
 
     # Registry of device types and their constructors
-    DEVICE_TYPES: Dict[str, Dict[str, Type[Device]]] = {
+    DEVICE_TYPES: dict[str, dict[str, type[Device]]] = {
         "heater": {
             "simulated": SimHeater,
             "serial": SerialHeater,
@@ -67,7 +66,7 @@ class DeviceFactory:
         return device_class(name=name, **kwargs)
 
     @classmethod
-    def get_supported_types(cls) -> Dict[str, list]:
+    def get_supported_types(cls) -> dict[str, list]:
         """Get all supported device types and their connection methods."""
         return {
             device_type: list(methods.keys())

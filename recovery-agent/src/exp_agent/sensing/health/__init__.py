@@ -6,10 +6,10 @@ Components:
 - Detectors: Specific anomaly detectors (stale, stuck, out-of-range, drift)
 """
 
-from exp_agent.sensing.health.health_monitor import HealthMonitor, HealthMonitorConfig
+from exp_agent.sensing.health.detectors.out_of_range import OutOfRangeDetector
 from exp_agent.sensing.health.detectors.stale import StaleDetector
 from exp_agent.sensing.health.detectors.stuck import StuckDetector
-from exp_agent.sensing.health.detectors.out_of_range import OutOfRangeDetector
+from exp_agent.sensing.health.health_monitor import HealthMonitor, HealthMonitorConfig
 
 __all__ = [
     "HealthMonitor",

@@ -6,8 +6,6 @@ experiment types. Templates provide pre-configured UOs with
 standard parameters and placeholders.
 """
 
-from typing import Dict, List, Optional
-
 from ..ir import UnitOperation
 
 
@@ -18,7 +16,7 @@ class TemplateRegistry:
     Provides lookup and retrieval of templates by domain and name.
     """
     _instance = None
-    _templates: Dict[str, Dict[str, UnitOperation]] = {}
+    _templates: dict[str, dict[str, UnitOperation]] = {}
 
     def __new__(cls):
         if cls._instance is None:
@@ -34,38 +32,38 @@ class TemplateRegistry:
         cls._templates[domain][name] = template
 
     @classmethod
-    def get(cls, domain: str, name: str) -> Optional[UnitOperation]:
+    def get(cls, domain: str, name: str) -> UnitOperation | None:
         """Get a template by domain and name. Returns a copy."""
         if domain in cls._templates and name in cls._templates[domain]:
             return cls._templates[domain][name].copy()
         return None
 
     @classmethod
-    def list_domains(cls) -> List[str]:
+    def list_domains(cls) -> list[str]:
         """List available domains."""
         return list(cls._templates.keys())
 
     @classmethod
-    def list_templates(cls, domain: str) -> List[str]:
+    def list_templates(cls, domain: str) -> list[str]:
         """List templates in a domain."""
         if domain in cls._templates:
             return list(cls._templates[domain].keys())
         return []
 
     @classmethod
-    def get_all_for_domain(cls, domain: str) -> Dict[str, UnitOperation]:
+    def get_all_for_domain(cls, domain: str) -> dict[str, UnitOperation]:
         """Get all templates for a domain (copies)."""
         if domain in cls._templates:
             return {k: v.copy() for k, v in cls._templates[domain].items()}
         return {}
 
 
-def get_template(domain: str, name: str) -> Optional[UnitOperation]:
+def get_template(domain: str, name: str) -> UnitOperation | None:
     """Convenience function to get a template."""
     return TemplateRegistry.get(domain, name)
 
 
-def list_templates(domain: str = None) -> Dict[str, List[str]]:
+def list_templates(domain: str = None) -> dict[str, list[str]]:
     """List available templates, optionally filtered by domain."""
     if domain:
         return {domain: TemplateRegistry.list_templates(domain)}
@@ -73,10 +71,11 @@ def list_templates(domain: str = None) -> Dict[str, List[str]]:
 
 
 # Import domain templates to register them
-from . import oer
+from . import oer  # noqa: E402
 
 __all__ = [
     "TemplateRegistry",
     "get_template",
     "list_templates",
+    "oer",
 ]

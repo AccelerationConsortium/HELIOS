@@ -4,7 +4,7 @@ Generic Gantry Adapter
 A generic adapter for custom gantry-based liquid handling systems.
 """
 
-from typing import Any, Dict
+from typing import Any
 
 
 class GenericGantryAdapter:
@@ -19,7 +19,7 @@ class GenericGantryAdapter:
     manufacturer = "Custom"
     model = "Generic Gantry System"
 
-    def translate_action(self, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def translate_action(self, action: str, params: dict[str, Any]) -> dict[str, Any]:
         """
         Translate generic action to gantry command.
 
@@ -31,7 +31,7 @@ class GenericGantryAdapter:
             "params": params,
         }
 
-    def get_capabilities(self) -> Dict[str, Any]:
+    def get_capabilities(self) -> dict[str, Any]:
         """Get adapter capabilities."""
         return {
             "name": self.name,

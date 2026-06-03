@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import copy
 import logging
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -42,7 +42,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-class CleaningDeviceType(str, Enum):
+class CleaningDeviceType(StrEnum):
     ULTRASONIC_BATH = "ultrasonic_bath"
     ACID_RINSE = "acid_rinse"
     WATER_FLUSH = "water_flush"

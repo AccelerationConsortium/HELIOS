@@ -8,7 +8,7 @@ mapped to specific device commands.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class ActionType(Enum):
@@ -77,25 +77,25 @@ class Primitive:
     """
     name: str                               # Primitive name/identifier
     action_type: ActionType                 # Action category
-    params: Dict[str, Any] = field(default_factory=dict)  # Action parameters
+    params: dict[str, Any] = field(default_factory=dict)  # Action parameters
 
     # Device requirements
     device_type: str = "any"                # Required device type
-    device_constraints: Dict[str, Any] = field(default_factory=dict)  # Device constraints
+    device_constraints: dict[str, Any] = field(default_factory=dict)  # Device constraints
 
     # Documentation
     description: str = ""                   # What this primitive does
 
     # Timing
-    estimated_duration_s: Optional[float] = None
+    estimated_duration_s: float | None = None
 
     # Dependencies
-    depends_on: List[str] = field(default_factory=list)  # Primitive names this depends on
+    depends_on: list[str] = field(default_factory=list)  # Primitive names this depends on
 
     # Source UO (for traceability)
-    source_uo: Optional[str] = None         # Name of UO this came from
+    source_uo: str | None = None         # Name of UO this came from
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "name": self.name,
@@ -110,7 +110,7 @@ class Primitive:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Primitive":
+    def from_dict(cls, data: dict[str, Any]) -> "Primitive":
         """Create from dictionary."""
         return cls(
             name=data["name"],
@@ -151,22 +151,22 @@ class DeviceAction:
     device_id: str                          # Specific device identifier
     device_type: str                        # Device type
     command: str                            # Device command/method
-    params: Dict[str, Any] = field(default_factory=dict)  # Command parameters
+    params: dict[str, Any] = field(default_factory=dict)  # Command parameters
 
     # Documentation
     description: str = ""
 
     # Timing
-    estimated_duration_s: Optional[float] = None
+    estimated_duration_s: float | None = None
 
     # Source
-    source_primitive: Optional[str] = None  # Primitive name this came from
+    source_primitive: str | None = None  # Primitive name this came from
 
     # Execution
     requires_confirmation: bool = False     # Need user confirmation?
     is_reversible: bool = False             # Can this be undone?
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "name": self.name,
@@ -182,7 +182,7 @@ class DeviceAction:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "DeviceAction":
+    def from_dict(cls, data: dict[str, Any]) -> "DeviceAction":
         """Create from dictionary."""
         return cls(
             name=data["name"],

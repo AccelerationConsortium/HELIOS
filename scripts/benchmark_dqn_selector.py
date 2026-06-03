@@ -16,8 +16,8 @@ from typing import Any
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
-from app.services.rl_data_collector import load_training_dataset
 from app.services.dqn_strategy_selector import DQNConfig, DQNStrategySelector
+from app.services.rl_data_collector import load_training_dataset
 from app.services.strategy_selector import (
     compute_diagnostics,
     select_strategy,
@@ -217,7 +217,7 @@ def main():
     kpi_improvement = (dqn_metrics['avg_final_kpi'] - rule_metrics['avg_final_kpi']) / abs(rule_metrics['avg_final_kpi']) * 100 if rule_metrics['avg_final_kpi'] != 0 else 0
     rounds_reduction = (rule_metrics['avg_rounds'] - dqn_metrics['avg_rounds']) / rule_metrics['avg_rounds'] * 100 if rule_metrics['avg_rounds'] != 0 else 0
 
-    print(f"\n📊 Improvement Summary:")
+    print("\n📊 Improvement Summary:")
     print(f"  • KPI improvement: {kpi_improvement:+.2f}%")
     print(f"  • Rounds reduction: {rounds_reduction:+.2f}%")
 

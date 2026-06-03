@@ -18,7 +18,6 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Safety Classification (4-tier, replacing binary CRITICAL/BYPASS)
 # ---------------------------------------------------------------------------

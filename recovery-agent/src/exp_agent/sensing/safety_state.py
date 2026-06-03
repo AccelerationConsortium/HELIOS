@@ -13,16 +13,17 @@ Based on Phase 3 requirements:
 - Hard interlocks force ASK_HUMAN, prevent auto-retry
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from enum import Enum, IntEnum
-from typing import Optional, Any, Callable
 import hashlib
 import json
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from enum import IntEnum, StrEnum
+from typing import Any
 
+from exp_agent.sensing.protocol.health_event import HealthStatus
 from exp_agent.sensing.protocol.sensor_event import SensorEvent, SensorType
 from exp_agent.sensing.protocol.snapshot import SystemSnapshot
-from exp_agent.sensing.protocol.health_event import HealthStatus
 
 
 class SafetyState(IntEnum):
@@ -41,14 +42,14 @@ class SafetyState(IntEnum):
     EMERGENCY = 3
 
 
-class InterlockClass(str, Enum):
+class InterlockClass(StrEnum):
     """Classification of interlock severity."""
 
     SOFT = "soft"           # Software-enforceable, auto-recovery possible
     HARD_REQUIRED = "hard"  # Requires human confirmation, no auto-recovery
 
 
-class InterlockReason(str, Enum):
+class InterlockReason(StrEnum):
     """Enumerated reasons for interlock (not free text)."""
 
     # Airflow
@@ -80,7 +81,7 @@ class InterlockReason(str, Enum):
     MULTIPLE_INTERLOCKS = "multiple_interlocks"
 
 
-class RecommendedAction(str, Enum):
+class RecommendedAction(StrEnum):
     """Actions that can be recommended by safety state."""
 
     CONTINUE = "continue"           # Normal operation
@@ -153,10 +154,10 @@ class Interlock:
     reason: InterlockReason
     interlock_class: InterlockClass
     sensor_id: str
-    current_value: Optional[float]
-    threshold: Optional[float]
+    current_value: float | None
+    threshold: float | None
     message: str
-    triggered_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    triggered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -181,7 +182,7 @@ class SafetyStateUpdate:
 
     # Current state
     state: SafetyState
-    previous_state: Optional[SafetyState] = None
+    previous_state: SafetyState | None = None
 
     # Primary reason (use MULTIPLE_INTERLOCKS if >1)
     reason: InterlockReason = InterlockReason.HOOD_AIRFLOW_LOW
@@ -190,16 +191,16 @@ class SafetyStateUpdate:
     interlocks: list[Interlock] = field(default_factory=list)
 
     # Evidence for audit
-    evidence: Optional[EvidenceChain] = None
+    evidence: EvidenceChain | None = None
 
     # Recommended actions (ordered by priority)
     recommended_actions: list[RecommendedAction] = field(default_factory=list)
 
     # Timestamp
-    ts: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    ts: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     # Optional explanation from SafetyAdvisor
-    explanation: Optional[str] = None
+    explanation: str | None = None
 
     @property
     def is_state_change(self) -> bool:
@@ -268,15 +269,15 @@ class SafetyStateMachine:
 
     def __init__(
         self,
-        hysteresis: Optional[HysteresisConfig] = None,
+        hysteresis: HysteresisConfig | None = None,
     ):
         self.hysteresis = hysteresis or HysteresisConfig()
 
         # Current state
         self._state = SafetyState.SAFE
-        self._state_entered_at = datetime.now(timezone.utc)
+        self._state_entered_at = datetime.now(UTC)
         self._clean_readings_count = 0
-        self._last_clean_at: Optional[datetime] = None
+        self._last_clean_at: datetime | None = None
 
         # Active interlocks
         self._active_interlocks: dict[str, Interlock] = {}
@@ -363,8 +364,8 @@ class SafetyStateMachine:
     def process_snapshot(
         self,
         snapshot: SystemSnapshot,
-        config: Optional[dict[str, float]] = None,
-        window_events: Optional[list[SensorEvent]] = None,
+        config: dict[str, float] | None = None,
+        window_events: list[SensorEvent] | None = None,
     ) -> SafetyStateUpdate:
         """
         Process a system snapshot and return current safety state.
@@ -378,7 +379,7 @@ class SafetyStateMachine:
             SafetyStateUpdate with state, interlocks, evidence, and actions
         """
         config = config or {}
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         previous_state = self._state
 
         # Clear trigger tracking for this evaluation
@@ -434,7 +435,7 @@ class SafetyStateMachine:
         # Calculate new state based on worst interlock
         calculated_state = SafetyState.SAFE
         for interlock in new_interlocks:
-            for def_key, idef in self._interlock_defs.items():
+            for _def_key, idef in self._interlock_defs.items():
                 if idef["reason"] == interlock.reason:
                     if idef["state"] > calculated_state:
                         calculated_state = idef["state"]
@@ -561,7 +562,7 @@ class SafetyStateMachine:
 
         # Interlock-specific actions
         for interlock in interlocks:
-            for def_key, idef in self._interlock_defs.items():
+            for _def_key, idef in self._interlock_defs.items():
                 if idef["reason"] == interlock.reason:
                     actions.update(idef["actions"])
                     break

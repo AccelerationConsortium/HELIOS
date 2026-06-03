@@ -6,8 +6,8 @@ published to SSE subscribers in real time.
 """
 from __future__ import annotations
 
-import uuid
 import sqlite3
+import uuid
 from typing import Any
 
 from app.core.db import json_dumps, utcnow_iso

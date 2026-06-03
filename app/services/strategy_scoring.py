@@ -17,13 +17,12 @@ import logging
 import math
 from typing import Any
 
-from app.services.convergence import _mean
 from app.services.strategy_models import (
     CampaignSnapshot,
     DiagnosticSignals,
     EvidenceItem,
-    PhasePosterior,
     PhaseConfig,
+    PhasePosterior,
     StabilizeSpec,
     WeightsUsed,
 )
@@ -313,7 +312,7 @@ def build_stabilize_spec(
 
     # Default: replicate global top-k points
     if all_params and all_kpis:
-        paired = list(zip(all_kpis, all_params))
+        paired = list(zip(all_kpis, all_params, strict=False))
         paired.sort(key=lambda x: x[0], reverse=maximize)
         top_points = [p for _, p in paired[:top_k]]
 

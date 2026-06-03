@@ -8,27 +8,11 @@ L0 out:   ResultPacket       (Data/Feature agent output)
 """
 from __future__ import annotations
 
-from app.contracts.task_contract import (
-    DimensionDef,
-    ExplorationSpace,
-    HumanGatePolicy,
-    ObjectiveSpec,
-    SafetyEnvelope,
-    StopCondition,
-    TaskContract,
-    new_task_contract_id,
-)
 from app.contracts.campaign_plan import (
     CampaignPlan,
     ResourceRequirements,
     RoundSpec,
     new_campaign_plan_id,
-)
-from app.contracts.run_bundle import (
-    DeckLayout,
-    RunBundle,
-    SlotAssignment,
-    new_run_bundle_id,
 )
 from app.contracts.query_contract import (
     ColumnSpec,
@@ -42,6 +26,22 @@ from app.contracts.result_packet import (
     QualityLabel,
     ResultPacket,
     new_result_packet_id,
+)
+from app.contracts.run_bundle import (
+    DeckLayout,
+    RunBundle,
+    SlotAssignment,
+    new_run_bundle_id,
+)
+from app.contracts.task_contract import (
+    DimensionDef,
+    ExplorationSpace,
+    HumanGatePolicy,
+    ObjectiveSpec,
+    SafetyEnvelope,
+    StopCondition,
+    TaskContract,
+    new_task_contract_id,
 )
 from app.contracts.workflow_ir import (
     AbstractPrimitive,

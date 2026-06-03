@@ -8,13 +8,13 @@ executed across multiple instruments.
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 
 @dataclass
 class StepParams:
     """Parameters for a workflow step."""
-    data: Dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
 
     def __getitem__(self, key: str) -> Any:
         return self.data.get(key)
@@ -25,7 +25,7 @@ class StepParams:
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return self.data.copy()
 
 
@@ -35,15 +35,15 @@ class Step:
     step_id: str
     device_type: str  # e.g., "liquid_handler", "potentiostat", "pump_controller"
     action: str  # e.g., "liquid_handler.transfer", "potentiostat.run_eis"
-    params: Dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
     description: str = ""
 
     # Execution metadata
-    depends_on: List[str] = field(default_factory=list)  # step_ids this step depends on
-    timeout_seconds: Optional[float] = None
+    depends_on: list[str] = field(default_factory=list)  # step_ids this step depends on
+    timeout_seconds: float | None = None
     retry_count: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         result = {
             "step_id": self.step_id,
@@ -63,7 +63,7 @@ class Step:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Step':
+    def from_dict(cls, data: dict[str, Any]) -> 'Step':
         """Create Step from dictionary."""
         return cls(
             step_id=data["step_id"],
@@ -82,13 +82,13 @@ class ParallelThread:
     """A thread of steps that can run in parallel with other threads."""
     thread_name: str
     description: str = ""
-    steps: List[Step] = field(default_factory=list)
+    steps: list[Step] = field(default_factory=list)
 
     def add_step(self, step: Step):
         """Add a step to this thread."""
         self.steps.append(step)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "thread_name": self.thread_name,
@@ -97,7 +97,7 @@ class ParallelThread:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ParallelThread':
+    def from_dict(cls, data: dict[str, Any]) -> 'ParallelThread':
         """Create ParallelThread from dictionary."""
         thread = cls(
             thread_name=data["thread_name"],
@@ -119,8 +119,8 @@ class Phase:
     """
     phase_name: str
     description: str = ""
-    steps: List[Step] = field(default_factory=list)
-    parallel_threads: List[ParallelThread] = field(default_factory=list)
+    steps: list[Step] = field(default_factory=list)
+    parallel_threads: list[ParallelThread] = field(default_factory=list)
 
     @property
     def is_parallel(self) -> bool:
@@ -139,7 +139,7 @@ class Phase:
             raise ValueError("Cannot add parallel threads to a sequential phase")
         self.parallel_threads.append(thread)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         result = {
             "phase_name": self.phase_name,
@@ -154,7 +154,7 @@ class Phase:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Phase':
+    def from_dict(cls, data: dict[str, Any]) -> 'Phase':
         """Create Phase from dictionary."""
         phase = cls(
             phase_name=data["phase_name"],
@@ -177,9 +177,9 @@ class DeviceConfig:
     device_type: str  # e.g., "liquid_handler", "potentiostat"
     adapter: str  # e.g., "ot2", "squidstat"
     name: str  # Instance name
-    config: Dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "device_type": self.device_type,
             "adapter": self.adapter,
@@ -188,7 +188,7 @@ class DeviceConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'DeviceConfig':
+    def from_dict(cls, data: dict[str, Any]) -> 'DeviceConfig':
         return cls(
             device_type=data["device_type"],
             adapter=data["adapter"],
@@ -212,16 +212,16 @@ class Workflow:
     created_at: datetime = field(default_factory=datetime.now)
 
     # Device configurations
-    devices: List[DeviceConfig] = field(default_factory=list)
+    devices: list[DeviceConfig] = field(default_factory=list)
 
     # Workflow phases
-    phases: List[Phase] = field(default_factory=list)
+    phases: list[Phase] = field(default_factory=list)
 
     # Metadata
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     # Original instructions (for traceability)
-    original_instructions: List[str] = field(default_factory=list)
+    original_instructions: list[str] = field(default_factory=list)
 
     def add_device(self, device: DeviceConfig):
         """Add a device configuration."""
@@ -231,7 +231,7 @@ class Workflow:
         """Add a phase to the workflow."""
         self.phases.append(phase)
 
-    def get_phase(self, name: str) -> Optional[Phase]:
+    def get_phase(self, name: str) -> Phase | None:
         """Get a phase by name."""
         for phase in self.phases:
             if phase.phase_name == name:
@@ -246,7 +246,7 @@ class Workflow:
             self.phases.append(phase)
         return phase
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "workflow_name": self.workflow_name,
@@ -272,7 +272,7 @@ class Workflow:
             f.write(self.to_json(indent=indent))
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Workflow':
+    def from_dict(cls, data: dict[str, Any]) -> 'Workflow':
         """Create Workflow from dictionary."""
         metadata = data.get("metadata", {})
 
@@ -308,5 +308,5 @@ class Workflow:
     @classmethod
     def load_json(cls, filepath: str) -> 'Workflow':
         """Load Workflow from JSON file."""
-        with open(filepath, 'r', encoding='utf-8') as f:
+        with open(filepath, encoding='utf-8') as f:
             return cls.from_json(f.read())

@@ -108,7 +108,6 @@ class ValidationAgent(BaseAgent[ValidationInput, ValidationOutput]):
         # In adversarial mode, the validator actively seeks refutations of the
         # hypothesis. The adversarial system prompt drives the LLM-backed review.
         adversarial = input_data.mode == "adversarial"
-        system_prompt = ADVERSARIAL_SYSTEM_PROMPT if adversarial else None
         refutations: list[str] = []
 
         # ── Tier 1: Semantic validation ────────────────────────────────────

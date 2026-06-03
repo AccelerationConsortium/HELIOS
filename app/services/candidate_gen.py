@@ -18,10 +18,10 @@ import math
 import random
 import sqlite3 as _sqlite3
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from app.core.db import connection, json_dumps, parse_json, run_txn, utcnow_iso
+from app.core.db import json_dumps, parse_json, run_txn, utcnow_iso
 
 logger = logging.getLogger(__name__)
 
@@ -391,7 +391,7 @@ def sample_dirichlet(
                     fracs = [g / total for g in gammas]
 
                 # Scale to target_sum
-                for name, frac in zip(constraint.param_names, fracs):
+                for name, frac in zip(constraint.param_names, fracs, strict=False):
                     point[name] = frac * constraint.target_sum
             else:
                 # Non-simplex dimension: uniform random
@@ -468,7 +468,7 @@ def _apply_simplex_constraints(
             else:
                 # Scale proportionally
                 scale = target / total
-                for n, v in zip(names, vals):
+                for n, v in zip(names, vals, strict=False):
                     point[n] = v * scale
         result.append(point)
     return result
@@ -588,12 +588,12 @@ def generate_batch(
         raw_params = sample_dirichlet(space, n_candidates, seed=seed)
     elif strategy == "adaptive":
         # Delegate to the adaptive strategy selector
+        from app.services.bayesian_opt import load_observations_from_db
         from app.services.optimization_backends import Observation as OptObs
         from app.services.strategy_selector import (
             CampaignSnapshot,
             generate_adaptive_candidates,
         )
-        from app.services.bayesian_opt import load_observations_from_db
 
         bo_obs = load_observations_from_db(
             space, campaign_id=campaign_id, kpi_name=kpi_name,

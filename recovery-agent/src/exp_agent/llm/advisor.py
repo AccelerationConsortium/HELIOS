@@ -6,9 +6,9 @@ The policy engine and guarded executor remain the gatekeepers.
 
 from __future__ import annotations
 
-from typing import List, Optional, Protocol, Dict
+from typing import Protocol
 
-from ..core.types import DeviceState, HardwareError, Action, Decision
+from ..core.types import Action, Decision, DeviceState, HardwareError
 from .types import LLMDecisionProposal
 
 
@@ -23,10 +23,10 @@ class LLMAdvisor(Protocol):
         *,
         state: DeviceState,
         error: HardwareError,
-        history: List[DeviceState],
-        retry_counts: Dict[str, int],
-        last_action: Optional[Action],
-        stage: Optional[str],
+        history: list[DeviceState],
+        retry_counts: dict[str, int],
+        last_action: Action | None,
+        stage: str | None,
         baseline_decision: Decision,
-    ) -> Optional[LLMDecisionProposal]:
+    ) -> LLMDecisionProposal | None:
         ...

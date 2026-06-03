@@ -163,9 +163,9 @@ class StrategyRouter:
             StrategyDecision from either RL or rule-based selector
         """
         from app.services.strategy_selector import (
-            CampaignSnapshot,
-            StrategyDecision,
             compute_diagnostics,
+        )
+        from app.services.strategy_selector import (
             select_strategy as rule_based_select,
         )
 
@@ -264,7 +264,7 @@ class StrategyRouter:
                 return
 
             # Compute reward (with learned weights if available)
-            from app.services.rl_reward import compute_reward, RewardConfig
+            from app.services.rl_reward import compute_reward
             from app.services.rl_strategy_selector import RLState
 
             reward_components = compute_reward(
@@ -402,7 +402,7 @@ class StrategyRouter:
         backend = self.config.rl_backend
 
         if backend == "dqn":
-            from app.services.dqn_strategy_selector import DQNStrategySelector, DQNConfig
+            from app.services.dqn_strategy_selector import DQNConfig, DQNStrategySelector
             config = DQNConfig(model_save_path=self.config.model_path)
             self._rl_selector = DQNStrategySelector(config)
 
@@ -431,7 +431,7 @@ class StrategyRouter:
 
         elif backend == "ppo":
             try:
-                from app.services.ppo_strategy_selector import PPOStrategySelector, PPOConfig
+                from app.services.ppo_strategy_selector import PPOConfig, PPOStrategySelector
                 ppo_config = PPOConfig(model_save_path=self.config.model_path.replace("dqn", "ppo"))
                 self._rl_selector = PPOStrategySelector(ppo_config)
 
@@ -450,7 +450,7 @@ class StrategyRouter:
                     "PPO backend requested but ppo_strategy_selector not available, "
                     "falling back to DQN"
                 )
-                from app.services.dqn_strategy_selector import DQNStrategySelector, DQNConfig
+                from app.services.dqn_strategy_selector import DQNConfig, DQNStrategySelector
                 config = DQNConfig(model_save_path=self.config.model_path)
                 self._rl_selector = DQNStrategySelector(config)
 
@@ -503,8 +503,8 @@ class StrategyRouter:
         Maps RL actions (explore/exploit/refine/stabilize) to the
         same StrategyDecision format the orchestrator expects.
         """
+        from app.services.rl_strategy_selector import ACTION_TO_BACKEND, ACTIONS
         from app.services.strategy_selector import StrategyDecision
-        from app.services.rl_strategy_selector import ACTIONS, ACTION_TO_BACKEND
 
         action_name = ACTIONS[action_id]
 

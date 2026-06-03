@@ -6,9 +6,8 @@ All drivers share this common interface so SensorHub can treat them uniformly.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import AsyncIterator, Callable, Optional
-from datetime import datetime, timezone
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 
 from exp_agent.sensing.protocol.sensor_event import SensorEvent
 
@@ -41,8 +40,8 @@ class SensorDriver(ABC):
         self.driver_id = config.driver_id
         self._running = False
         self._connected = False
-        self._last_error: Optional[Exception] = None
-        self._event_callback: Optional[Callable[[SensorEvent], None]] = None
+        self._last_error: Exception | None = None
+        self._event_callback: Callable[[SensorEvent], None] | None = None
 
     @property
     def is_running(self) -> bool:
@@ -115,7 +114,7 @@ class SensorDriver(ABC):
         """Set a callback to be called for each event."""
         self._event_callback = callback
 
-    def get_last_error(self) -> Optional[Exception]:
+    def get_last_error(self) -> Exception | None:
         """Get the last error that occurred."""
         return self._last_error
 

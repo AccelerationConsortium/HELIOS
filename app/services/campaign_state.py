@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from app.core.db import (
@@ -13,7 +12,6 @@ from app.core.db import (
     run_txn,
     utcnow_iso,
 )
-
 
 # ---------------------------------------------------------------------------
 # Campaign-level CRUD

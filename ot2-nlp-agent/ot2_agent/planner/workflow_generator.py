@@ -5,10 +5,14 @@ This module generates WorkflowDraft candidates from an Intent
 using domain knowledge.
 """
 
-from typing import Dict, List, Optional
 
-from ..ir import Intent, UnitOperation, MissingInfo, PlanningContext
-from .domain_knowledge import DomainKnowledge, OERDomainKnowledge, GeneralDomainKnowledge
+from typing import TYPE_CHECKING
+
+from ..ir import Intent, MissingInfo, PlanningContext, UnitOperation
+from .domain_knowledge import DomainKnowledge, GeneralDomainKnowledge, OERDomainKnowledge
+
+if TYPE_CHECKING:
+    from .planner import WorkflowDraft
 
 
 class WorkflowGenerator:
@@ -24,7 +28,7 @@ class WorkflowGenerator:
 
     def __init__(self):
         """Initialize workflow generator."""
-        self._domain_instances: Dict[str, DomainKnowledge] = {}
+        self._domain_instances: dict[str, DomainKnowledge] = {}
 
     def get_domain_knowledge(self, domain: str) -> DomainKnowledge:
         """Get or create domain knowledge instance."""
@@ -40,7 +44,7 @@ class WorkflowGenerator:
         self,
         intent: Intent,
         context: PlanningContext = None
-    ) -> List["WorkflowDraft"]:
+    ) -> list["WorkflowDraft"]:
         """
         Generate candidate workflow drafts.
 
@@ -111,7 +115,7 @@ class WorkflowGenerator:
         self,
         intent: Intent,
         num_workflows: int
-    ) -> List[Dict[str, str]]:
+    ) -> list[dict[str, str]]:
         """Generate names and descriptions for workflows."""
         names = []
 
@@ -147,8 +151,8 @@ class WorkflowGenerator:
     def _calculate_draft_confidence(
         self,
         intent: Intent,
-        uo_list: List[UnitOperation],
-        missing_info: List[MissingInfo]
+        uo_list: list[UnitOperation],
+        missing_info: list[MissingInfo]
     ) -> float:
         """
         Calculate confidence score for a workflow draft.
@@ -175,8 +179,8 @@ class WorkflowGenerator:
 
     def _check_metrics_coverage(
         self,
-        uo_list: List[UnitOperation],
-        target_metrics: List[str]
+        uo_list: list[UnitOperation],
+        target_metrics: list[str]
     ) -> float:
         """
         Check how well the workflow covers target metrics.

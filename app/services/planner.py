@@ -16,9 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from app.services.llm_gateway import LLMError, LLMMessage, LLMProvider, get_llm_provider
+from app.services.llm_gateway import LLMMessage, LLMProvider, get_llm_provider
 from app.services.primitives_registry import get_registry
-
 
 # ---------------------------------------------------------------------------
 # Data classes

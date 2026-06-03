@@ -16,7 +16,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 # ---------------------------------------------------------------------------
 # Entity → canonical view / table mapping
 # ---------------------------------------------------------------------------

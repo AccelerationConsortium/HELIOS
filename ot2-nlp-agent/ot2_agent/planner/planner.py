@@ -6,12 +6,12 @@ It orchestrates intent parsing and workflow generation.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from ..ir import Intent, UnitOperation, MissingInfo, PlanningContext
+from ..ir import Intent, MissingInfo, PlanningContext, UnitOperation
+from .domain_knowledge import DomainKnowledge
 from .intent_parser import IntentParser
 from .workflow_generator import WorkflowGenerator
-from .domain_knowledge import DomainKnowledge, OERDomainKnowledge
 
 
 @dataclass
@@ -24,11 +24,11 @@ class WorkflowDraft:
     name: str
     description: str
     description_zh: str = ""
-    unit_operations: List[UnitOperation] = field(default_factory=list)
-    assumptions: List[str] = field(default_factory=list)
-    missing_info: List[MissingInfo] = field(default_factory=list)
+    unit_operations: list[UnitOperation] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
+    missing_info: list[MissingInfo] = field(default_factory=list)
     confidence: float = 0.0
-    alternatives: List[str] = field(default_factory=list)
+    alternatives: list[str] = field(default_factory=list)
 
     def get_description(self, language: str = "en") -> str:
         """Get description in specified language."""
@@ -36,15 +36,15 @@ class WorkflowDraft:
             return self.description_zh
         return self.description
 
-    def get_required_missing_info(self) -> List[MissingInfo]:
+    def get_required_missing_info(self) -> list[MissingInfo]:
         """Get only required missing info."""
         return [mi for mi in self.missing_info if mi.required]
 
-    def get_optional_missing_info(self) -> List[MissingInfo]:
+    def get_optional_missing_info(self) -> list[MissingInfo]:
         """Get only optional missing info."""
         return [mi for mi in self.missing_info if not mi.required]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "name": self.name,
@@ -58,7 +58,7 @@ class WorkflowDraft:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowDraft":
+    def from_dict(cls, data: dict[str, Any]) -> "WorkflowDraft":
         """Create from dictionary."""
         return cls(
             name=data["name"],
@@ -81,9 +81,9 @@ class ConfirmedWorkflow:
     fills in the missing parameters.
     """
     draft: WorkflowDraft
-    filled_parameters: Dict[str, Any] = field(default_factory=dict)
+    filled_parameters: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "draft": self.draft.to_dict(),
@@ -91,14 +91,14 @@ class ConfirmedWorkflow:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ConfirmedWorkflow":
+    def from_dict(cls, data: dict[str, Any]) -> "ConfirmedWorkflow":
         """Create from dictionary."""
         return cls(
             draft=WorkflowDraft.from_dict(data["draft"]),
             filled_parameters=data.get("filled_parameters", {}),
         )
 
-    def get_filled_unit_operations(self) -> List[UnitOperation]:
+    def get_filled_unit_operations(self) -> list[UnitOperation]:
         """
         Get UOs with parameters filled in.
 
@@ -126,17 +126,17 @@ class PlannerOutput:
     Contains the parsed intent and candidate workflows.
     """
     intent: Intent
-    candidates: List[WorkflowDraft]
+    candidates: list[WorkflowDraft]
     context: PlanningContext = field(default_factory=PlanningContext)
     recommended_idx: int = 0
 
-    def get_recommended(self) -> Optional[WorkflowDraft]:
+    def get_recommended(self) -> WorkflowDraft | None:
         """Get the recommended workflow candidate."""
         if 0 <= self.recommended_idx < len(self.candidates):
             return self.candidates[self.recommended_idx]
         return self.candidates[0] if self.candidates else None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "intent": self.intent.to_dict(),
@@ -171,7 +171,7 @@ class Planner:
     def plan(
         self,
         user_input: str,
-        context: Dict[str, Any] = None
+        context: dict[str, Any] = None
     ) -> PlannerOutput:
         """
         Main planning method.
@@ -202,7 +202,7 @@ class Planner:
             recommended_idx=recommended_idx,
         )
 
-    def _parse_context(self, context: Dict[str, Any] = None) -> PlanningContext:
+    def _parse_context(self, context: dict[str, Any] = None) -> PlanningContext:
         """Parse context dictionary into PlanningContext."""
         if context is None:
             return PlanningContext()

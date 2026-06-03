@@ -26,9 +26,9 @@ Typical usage
            revision = middleware.rollback_saga(saga_id, from_layer, reason, claims)
            # pass revision to InverseDesignAgent
 """
+from app.governance.circuit_breaker import CircuitBreaker
 from app.governance.claim_tracker import ClaimTracker, init_governance_schema
 from app.governance.claim_verifier import ClaimVerifier
-from app.governance.circuit_breaker import CircuitBreaker
 from app.governance.middleware import (
     GovernanceMiddleware,
     start_governance_listener,
@@ -37,9 +37,9 @@ from app.governance.middleware import (
 from app.governance.saga_coordinator import SagaCoordinator
 from app.governance.schemas import (
     BreakCondition,
+    CircuitBreakerState,
     Claim,
     ClaimLineage,
-    CircuitBreakerState,
     GovernanceDecision,
     GovernanceVerdict,
     PolicyViolation,

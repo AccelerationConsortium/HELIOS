@@ -14,8 +14,9 @@ import logging
 import time
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, ClassVar, Generic, TypeVar
+from typing import Any, ClassVar, Generic, TypeVar
 
 from pydantic import BaseModel
 
@@ -24,7 +25,6 @@ from app.agents.pause import (
     PauseHandler,
     PauseRequest,
     PauseResult,
-    RiskAssessment,
     auto_approve_handler,
 )
 

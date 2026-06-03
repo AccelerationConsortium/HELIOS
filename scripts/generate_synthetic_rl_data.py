@@ -92,30 +92,30 @@ def generate_campaign_trace(
         kpi_history.append(round_avg_kpi)
 
         # Campaign context (4 features)
-        f1_round_progress = round_num / max_rounds
-        f2_runs_so_far = n_runs / (max_rounds * runs_per_round)
-        f3_current_kpi = current_kpi / 100.0  # Normalize to [0,1]
-        f4_best_kpi = best_kpi / 100.0
+        round_num / max_rounds
+        n_runs / (max_rounds * runs_per_round)
+        current_kpi / 100.0  # Normalize to [0,1]
+        best_kpi / 100.0
 
         # Epistemic signals (4 features)
         f5_kpi_stddev = random.uniform(2.0, 8.0) / 100.0  # Uncertainty
         f6_model_confidence = max(0.0, 1.0 - f5_kpi_stddev * 5)  # Higher stddev → lower confidence
-        f7_runs_since_improvement = min(1.0, rounds_since_improvement / 3.0)
+        min(1.0, rounds_since_improvement / 3.0)
         f8_search_space_coverage = min(1.0, n_runs / 50.0)
 
         # Aleatoric signals (4 features)
         f9_kpi_variance_recent = random.uniform(1.0, 5.0) / 100.0
         f10_noise_level = f9_kpi_variance_recent * 2.0
-        f11_outlier_rate = random.uniform(0.0, 0.1)
-        f12_repeatability = max(0.0, 1.0 - f10_noise_level * 2)
+        random.uniform(0.0, 0.1)
+        max(0.0, 1.0 - f10_noise_level * 2)
 
         # Saturation signals (2 features)
-        f13_improvement_rate = max(-0.5, min(0.5, kpi_improvement_rate))
+        max(-0.5, min(0.5, kpi_improvement_rate))
         f14_convergence_indicator = 1.0 if rounds_since_improvement >= 3 else 0.0
 
         # Landscape signals (2 features)
         f15_local_gradient = random.uniform(-0.2, 0.3)  # Search space gradient
-        f16_flatness = 1.0 - abs(f15_local_gradient)
+        1.0 - abs(f15_local_gradient)
 
         # Create CampaignSnapshot-compatible dict
         snapshot = {
@@ -303,7 +303,7 @@ def main():
     logger.info(f"  Target reached: {target_reached_count}/{len(campaigns)} ({target_reached_count/len(campaigns)*100:.1f}%)")
 
     # Strategy profile breakdown
-    logger.info(f"\n  Strategy profiles:")
+    logger.info("\n  Strategy profiles:")
     for profile in strategy_profiles:
         profile_campaigns = [c for c in campaigns if c["strategy_profile"] == profile]
         avg_kpi = sum(c["final_kpi"] for c in profile_campaigns) / len(profile_campaigns)

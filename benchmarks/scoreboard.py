@@ -9,7 +9,6 @@ Metrics:
 """
 from __future__ import annotations
 
-import math
 import statistics
 from dataclasses import dataclass, field
 from typing import Any
@@ -179,7 +178,7 @@ class Scoreboard:
             return 1.0  # No KPIs = perfectly stable (vacuously)
 
         cvs: list[float] = []
-        for name, values in self._kpi_series.items():
+        for _name, values in self._kpi_series.items():
             if len(values) < 2:
                 continue
             mean = statistics.mean(values)

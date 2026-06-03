@@ -12,14 +12,14 @@ Design principles:
 - Immutable after creation (frozen dataclass)
 """
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Optional
 import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
 
 
-class QualityStatus(str, Enum):
+class QualityStatus(StrEnum):
     """Quality status of a sensor reading."""
 
     OK = "OK"                       # Normal reading
@@ -31,7 +31,7 @@ class QualityStatus(str, Enum):
     UNKNOWN = "UNKNOWN"             # Cannot determine quality
 
 
-class SensorType(str, Enum):
+class SensorType(StrEnum):
     """Types of sensors supported by the sensing layer (P0/P1/P2 priority)."""
 
     # P0 - Critical safety sensors (must have)
@@ -75,9 +75,9 @@ class SensorMeta:
 
     location: str                              # Physical location (e.g., "SDL1_hood_A")
     source: str                                # Protocol source: "modbus|mqtt|serial|http|mock"
-    raw: Optional[str] = None                  # Raw value for debugging/audit
-    driver_id: Optional[str] = None            # Which driver produced this
-    sequence_num: Optional[int] = None         # For ordering/dedup
+    raw: str | None = None                  # Raw value for debugging/audit
+    driver_id: str | None = None            # Which driver produced this
+    sequence_num: int | None = None         # For ordering/dedup
 
     @classmethod
     def mock(cls, location: str = "mock_location") -> "SensorMeta":
@@ -109,7 +109,7 @@ class SensorEvent:
     event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
     # Timestamp in UTC ISO-8601 format
-    ts: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    ts: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     # Sensor identification
     sensor_id: str = ""                        # Unique sensor identifier
@@ -126,7 +126,7 @@ class SensorEvent:
     def __post_init__(self):
         """Ensure ts is timezone-aware."""
         if self.ts.tzinfo is None:
-            object.__setattr__(self, 'ts', self.ts.replace(tzinfo=timezone.utc))
+            object.__setattr__(self, 'ts', self.ts.replace(tzinfo=UTC))
 
     @property
     def is_ok(self) -> bool:
@@ -173,7 +173,7 @@ class SensorEvent:
         """Create from dictionary."""
         return cls(
             event_id=data.get("event_id", str(uuid.uuid4())),
-            ts=datetime.fromisoformat(data["ts"]) if isinstance(data.get("ts"), str) else data.get("ts", datetime.now(timezone.utc)),
+            ts=datetime.fromisoformat(data["ts"]) if isinstance(data.get("ts"), str) else data.get("ts", datetime.now(UTC)),
             sensor_id=data.get("sensor_id", ""),
             sensor_type=SensorType(data.get("type", "generic")),
             value=float(data.get("value", 0.0)),

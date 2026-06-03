@@ -15,7 +15,6 @@ from __future__ import annotations
 import base64
 import logging
 import tempfile
-from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -120,7 +119,7 @@ class BlueprintReaderAgent(BaseAgent[BlueprintReaderInput, BlueprintReaderOutput
         if input_data.phase == "extract":
             if not input_data.pdf_path and not input_data.pdf_base64:
                 errors.append("Either pdf_path or pdf_base64 is required")
-            from app.services.deck_layout import valid_slot, RobotType
+            from app.services.deck_layout import RobotType, valid_slot
             rt = RobotType(getattr(input_data, 'robot_type', 'ot2') or 'ot2')
             if not valid_slot(input_data.slot_number, rt):
                 errors.append(f"slot_number {input_data.slot_number} is invalid for {rt.value}")

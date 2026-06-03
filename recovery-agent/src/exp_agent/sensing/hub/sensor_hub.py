@@ -14,16 +14,17 @@ Features:
 """
 
 import asyncio
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Callable, Optional, Any
 from collections import defaultdict
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
 
 from exp_agent.sensing.drivers.base import SensorDriver
-from exp_agent.sensing.protocol.sensor_event import SensorEvent
-from exp_agent.sensing.protocol.health_event import SensorHealthEvent, HealthStatus
-from exp_agent.sensing.protocol.snapshot import SensorSnapshot, SystemSnapshot
 from exp_agent.sensing.hub.ring_buffer import RingBuffer
+from exp_agent.sensing.protocol.health_event import SensorHealthEvent
+from exp_agent.sensing.protocol.sensor_event import SensorEvent
+from exp_agent.sensing.protocol.snapshot import SensorSnapshot, SystemSnapshot
 
 
 @dataclass
@@ -59,7 +60,7 @@ class SensorHub:
         await hub.stop()
     """
 
-    def __init__(self, config: Optional[HubConfig] = None):
+    def __init__(self, config: HubConfig | None = None):
         self.config = config or HubConfig()
         self._drivers: dict[str, SensorDriver] = {}
         self._buffer: RingBuffer[SensorEvent] = RingBuffer(
@@ -113,14 +114,14 @@ class SensorHub:
             return
 
         self._running = True
-        self._stats["start_time"] = datetime.now(timezone.utc)
+        self._stats["start_time"] = datetime.now(UTC)
 
         # Start all drivers
         for driver in self._drivers.values():
             await driver.start()
 
         # Start collection tasks
-        for driver_id, driver in self._drivers.items():
+        for _driver_id, driver in self._drivers.items():
             task = asyncio.create_task(self._collect_from_driver(driver))
             self._tasks.append(task)
 
@@ -199,11 +200,11 @@ class SensorHub:
             except Exception as e:
                 print(f"Error in event callback: {e}")
 
-    def get_latest(self, sensor_id: str) -> Optional[SensorEvent]:
+    def get_latest(self, sensor_id: str) -> SensorEvent | None:
         """Get the latest event for a sensor."""
         return self._latest_events.get(sensor_id)
 
-    def get_latest_value(self, sensor_id: str) -> Optional[float]:
+    def get_latest_value(self, sensor_id: str) -> float | None:
         """Get the latest value for a sensor."""
         event = self._latest_events.get(sensor_id)
         return event.value if event else None
@@ -214,9 +215,9 @@ class SensorHub:
 
     def get_history(
         self,
-        sensor_id: Optional[str] = None,
-        since: Optional[datetime] = None,
-        limit: Optional[int] = None,
+        sensor_id: str | None = None,
+        since: datetime | None = None,
+        limit: int | None = None,
     ) -> list[SensorEvent]:
         """Get historical events."""
         if since:
@@ -232,15 +233,15 @@ class SensorHub:
 
         return events
 
-    def get_sensor_snapshot(self, sensor_id: str) -> Optional[SensorSnapshot]:
+    def get_sensor_snapshot(self, sensor_id: str) -> SensorSnapshot | None:
         """Get snapshot for a specific sensor."""
         return self._sensor_snapshots.get(sensor_id)
 
     def get_snapshot(self) -> SystemSnapshot:
         """Get a system-wide snapshot of all sensors."""
-        snapshot = SystemSnapshot(ts=datetime.now(timezone.utc))
+        snapshot = SystemSnapshot(ts=datetime.now(UTC))
 
-        for sensor_id, sensor_snapshot in self._sensor_snapshots.items():
+        for _sensor_id, sensor_snapshot in self._sensor_snapshots.items():
             snapshot.add_sensor(sensor_snapshot)
 
         return snapshot
@@ -265,15 +266,15 @@ class SensorHub:
 
     # Convenience methods for common sensor queries
 
-    def get_temperature(self, sensor_id: str) -> Optional[float]:
+    def get_temperature(self, sensor_id: str) -> float | None:
         """Get current temperature reading."""
         return self.get_latest_value(sensor_id)
 
-    def get_airflow(self, sensor_id: str) -> Optional[float]:
+    def get_airflow(self, sensor_id: str) -> float | None:
         """Get current airflow reading."""
         return self.get_latest_value(sensor_id)
 
-    def get_pressure(self, sensor_id: str) -> Optional[float]:
+    def get_pressure(self, sensor_id: str) -> float | None:
         """Get current pressure reading."""
         return self.get_latest_value(sensor_id)
 

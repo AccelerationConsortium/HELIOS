@@ -4,7 +4,7 @@ OT-2 Hardware Adapter
 Translates generic liquid handling operations to Opentrons OT-2 specific commands.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class OT2Adapter:
@@ -63,7 +63,7 @@ class OT2Adapter:
         """Resolve pipette alias to OT-2 pipette name."""
         return self.PIPETTE_ALIASES.get(alias.lower(), alias)
 
-    def translate_action(self, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def translate_action(self, action: str, params: dict[str, Any]) -> dict[str, Any]:
         """
         Translate generic action to OT-2 specific command.
 
@@ -99,7 +99,7 @@ class OT2Adapter:
             "params": self._translate_params(ot2_action, params),
         }
 
-    def _translate_params(self, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _translate_params(self, action: str, params: dict[str, Any]) -> dict[str, Any]:
         """Translate generic params to OT-2 specific params."""
         result = params.copy()
 
@@ -116,7 +116,7 @@ class OT2Adapter:
     def generate_python_code(
         self,
         action: str,
-        params: Dict[str, Any],
+        params: dict[str, Any],
         pipette_var: str = "pipette",
         labware_var: str = "plate"
     ) -> str:
@@ -150,7 +150,7 @@ class OT2Adapter:
 
         return code_templates.get(action, f"# Unknown action: {action}")
 
-    def get_capabilities(self) -> Dict[str, Any]:
+    def get_capabilities(self) -> dict[str, Any]:
         """Get OT-2 adapter capabilities."""
         return {
             "name": self.name,

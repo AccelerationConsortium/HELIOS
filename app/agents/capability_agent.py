@@ -19,7 +19,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, Field
 
-from app.agents.base import AgentResult, BaseAgent, DecisionNode
+from app.agents.base import BaseAgent, DecisionNode
 from app.core.config import get_settings
 from app.services.primitives_registry import PrimitivesRegistry, get_registry
 

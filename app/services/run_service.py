@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-import json
 import sqlite3
-from typing import Any
 import uuid
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from app.core.constants import (
     RUN_STATUS_AWAITING_APPROVAL,
@@ -389,7 +388,7 @@ def _run_row(conn: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
 
 
 def trigger_due_campaigns(actor: str = "campaign-loop") -> list[str]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     now_iso = now.isoformat()
 
     def _txn(conn: sqlite3.Connection) -> list[str]:

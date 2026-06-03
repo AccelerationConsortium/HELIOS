@@ -44,7 +44,6 @@ from app.governance.schemas import (
     Claim,
     RevisionRequest,
     SagaStep,
-    SagaStepStatus,
 )
 
 logger = logging.getLogger(__name__)

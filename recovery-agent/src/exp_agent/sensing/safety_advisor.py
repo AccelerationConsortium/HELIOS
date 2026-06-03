@@ -13,17 +13,16 @@ Key principle: SafetyAdvisor is proposal-only. It provides:
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Protocol, Optional, Any, runtime_checkable
+from datetime import UTC, datetime
+from typing import Any, Protocol, runtime_checkable
 
-from exp_agent.sensing.safety_state import (
-    SafetyStateUpdate,
-    SafetyState,
-    InterlockReason,
-    EvidenceChain,
-)
-from exp_agent.sensing.protocol.snapshot import SystemSnapshot
 from exp_agent.core.safety_types import SafetyPacket
+from exp_agent.sensing.protocol.snapshot import SystemSnapshot
+from exp_agent.sensing.safety_state import (
+    InterlockReason,
+    SafetyState,
+    SafetyStateUpdate,
+)
 
 
 @dataclass
@@ -34,16 +33,16 @@ class AdvisorQuery:
     state_update: SafetyStateUpdate
 
     # Snapshot at time of incident
-    snapshot: Optional[SystemSnapshot] = None
+    snapshot: SystemSnapshot | None = None
 
     # Chemical context from pre-flight assessment
-    safety_packet: Optional[SafetyPacket] = None
+    safety_packet: SafetyPacket | None = None
 
     # Incident description
     incident_summary: str = ""
 
     # Specific question (optional)
-    question: Optional[str] = None
+    question: str | None = None
 
     def to_prompt(self) -> str:
         """Generate a prompt for the safety advisor."""
@@ -105,16 +104,16 @@ class AdvisorResponse:
     risk_level: str = "unknown"  # low, medium, high, critical
 
     # Chemical-specific notes
-    chemical_notes: Optional[str] = None
+    chemical_notes: str | None = None
 
     # Suggested monitoring (what to watch)
     monitoring_suggestions: list[str] = field(default_factory=list)
 
     # Timestamp
-    ts: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    ts: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     # Source model (for audit)
-    model_source: Optional[str] = None
+    model_source: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -208,7 +207,7 @@ class SafetyAdvisorBridge:
     def __init__(
         self,
         safety_agent=None,  # SafetyAgentProtocol from safety/agent.py
-        fallback: Optional[SafetyAdvisorProtocol] = None,
+        fallback: SafetyAdvisorProtocol | None = None,
     ):
         self._safety_agent = safety_agent
         self._fallback = fallback or NullSafetyAdvisor()

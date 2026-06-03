@@ -9,7 +9,6 @@ Layer: L1 (compilation)
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -251,7 +250,7 @@ class NLPCodeAgent(BaseAgent[NLPCodeInput, NLPCodeOutput]):
             modified_steps=input_data.modified_steps,
         )
 
-        status = respond_to_confirmation(response)
+        respond_to_confirmation(response)
 
         if not input_data.approved:
             return NLPCodeOutput(

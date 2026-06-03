@@ -6,10 +6,9 @@ A sensor is considered stuck if:
 - And the value is not a valid constant (like a binary sensor in steady state)
 """
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional
 import math
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -35,10 +34,10 @@ class StuckState:
     """Tracked state for stuck detection."""
 
     sensor_id: str
-    last_value: Optional[float] = None
-    value_since: Optional[datetime] = None
+    last_value: float | None = None
+    value_since: datetime | None = None
     is_stuck: bool = False
-    stuck_since: Optional[datetime] = None
+    stuck_since: datetime | None = None
     stuck_count: int = 0
 
 
@@ -55,7 +54,7 @@ class StuckDetector:
         is_stuck = detector.check("temp_1")
     """
 
-    def __init__(self, config: Optional[StuckConfig] = None):
+    def __init__(self, config: StuckConfig | None = None):
         self.config = config or StuckConfig()
         self._sensors: dict[str, StuckState] = {}
 
@@ -67,7 +66,7 @@ class StuckDetector:
         self,
         sensor_id: str,
         value: float,
-        timestamp: Optional[datetime] = None,
+        timestamp: datetime | None = None,
     ) -> bool:
         """
         Update with a new value and return whether value changed.
@@ -78,7 +77,7 @@ class StuckDetector:
             self._sensors[sensor_id] = StuckState(sensor_id=sensor_id)
 
         state = self._sensors[sensor_id]
-        now = timestamp or datetime.now(timezone.utc)
+        now = timestamp or datetime.now(UTC)
 
         # Check if value changed
         value_changed = False
@@ -100,7 +99,7 @@ class StuckDetector:
     def check(
         self,
         sensor_id: str,
-        now: Optional[datetime] = None,
+        now: datetime | None = None,
     ) -> bool:
         """
         Check if a sensor is stuck.
@@ -115,7 +114,7 @@ class StuckDetector:
             return False  # Unknown sensor = not stuck (no data)
 
         state = self._sensors[sensor_id]
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
 
         if state.value_since is None:
             return False  # No data yet
@@ -136,31 +135,31 @@ class StuckDetector:
 
         return is_stuck
 
-    def check_all(self, now: Optional[datetime] = None) -> dict[str, bool]:
+    def check_all(self, now: datetime | None = None) -> dict[str, bool]:
         """Check stuck status for all sensors."""
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         return {
             sensor_id: self.check(sensor_id, now)
             for sensor_id in self._sensors
         }
 
-    def get_stuck_sensors(self, now: Optional[datetime] = None) -> list[str]:
+    def get_stuck_sensors(self, now: datetime | None = None) -> list[str]:
         """Get list of stuck sensor IDs."""
         statuses = self.check_all(now)
         return [sensor_id for sensor_id, is_stuck in statuses.items() if is_stuck]
 
-    def get_state(self, sensor_id: str) -> Optional[StuckState]:
+    def get_state(self, sensor_id: str) -> StuckState | None:
         """Get the stuck state for a sensor."""
         return self._sensors.get(sensor_id)
 
     def get_stuck_duration_ms(
         self,
         sensor_id: str,
-        now: Optional[datetime] = None,
-    ) -> Optional[float]:
+        now: datetime | None = None,
+    ) -> float | None:
         """Get how long the sensor has been at the same value."""
         state = self._sensors.get(sensor_id)
         if state is None or state.value_since is None:
             return None
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         return (now - state.value_since).total_seconds() * 1000

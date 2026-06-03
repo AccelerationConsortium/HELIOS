@@ -11,25 +11,23 @@ Key Integration Points (from plan.md 0205):
 4. Sensor stale (> 2x expected period) → degrade: block high-risk steps
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional, Callable, Any
-from enum import Enum
+from enum import StrEnum
+from typing import Any
 
-from exp_agent.sensing.hub.sensor_hub import SensorHub, HubConfig
-from exp_agent.sensing.health.health_monitor import (
-    HealthMonitor,
-    HealthMonitorConfig,
-    SensorHealthConfig,
-)
 from exp_agent.sensing.api.sensing_api import SensingAPI
 from exp_agent.sensing.drivers.mock_driver import MockSensorDriver, create_lab_sensor_set
+from exp_agent.sensing.health.health_monitor import (
+    HealthMonitor,
+    SensorHealthConfig,
+)
+from exp_agent.sensing.hub.sensor_hub import SensorHub
 from exp_agent.sensing.protocol.sensor_event import SensorEvent, SensorType
-from exp_agent.sensing.protocol.health_event import HealthStatus
 from exp_agent.sensing.protocol.snapshot import SystemSnapshot
 
 
-class SafetyVetoReason(str, Enum):
+class SafetyVetoReason(StrEnum):
     """Reasons for safety veto based on sensor data."""
 
     HOOD_AIRFLOW_LOW = "hood_airflow_low"
@@ -47,8 +45,8 @@ class SafetyVeto:
 
     reason: SafetyVetoReason
     sensor_id: str
-    current_value: Optional[float]
-    threshold: Optional[float]
+    current_value: float | None
+    threshold: float | None
     message: str
     severity: str = "critical"  # critical, warning
 
@@ -112,14 +110,14 @@ class SensingIntegration:
 
     def __init__(
         self,
-        config: Optional[SensingInterlockConfig] = None,
-        hub: Optional[SensorHub] = None,
-        monitor: Optional[HealthMonitor] = None,
+        config: SensingInterlockConfig | None = None,
+        hub: SensorHub | None = None,
+        monitor: HealthMonitor | None = None,
     ):
         self.config = config or SensingInterlockConfig()
         self._hub = hub
         self._monitor = monitor
-        self._api: Optional[SensingAPI] = None
+        self._api: SensingAPI | None = None
         self._drivers: list = []
         self._running = False
 
@@ -394,7 +392,7 @@ class SensingIntegration:
 
         return telemetry
 
-    def get_snapshot(self) -> Optional[SystemSnapshot]:
+    def get_snapshot(self) -> SystemSnapshot | None:
         """Get the current system snapshot."""
         if self._hub:
             return self._hub.get_snapshot()

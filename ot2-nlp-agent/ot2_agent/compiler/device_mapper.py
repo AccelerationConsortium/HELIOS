@@ -6,17 +6,17 @@ device commands.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Any
 
-from ..ir import Primitive, ActionType, DeviceAction
+from ..ir import ActionType, DeviceAction, Primitive
 from ..operations import Operation, OperationType
 
 
 @dataclass
 class DeviceCapability:
     """Describes what a device can do."""
-    action_types: List[ActionType]
-    constraints: Dict[str, Any] = field(default_factory=dict)
+    action_types: list[ActionType]
+    constraints: dict[str, Any] = field(default_factory=dict)
 
 
 class DeviceRegistry:
@@ -26,7 +26,7 @@ class DeviceRegistry:
 
     def __init__(self):
         """Initialize with default devices."""
-        self.devices: Dict[str, Dict[str, Any]] = {}
+        self.devices: dict[str, dict[str, Any]] = {}
         self._register_default_devices()
 
     def _register_default_devices(self):
@@ -116,7 +116,7 @@ class DeviceRegistry:
             "capabilities": capabilities,
         }
 
-    def find_device(self, action_type: ActionType, device_type: str = None) -> Optional[str]:
+    def find_device(self, action_type: ActionType, device_type: str = None) -> str | None:
         """Find a device that can perform the given action."""
         for device_id, device_info in self.devices.items():
             caps = device_info["capabilities"]
@@ -125,7 +125,7 @@ class DeviceRegistry:
                     return device_id
         return None
 
-    def get_device(self, device_id: str) -> Optional[Dict]:
+    def get_device(self, device_id: str) -> dict | None:
         """Get device info by ID."""
         return self.devices.get(device_id)
 
@@ -147,7 +147,7 @@ class DeviceMapper:
         """
         self.registry = registry or DeviceRegistry()
 
-    def map(self, primitives: List[Primitive]) -> List[DeviceAction]:
+    def map(self, primitives: list[Primitive]) -> list[DeviceAction]:
         """
         Map primitives to device actions.
 
@@ -166,7 +166,7 @@ class DeviceMapper:
 
         return actions
 
-    def _map_primitive(self, primitive: Primitive) -> Optional[DeviceAction]:
+    def _map_primitive(self, primitive: Primitive) -> DeviceAction | None:
         """Map a single primitive to a device action."""
         # Find appropriate device
         device_id = self.registry.find_device(
@@ -366,7 +366,7 @@ class DeviceMapper:
             requires_confirmation=True,
         )
 
-    def to_operations(self, device_actions: List[DeviceAction]) -> List[Operation]:
+    def to_operations(self, device_actions: list[DeviceAction]) -> list[Operation]:
         """
         Convert DeviceActions to existing Operation format for compatibility.
 
@@ -388,7 +388,7 @@ class DeviceMapper:
 
         return operations
 
-    def _action_to_operation_type(self, action: DeviceAction) -> Optional[OperationType]:
+    def _action_to_operation_type(self, action: DeviceAction) -> OperationType | None:
         """Map DeviceAction to OperationType."""
         command_map = {
             "transfer": OperationType.TRANSFER,

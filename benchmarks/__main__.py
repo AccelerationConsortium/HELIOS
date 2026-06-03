@@ -53,9 +53,9 @@ def main() -> None:
     )
 
     # Import scenarios (triggers registration)
-    from benchmarks.scenarios import get_scenarios
-    from benchmarks.runner import BenchmarkRunner
     from benchmarks.reporter import Reporter
+    from benchmarks.runner import BenchmarkRunner
+    from benchmarks.scenarios import get_scenarios
 
     # Select scenarios
     category = args.category if args.category != "all" else None

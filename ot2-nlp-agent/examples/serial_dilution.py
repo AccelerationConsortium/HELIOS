@@ -5,6 +5,7 @@ Demonstrates creating a serial dilution protocol using natural language.
 """
 
 import sys
+
 sys.path.insert(0, '..')
 
 from ot2_agent import OT2Agent

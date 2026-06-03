@@ -9,13 +9,11 @@ Responsibilities:
 """
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.services.planner import PlanResult
 from app.services.primitives_registry import PrimitiveParam, PrimitiveSpec, get_registry
-
 
 # ---------------------------------------------------------------------------
 # Data classes

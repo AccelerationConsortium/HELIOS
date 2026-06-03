@@ -25,7 +25,8 @@ import hashlib
 import json
 import logging
 from collections import defaultdict
-from typing import Any, Callable, ClassVar, TypeVar
+from collections.abc import Callable
+from typing import Any, ClassVar, TypeVar
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -204,7 +205,7 @@ class MigrationRegistry:
         parts1 = [int(x) for x in v1.split(".")]
         parts2 = [int(x) for x in v2.split(".")]
 
-        for p1, p2 in zip(parts1, parts2):
+        for p1, p2 in zip(parts1, parts2, strict=False):
             if p1 < p2:
                 return -1
             if p1 > p2:

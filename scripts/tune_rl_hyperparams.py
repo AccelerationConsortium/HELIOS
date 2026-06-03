@@ -7,13 +7,12 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
 import logging
 import sys
 from pathlib import Path
 from typing import Any
-
-import itertools
 
 # Add project root to path
 project_root = Path(__file__).resolve().parent.parent
@@ -22,10 +21,7 @@ sys.path.insert(0, str(project_root))
 from app.services.rl_data_collector import load_training_dataset
 from app.services.rl_strategy_selector import (
     RLConfig,
-    RLState,
-    RLStrategySelector,
 )
-from app.services.strategy_selector import compute_diagnostics
 
 logging.basicConfig(
     level=logging.INFO,
@@ -119,7 +115,7 @@ def grid_search(
     results = []
 
     for i, combo in enumerate(combinations):
-        params = dict(zip(param_names, combo))
+        params = dict(zip(param_names, combo, strict=False))
         logger.info(f"\n[{i+1}/{len(combinations)}] Testing: {params}")
 
         # Create config
@@ -271,10 +267,10 @@ def main():
         logger.info(f"Convergence Rate: {best_result['metrics']['convergence_rate']:.1%}")
         logger.info(f"Q-table size: {best_result['metrics']['q_table_size']}")
 
-        logger.info(f"\nNext step: Train final model with best params:")
-        logger.info(f"  python3 scripts/train_rl_selector.py \\")
+        logger.info("\nNext step: Train final model with best params:")
+        logger.info("  python3 scripts/train_rl_selector.py \\")
         logger.info(f"    --data {args.data} \\")
-        logger.info(f"    --output models/rl_selector_tuned.pkl \\")
+        logger.info("    --output models/rl_selector_tuned.pkl \\")
         logger.info(f"    --learning-rate {best_result['params']['learning_rate']} \\")
         logger.info(f"    --gamma {best_result['params']['gamma']} \\")
         logger.info(f"    --epsilon {best_result['params']['epsilon']}")

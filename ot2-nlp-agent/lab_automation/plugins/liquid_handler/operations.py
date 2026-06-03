@@ -5,7 +5,7 @@ Defines all operations supported by liquid handling robots.
 """
 
 from enum import Enum
-from typing import Dict, List
+
 from ...core.plugin_base import OperationDef
 
 
@@ -29,7 +29,7 @@ class LiquidOperation(Enum):
 
 
 # Operation definitions with multilingual keywords
-LIQUID_OPERATIONS: Dict[LiquidOperation, OperationDef] = {
+LIQUID_OPERATIONS: dict[LiquidOperation, OperationDef] = {
     LiquidOperation.ASPIRATE: OperationDef(
         name="aspirate",
         action="liquid_handler.aspirate",
@@ -252,6 +252,6 @@ def get_operation(op_type: LiquidOperation) -> OperationDef:
     return LIQUID_OPERATIONS[op_type]
 
 
-def get_all_operations() -> Dict[LiquidOperation, OperationDef]:
+def get_all_operations() -> dict[LiquidOperation, OperationDef]:
     """Get all operation definitions."""
     return LIQUID_OPERATIONS.copy()

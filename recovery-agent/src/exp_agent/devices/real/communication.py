@@ -5,12 +5,12 @@ This module provides concrete implementations for actual laboratory equipment,
 replacing the simulated versions with real hardware communication.
 """
 
-from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any
 import time
+from abc import ABC, abstractmethod
+from typing import Any
 
+from ...core.types import DeviceState, HardwareError
 from ..base import Device
-from ...core.types import DeviceState, Action, HardwareError
 
 
 class CommunicationInterface(ABC):
@@ -28,13 +28,13 @@ class CommunicationInterface(ABC):
 
     @abstractmethod
     def send_command(
-        self, command: str, params: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        self, command: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Send command to device and get response."""
         pass
 
     @abstractmethod
-    def read_data(self) -> Dict[str, Any]:
+    def read_data(self) -> dict[str, Any]:
         """Read current device state/data."""
         pass
 
@@ -62,28 +62,28 @@ class SerialCommunication(CommunicationInterface):
                 port=self.port, baudrate=self.baudrate, timeout=self.timeout
             )
             return True
-        except ImportError:
+        except ImportError as e:
             raise HardwareError(
                 device="serial_interface",
                 type="missing_dependency",
                 severity="high",
                 message="pyserial not installed",
-            )
+            ) from e
         except Exception as e:
             raise HardwareError(
                 device="serial_interface",
                 type="connection_failed",
                 severity="high",
                 message=f"Serial connection failed: {e}",
-            )
+            ) from e
 
     def disconnect(self):
         if self._serial:
             self._serial.close()
 
     def send_command(
-        self, command: str, params: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        self, command: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         if not self._serial:
             raise HardwareError(
                 device="serial_interface",
@@ -123,9 +123,9 @@ class SerialCommunication(CommunicationInterface):
                 type="communication_error",
                 severity="high",
                 message=f"Serial communication error: {e}",
-            )
+            ) from e
 
-    def read_data(self) -> Dict[str, Any]:
+    def read_data(self) -> dict[str, Any]:
         return self.send_command("READ")
 
     @property
@@ -156,15 +156,15 @@ class NetworkCommunication(CommunicationInterface):
                 type="connection_failed",
                 severity="high",
                 message=f"Network connection failed: {e}",
-            )
+            ) from e
 
     def disconnect(self):
         if self._socket:
             self._socket.close()
 
     def send_command(
-        self, command: str, params: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        self, command: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         if not self._socket:
             raise HardwareError(
                 device="network_interface",
@@ -197,22 +197,22 @@ class NetworkCommunication(CommunicationInterface):
 
             return response
 
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             raise HardwareError(
                 device="network_interface",
                 type="protocol_error",
                 severity="high",
                 message="Invalid JSON response from device",
-            )
+            ) from e
         except Exception as e:
             raise HardwareError(
                 device="network_interface",
                 type="communication_error",
                 severity="high",
                 message=f"Network communication error: {e}",
-            )
+            ) from e
 
-    def read_data(self) -> Dict[str, Any]:
+    def read_data(self) -> dict[str, Any]:
         return self.send_command("read_state")
 
     @property
@@ -280,9 +280,9 @@ class RealDevice(Device):
                 type="read_error",
                 severity="high",
                 message=f"Failed to read device state: {e}",
-            )
+            ) from e
 
     @abstractmethod
-    def _parse_device_state(self, raw_data: Dict[str, Any]) -> DeviceState:
+    def _parse_device_state(self, raw_data: dict[str, Any]) -> DeviceState:
         """Parse raw device data into DeviceState."""
         pass

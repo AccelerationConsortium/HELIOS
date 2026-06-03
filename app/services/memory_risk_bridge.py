@@ -14,11 +14,10 @@ All reads are advisory — wrapped in try/except, never block.
 from __future__ import annotations
 
 import logging
-import math
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.core.db import connection, parse_json
+from app.core.db import connection
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +194,7 @@ def assess_workflow_risk(
     # Weighted average risk (weight by 1/success_rate so riskier primitives dominate)
     if profiles:
         weights = [max(0.1, p.risk_score) for p in profiles]
-        overall = sum(p.risk_score * w for p, w in zip(profiles, weights)) / sum(weights)
+        overall = sum(p.risk_score * w for p, w in zip(profiles, weights, strict=False)) / sum(weights)
     else:
         overall = 0.0
 

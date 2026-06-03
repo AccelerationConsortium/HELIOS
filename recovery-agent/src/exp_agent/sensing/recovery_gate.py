@@ -15,23 +15,21 @@ This is the "gold rule" that prevents accidents.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Optional, Any, Set
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
 
-from exp_agent.sensing.safety_state import (
-    SafetyStateMachine,
-    SafetyState,
-    SafetyStateUpdate,
-    InterlockClass,
-    RecommendedAction,
-)
-from exp_agent.sensing.protocol.snapshot import SystemSnapshot, SensorSnapshot
-from exp_agent.sensing.protocol.sensor_event import SensorType
 from exp_agent.sensing.protocol.health_event import HealthStatus
+from exp_agent.sensing.protocol.sensor_event import SensorType
+from exp_agent.sensing.protocol.snapshot import SystemSnapshot
+from exp_agent.sensing.safety_state import (
+    SafetyState,
+    SafetyStateMachine,
+    SafetyStateUpdate,
+)
 
 
-class RecoveryAction(str, Enum):
+class RecoveryAction(StrEnum):
     """Recovery actions that RecoveryAgent might propose."""
 
     # Safe actions (always allowed)
@@ -59,7 +57,7 @@ class RecoveryAction(str, Enum):
     QUENCH = "quench"
 
 
-class ActionRiskLevel(str, Enum):
+class ActionRiskLevel(StrEnum):
     """Risk classification for recovery actions."""
 
     ALWAYS_SAFE = "always_safe"      # Always allowed
@@ -165,7 +163,7 @@ class RecoveryGate:
 
     def __init__(
         self,
-        state_machine: Optional[SafetyStateMachine] = None,
+        state_machine: SafetyStateMachine | None = None,
         max_sensor_age_seconds: float = 10.0,
     ):
         self._state_machine = state_machine
@@ -175,7 +173,7 @@ class RecoveryGate:
         self,
         action: RecoveryAction,
         snapshot: SystemSnapshot,
-        current_state: Optional[SafetyStateUpdate] = None,
+        current_state: SafetyStateUpdate | None = None,
     ) -> GateDecision:
         """
         Check if a recovery action is allowed.
@@ -275,7 +273,7 @@ class RecoveryGate:
     ) -> list[str]:
         """Check sensor requirements for high-risk actions."""
         issues = []
-        now = datetime.now(timezone.utc)
+        datetime.now(UTC)
 
         requirements = self.HIGH_RISK_REQUIREMENTS.get(action, [])
 
@@ -313,7 +311,7 @@ class RecoveryGate:
     def get_allowed_actions(
         self,
         snapshot: SystemSnapshot,
-        current_state: Optional[SafetyStateUpdate] = None,
+        current_state: SafetyStateUpdate | None = None,
     ) -> list[RecoveryAction]:
         """
         Get list of all currently allowed recovery actions.
@@ -331,7 +329,7 @@ class RecoveryGate:
         self,
         proposed_actions: list[RecoveryAction],
         snapshot: SystemSnapshot,
-        current_state: Optional[SafetyStateUpdate] = None,
+        current_state: SafetyStateUpdate | None = None,
     ) -> RecoveryAction:
         """
         From a list of proposed actions, return the safest allowed one.
@@ -349,7 +347,7 @@ class RecoveryGate:
 
 # Convenience function for RecoveryAgent integration
 def create_sensor_aware_recovery_check(
-    state_machine: Optional[SafetyStateMachine] = None,
+    state_machine: SafetyStateMachine | None = None,
 ) -> RecoveryGate:
     """
     Create a RecoveryGate for sensor-aware recovery decisions.

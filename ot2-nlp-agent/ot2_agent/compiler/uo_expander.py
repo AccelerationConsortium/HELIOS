@@ -5,9 +5,8 @@ This module converts high-level UOs into sequences of
 device-agnostic primitive actions.
 """
 
-from typing import Dict, List, Any
 
-from ..ir import UnitOperation, UOType, Primitive, ActionType
+from ..ir import ActionType, Primitive, UnitOperation, UOType
 
 
 class UOExpander:
@@ -35,7 +34,7 @@ class UOExpander:
             UOType.WAIT: self._expand_wait,
         }
 
-    def expand(self, unit_operations: List[UnitOperation]) -> List[Primitive]:
+    def expand(self, unit_operations: list[UnitOperation]) -> list[Primitive]:
         """
         Expand a list of UOs into primitives.
 
@@ -57,7 +56,7 @@ class UOExpander:
 
         return primitives
 
-    def _expand_electrode_prep(self, uo: UnitOperation) -> List[Primitive]:
+    def _expand_electrode_prep(self, uo: UnitOperation) -> list[Primitive]:
         """Expand electrode preparation UO."""
         primitives = []
         params = uo.parameters
@@ -121,7 +120,7 @@ class UOExpander:
 
         return primitives
 
-    def _expand_electrolyte_prep(self, uo: UnitOperation) -> List[Primitive]:
+    def _expand_electrolyte_prep(self, uo: UnitOperation) -> list[Primitive]:
         """Expand electrolyte preparation UO."""
         primitives = []
         params = uo.parameters
@@ -170,7 +169,7 @@ class UOExpander:
 
         return primitives
 
-    def _expand_cell_assembly(self, uo: UnitOperation) -> List[Primitive]:
+    def _expand_cell_assembly(self, uo: UnitOperation) -> list[Primitive]:
         """Expand cell assembly UO."""
         primitives = []
         params = uo.parameters
@@ -212,7 +211,7 @@ class UOExpander:
 
         return primitives
 
-    def _expand_calibration(self, uo: UnitOperation) -> List[Primitive]:
+    def _expand_calibration(self, uo: UnitOperation) -> list[Primitive]:
         """Expand calibration UO."""
         primitives = []
         params = uo.parameters
@@ -256,7 +255,7 @@ class UOExpander:
 
         return primitives
 
-    def _expand_measurement(self, uo: UnitOperation) -> List[Primitive]:
+    def _expand_measurement(self, uo: UnitOperation) -> list[Primitive]:
         """Expand measurement UO (LSV, CV, etc.)."""
         primitives = []
         params = uo.parameters
@@ -299,7 +298,7 @@ class UOExpander:
 
         return primitives
 
-    def _expand_data_analysis(self, uo: UnitOperation) -> List[Primitive]:
+    def _expand_data_analysis(self, uo: UnitOperation) -> list[Primitive]:
         """Expand data analysis UO."""
         primitives = []
         params = uo.parameters
@@ -320,7 +319,7 @@ class UOExpander:
 
         return primitives
 
-    def _expand_data_logging(self, uo: UnitOperation) -> List[Primitive]:
+    def _expand_data_logging(self, uo: UnitOperation) -> list[Primitive]:
         """Expand data logging/save UO."""
         primitives = []
         params = uo.parameters
@@ -342,7 +341,7 @@ class UOExpander:
 
         return primitives
 
-    def _expand_stability_test(self, uo: UnitOperation) -> List[Primitive]:
+    def _expand_stability_test(self, uo: UnitOperation) -> list[Primitive]:
         """Expand stability test UO."""
         primitives = []
         params = uo.parameters
@@ -364,7 +363,7 @@ class UOExpander:
 
         return primitives
 
-    def _expand_cleanup(self, uo: UnitOperation) -> List[Primitive]:
+    def _expand_cleanup(self, uo: UnitOperation) -> list[Primitive]:
         """Expand cleanup UO."""
         primitives = []
         params = uo.parameters
@@ -388,7 +387,7 @@ class UOExpander:
 
         return primitives
 
-    def _expand_checkpoint(self, uo: UnitOperation) -> List[Primitive]:
+    def _expand_checkpoint(self, uo: UnitOperation) -> list[Primitive]:
         """Expand user checkpoint UO."""
         return [Primitive(
             name=f"{uo.name}_checkpoint",
@@ -399,7 +398,7 @@ class UOExpander:
             source_uo=uo.name,
         )]
 
-    def _expand_wait(self, uo: UnitOperation) -> List[Primitive]:
+    def _expand_wait(self, uo: UnitOperation) -> list[Primitive]:
         """Expand wait UO."""
         return [Primitive(
             name=f"{uo.name}_wait",
@@ -410,7 +409,7 @@ class UOExpander:
             source_uo=uo.name,
         )]
 
-    def _expand_generic(self, uo: UnitOperation) -> List[Primitive]:
+    def _expand_generic(self, uo: UnitOperation) -> list[Primitive]:
         """Generic expansion for unhandled UO types."""
         return [Primitive(
             name=f"{uo.name}_generic",

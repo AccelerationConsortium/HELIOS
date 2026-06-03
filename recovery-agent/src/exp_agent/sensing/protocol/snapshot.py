@@ -12,15 +12,15 @@ Key features:
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Optional
-from enum import Enum
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
 
-from exp_agent.sensing.protocol.sensor_event import SensorEvent, SensorType, QualityStatus
-from exp_agent.sensing.protocol.health_event import HealthStatus, HealthMetrics
+from exp_agent.sensing.protocol.health_event import HealthMetrics, HealthStatus
+from exp_agent.sensing.protocol.sensor_event import QualityStatus, SensorEvent, SensorType
 
 
-class SystemHealthStatus(str, Enum):
+class SystemHealthStatus(StrEnum):
     """Overall system health based on sensor states."""
 
     NOMINAL = "NOMINAL"             # All sensors healthy
@@ -43,8 +43,8 @@ class SensorSnapshot:
     sensor_type: SensorType
 
     # Latest reading
-    latest_event: Optional[SensorEvent] = None
-    latest_value: Optional[float] = None
+    latest_event: SensorEvent | None = None
+    latest_value: float | None = None
     latest_unit: str = ""
     latest_quality: QualityStatus = QualityStatus.UNKNOWN
 
@@ -58,10 +58,10 @@ class SensorSnapshot:
     window_seconds: float = 60.0  # How much history to keep
 
     # Derived metrics
-    trend_slope: Optional[float] = None       # Rate of change (units/sec)
-    value_min: Optional[float] = None         # Min in window
-    value_max: Optional[float] = None         # Max in window
-    value_mean: Optional[float] = None        # Mean in window
+    trend_slope: float | None = None       # Rate of change (units/sec)
+    value_min: float | None = None         # Min in window
+    value_max: float | None = None         # Max in window
+    value_mean: float | None = None        # Mean in window
 
     @property
     def is_healthy(self) -> bool:
@@ -77,11 +77,11 @@ class SensorSnapshot:
         )
 
     @property
-    def age_seconds(self) -> Optional[float]:
+    def age_seconds(self) -> float | None:
         """How old is the latest reading?"""
         if self.latest_event is None:
             return None
-        return (datetime.now(timezone.utc) - self.latest_event.ts).total_seconds()
+        return (datetime.now(UTC) - self.latest_event.ts).total_seconds()
 
     def add_reading(self, event: SensorEvent, window_seconds: float = 60.0) -> None:
         """Add a new reading and update derived metrics."""
@@ -105,7 +105,7 @@ class SensorSnapshot:
         self.recent_timestamps.append(event.ts)
 
         # Trim old readings outside window
-        cutoff = datetime.now(timezone.utc).timestamp() - window_seconds
+        cutoff = datetime.now(UTC).timestamp() - window_seconds
         while (
             self.recent_timestamps
             and self.recent_timestamps[0].timestamp() < cutoff
@@ -164,7 +164,7 @@ class SystemSnapshot:
     "what's happening in the lab right now".
     """
 
-    ts: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    ts: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     # All sensor snapshots indexed by sensor_id
     sensors: dict[str, SensorSnapshot] = field(default_factory=dict)
@@ -187,7 +187,7 @@ class SystemSnapshot:
         self.sensors[snapshot.sensor_id] = snapshot
         self._update_aggregates()
 
-    def get_sensor(self, sensor_id: str) -> Optional[SensorSnapshot]:
+    def get_sensor(self, sensor_id: str) -> SensorSnapshot | None:
         """Get snapshot for a specific sensor."""
         return self.sensors.get(sensor_id)
 
@@ -195,7 +195,7 @@ class SystemSnapshot:
         """Get all sensors of a specific type."""
         return [s for s in self.sensors.values() if s.sensor_type == sensor_type]
 
-    def get_value(self, sensor_id: str) -> Optional[float]:
+    def get_value(self, sensor_id: str) -> float | None:
         """Get latest value for a sensor."""
         snapshot = self.sensors.get(sensor_id)
         return snapshot.latest_value if snapshot else None

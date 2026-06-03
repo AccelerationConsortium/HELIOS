@@ -17,14 +17,21 @@ Safety Integration (Phase 1):
 """
 import time
 from dataclasses import dataclass, field
-from typing import Literal, List, Optional, Dict, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal, Optional
 
-from ..core.types import (
-    PlanStep, PlanPatch, Action, Decision, ExecutionState,
-    HardwareError, DeviceState,
-)
 from ..core.safety_types import (
-    SafetyPacket, ExperimentSummary, ChemicalInfo, GateDecision,
+    ExperimentSummary,
+    GateDecision,
+    SafetyPacket,
+)
+from ..core.types import (
+    Action,
+    Decision,
+    DeviceState,
+    ExecutionState,
+    HardwareError,
+    PlanPatch,
+    PlanStep,
 )
 from ..devices.simulated.heater import SimHeater
 from ..executor.guarded_executor import GuardedExecutor
@@ -39,22 +46,22 @@ class StepResult:
     step_id: str
     stage: str
     outcome: Literal["ok", "skipped", "degraded", "aborted"]
-    error_type: Optional[str] = None
-    decision: Optional[str] = None
-    rationale: Optional[str] = None
-    patch: Optional[PlanPatch] = None
+    error_type: str | None = None
+    decision: str | None = None
+    rationale: str | None = None
+    patch: PlanPatch | None = None
 
 
 @dataclass
 class PlanResult:
     success: bool
-    steps: List[StepResult] = field(default_factory=list)
-    patches: List[PlanPatch] = field(default_factory=list)
-    aborted_at: Optional[str] = None
+    steps: list[StepResult] = field(default_factory=list)
+    patches: list[PlanPatch] = field(default_factory=list)
+    aborted_at: str | None = None
     # Safety integration
-    safety_gate_decision: Optional[GateDecision] = None
-    safety_gate_rationale: Optional[str] = None
-    safety_packet: Optional[SafetyPacket] = None
+    safety_gate_decision: GateDecision | None = None
+    safety_gate_rationale: str | None = None
+    safety_packet: SafetyPacket | None = None
 
 
 class WorkflowSupervisor:
@@ -80,7 +87,7 @@ class WorkflowSupervisor:
         device: SimHeater,
         target_temp: float = 120.0,
         safety_agent: Optional["SafetyAgent"] = None,
-        experiment_summary: Optional[ExperimentSummary] = None,
+        experiment_summary: ExperimentSummary | None = None,
     ):
         """Initialize WorkflowSupervisor.
 
@@ -99,10 +106,10 @@ class WorkflowSupervisor:
         self.executor = GuardedExecutor()
         self.recovery = RecoveryAgent()
         self.state = ExecutionState(devices={device.name: device.read_state()})
-        self.history: List[DeviceState] = []
-        self.active_patches: List[PlanPatch] = []
+        self.history: list[DeviceState] = []
+        self.active_patches: list[PlanPatch] = []
         # Safety packet from pre-flight assessment
-        self.safety_packet: Optional[SafetyPacket] = None
+        self.safety_packet: SafetyPacket | None = None
 
     def _configure_safety_runtime(self, packet: SafetyPacket) -> None:
         """Configure runtime components with SafetyPacket constraints.
@@ -117,7 +124,7 @@ class WorkflowSupervisor:
     # ------------------------------------------------------------------
     # Pre-flight Safety Gate
     # ------------------------------------------------------------------
-    async def _run_safety_gate(self, plan: List[PlanStep]) -> Optional[SafetyPacket]:
+    async def _run_safety_gate(self, plan: list[PlanStep]) -> SafetyPacket | None:
         """Run pre-flight safety assessment if SafetyAgent is configured.
 
         Args:
@@ -140,7 +147,7 @@ class WorkflowSupervisor:
         print("\n" + "=" * 66)
         print("  PRE-FLIGHT SAFETY GATE")
         print("=" * 66)
-        print(f"  Assessing experiment safety...")
+        print("  Assessing experiment safety...")
         if summary.chemicals:
             print(f"  Chemicals: {[c.name for c in summary.chemicals]}")
         print(f"  Parameters: {summary.parameters}")
@@ -170,14 +177,14 @@ class WorkflowSupervisor:
 
         return packet
 
-    def _build_experiment_summary(self, plan: List[PlanStep]) -> ExperimentSummary:
+    def _build_experiment_summary(self, plan: list[PlanStep]) -> ExperimentSummary:
         """Build experiment summary from plan for safety assessment."""
         # Extract parameters from plan steps
-        parameters: Dict[str, Any] = {
+        parameters: dict[str, Any] = {
             "temperature": self.target_temp,
         }
 
-        procedure_steps: List[str] = []
+        procedure_steps: list[str] = []
         for step in plan:
             desc = step.description or f"{step.action.name} ({step.stage})"
             procedure_steps.append(desc)
@@ -194,7 +201,7 @@ class WorkflowSupervisor:
             equipment=[self.device.name],
         )
 
-    def execute_plan_sync(self, plan: List[PlanStep]) -> PlanResult:
+    def execute_plan_sync(self, plan: list[PlanStep]) -> PlanResult:
         """Synchronous wrapper for execute_plan (for backwards compatibility)."""
         import asyncio
         return asyncio.get_event_loop().run_until_complete(
@@ -204,7 +211,7 @@ class WorkflowSupervisor:
     # ------------------------------------------------------------------
     # Main entry point
     # ------------------------------------------------------------------
-    def execute_plan(self, plan: List[PlanStep]) -> PlanResult:
+    def execute_plan(self, plan: list[PlanStep]) -> PlanResult:
         """Execute a workflow plan, returning structured results.
 
         This is the synchronous entry point. For async usage, use execute_plan_async().
@@ -216,7 +223,7 @@ class WorkflowSupervisor:
 
         # Check if we're already in an event loop
         try:
-            loop = asyncio.get_running_loop()
+            asyncio.get_running_loop()
             # We're in an async context - can't use run_until_complete
             # Create a new thread to run the async code
             import concurrent.futures
@@ -230,7 +237,7 @@ class WorkflowSupervisor:
             # No running loop - safe to use asyncio.run
             return asyncio.run(self.execute_plan_async(plan))
 
-    async def execute_plan_async(self, plan: List[PlanStep]) -> PlanResult:
+    async def execute_plan_async(self, plan: list[PlanStep]) -> PlanResult:
         """Execute a workflow plan asynchronously, returning structured results.
 
         This is the async entry point that supports SafetyAgent integration.
@@ -263,7 +270,7 @@ class WorkflowSupervisor:
 
         # --- Continue with normal execution ---
         cursor = 0
-        retry_budget: Dict[str, int] = {}  # step_id -> retries used
+        retry_budget: dict[str, int] = {}  # step_id -> retries used
 
         print("=" * 66)
         print("  WORKFLOW SUPERVISOR — execute_plan()")
@@ -300,7 +307,7 @@ class WorkflowSupervisor:
                 print(f"  ✗ OBSERVE FAILED  step_id={step.step_id}  error={obs_err.type}")
                 # Observation failure — feed into recovery with step semantics
                 if step.on_failure == "skip" and step.criticality == "optional":
-                    print(f"  CURSOR: skip (observation error on optional step)")
+                    print("  CURSOR: skip (observation error on optional step)")
                     result.steps.append(StepResult(
                         step_id=step.step_id, stage=step.stage,
                         outcome="skipped", error_type=obs_err.type,
@@ -310,7 +317,7 @@ class WorkflowSupervisor:
                     cursor += 1
                     continue
                 else:
-                    print(f"  CURSOR: abort (observation error on critical step)")
+                    print("  CURSOR: abort (observation error on critical step)")
                     result.steps.append(StepResult(
                         step_id=step.step_id, stage=step.stage,
                         outcome="aborted", error_type=obs_err.type,
@@ -358,7 +365,7 @@ class WorkflowSupervisor:
                 if decision.kind == "abort":
                     # Check step's on_failure override
                     if step.on_failure == "skip" and step.criticality == "optional":
-                        print(f"  CURSOR: skip (on_failure override for optional step)")
+                        print("  CURSOR: skip (on_failure override for optional step)")
                         result.steps.append(StepResult(
                             step_id=step.step_id, stage=step.stage,
                             outcome="skipped", error_type=err.type,
@@ -367,7 +374,7 @@ class WorkflowSupervisor:
                         cursor += 1
                         continue
 
-                    print(f"  CURSOR: abort — stopping plan")
+                    print("  CURSOR: abort — stopping plan")
                     self._execute_recovery_actions(decision.actions)
                     result.steps.append(StepResult(
                         step_id=step.step_id, stage=step.stage,
@@ -386,22 +393,22 @@ class WorkflowSupervisor:
                         # Exceeded budget — fall back to step's on_failure
                         print(f"  CURSOR: retry budget exhausted ({retries_used}/{step.max_retries})")
                         if step.on_failure == "skip":
-                            print(f"  CURSOR: skip (on_failure fallback)")
+                            print("  CURSOR: skip (on_failure fallback)")
                             result.steps.append(StepResult(
                                 step_id=step.step_id, stage=step.stage,
                                 outcome="skipped", error_type=err.type,
                                 decision="skip",
-                                rationale=f"Retry budget exhausted, on_failure=skip",
+                                rationale="Retry budget exhausted, on_failure=skip",
                             ))
                             cursor += 1
                         else:
-                            print(f"  CURSOR: abort (on_failure fallback)")
+                            print("  CURSOR: abort (on_failure fallback)")
                             self._execute_recovery_actions(decision.actions)
                             result.steps.append(StepResult(
                                 step_id=step.step_id, stage=step.stage,
                                 outcome="aborted", error_type=err.type,
                                 decision="abort",
-                                rationale=f"Retry budget exhausted, on_failure=abort",
+                                rationale="Retry budget exhausted, on_failure=abort",
                             ))
                             result.aborted_at = step.step_id
                             self._shutdown()
@@ -496,8 +503,8 @@ class WorkflowSupervisor:
 
     def _build_patch(
         self, step: PlanStep, decision: Decision,
-        plan: List[PlanStep], cursor: int,
-    ) -> Optional[PlanPatch]:
+        plan: list[PlanStep], cursor: int,
+    ) -> PlanPatch | None:
         """Build a PlanPatch when degrade happens."""
         # Extract degraded target from decision actions
         degraded_target = None
@@ -515,7 +522,7 @@ class WorkflowSupervisor:
             degraded_target=degraded_target,
             notes=[
                 f"Degraded from {original_target}°C to {degraded_target}°C at step {step.step_id}",
-                f"Downstream postconditions relaxed. Results may be compromised/anomalous.",
+                "Downstream postconditions relaxed. Results may be compromised/anomalous.",
             ],
         )
 
@@ -549,7 +556,7 @@ class WorkflowSupervisor:
     # ------------------------------------------------------------------
     # Recovery / shutdown helpers
     # ------------------------------------------------------------------
-    def _execute_recovery_actions(self, actions: List[Action]):
+    def _execute_recovery_actions(self, actions: list[Action]):
         if not actions:
             return
         print(f"  RECOVERY: executing {len(actions)} action(s)")

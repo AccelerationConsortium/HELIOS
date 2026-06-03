@@ -12,14 +12,14 @@ Use for:
 - Training and validation
 """
 
-import json
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from typing import Optional, Iterator
 import asyncio
+import json
+from collections.abc import Iterator
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
-from exp_agent.sensing.drivers.base import SensorDriver, DriverConfig
+from exp_agent.sensing.drivers.base import DriverConfig, SensorDriver
 from exp_agent.sensing.protocol.sensor_event import SensorEvent
 
 
@@ -29,7 +29,7 @@ class ReplayConfig(DriverConfig):
 
     # Source of events
     events: list[SensorEvent] = field(default_factory=list)
-    source_file: Optional[str] = None
+    source_file: str | None = None
 
     # Replay behavior
     time_scale: float = 1.0              # Playback speed (1.0 = real-time)
@@ -58,8 +58,8 @@ class ReplayDriver(SensorDriver):
         self.replay_config = config
         self._events: list[SensorEvent] = list(config.events)
         self._current_index: int = 0
-        self._replay_start: Optional[datetime] = None
-        self._event_start: Optional[datetime] = None
+        self._replay_start: datetime | None = None
+        self._event_start: datetime | None = None
 
         # Load from file if specified
         if config.source_file:
@@ -80,7 +80,7 @@ class ReplayDriver(SensorDriver):
 
     def _load_json(self, path: Path) -> None:
         """Load events from JSON file."""
-        with open(path, "r") as f:
+        with open(path) as f:
             data = json.load(f)
 
         if isinstance(data, list):
@@ -93,7 +93,7 @@ class ReplayDriver(SensorDriver):
     def _load_jsonl(self, path: Path) -> None:
         """Load events from JSON Lines file (one event per line)."""
         self._events = []
-        with open(path, "r") as f:
+        with open(path) as f:
             for line in f:
                 line = line.strip()
                 if line:
@@ -105,7 +105,7 @@ class ReplayDriver(SensorDriver):
         import csv
 
         self._events = []
-        with open(path, "r") as f:
+        with open(path) as f:
             reader = csv.DictReader(f)
             for row in reader:
                 # Convert CSV row to event dict format
@@ -165,7 +165,7 @@ class ReplayDriver(SensorDriver):
 
     async def stream(self) -> Iterator[SensorEvent]:
         """Stream events with timing preservation."""
-        self._replay_start = datetime.now(timezone.utc)
+        self._replay_start = datetime.now(UTC)
 
         if self._events:
             self._event_start = self._events[0].ts
@@ -174,7 +174,7 @@ class ReplayDriver(SensorDriver):
             if self._current_index >= len(self._events):
                 if self.replay_config.loop:
                     self._current_index = 0
-                    self._replay_start = datetime.now(timezone.utc)
+                    self._replay_start = datetime.now(UTC)
                     if self._events:
                         self._event_start = self._events[0].ts
                 else:
@@ -190,7 +190,7 @@ class ReplayDriver(SensorDriver):
                 )
 
                 # Wait until it's time
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 if target_time > now:
                     delay = (target_time - now).total_seconds()
                     await asyncio.sleep(delay)
@@ -202,7 +202,7 @@ class ReplayDriver(SensorDriver):
         """Add more events to the replay queue."""
         self._events.extend(events)
 
-    def get_duration(self) -> Optional[timedelta]:
+    def get_duration(self) -> timedelta | None:
         """Get the total duration of all events."""
         if not self._events:
             return None

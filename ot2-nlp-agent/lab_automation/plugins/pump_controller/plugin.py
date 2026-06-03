@@ -6,8 +6,9 @@ Main plugin class for pump systems (PLC, peristaltic, syringe, microfluidic).
 
 import re
 from enum import Enum
-from typing import Any, Dict, List, Optional
-from ...core.plugin_base import PluginBase, ParserBase, OperationDef
+from typing import Any
+
+from ...core.plugin_base import OperationDef, ParserBase, PluginBase
 
 
 class PumpOperation(Enum):
@@ -25,7 +26,7 @@ class PumpOperation(Enum):
 
 
 # Operation definitions
-PUMP_OPERATIONS: Dict[PumpOperation, OperationDef] = {
+PUMP_OPERATIONS: dict[PumpOperation, OperationDef] = {
     PumpOperation.DISPENSE: OperationDef(
         name="dispense",
         action="pump_controller.dispense",
@@ -157,7 +158,7 @@ class PumpControllerParser(ParserBase):
     def __init__(self):
         self._operations = PUMP_OPERATIONS
 
-    def parse(self, instruction: str) -> Dict[str, Any]:
+    def parse(self, instruction: str) -> dict[str, Any]:
         """Parse pump instruction."""
         language = self.detect_language(instruction)
 
@@ -194,7 +195,7 @@ class PumpControllerParser(ParserBase):
             "description": instruction,
         }
 
-    def _extract_params(self, instruction: str, op_type: PumpOperation) -> Dict[str, Any]:
+    def _extract_params(self, instruction: str, op_type: PumpOperation) -> dict[str, Any]:
         """Extract pump parameters."""
         params = {}
 
@@ -243,13 +244,13 @@ class PumpControllerPlugin(PluginBase):
 
     def _register_operations(self):
         """Register pump operations."""
-        for op_type, op_def in PUMP_OPERATIONS.items():
+        for _op_type, op_def in PUMP_OPERATIONS.items():
             self.register_operation(op_def)
 
     def _create_parser(self) -> ParserBase:
         """Create pump parser."""
         return PumpControllerParser()
 
-    def get_supported_operations(self) -> List[str]:
+    def get_supported_operations(self) -> list[str]:
         """Get list of supported operation names."""
         return [op.value for op in PumpOperation]

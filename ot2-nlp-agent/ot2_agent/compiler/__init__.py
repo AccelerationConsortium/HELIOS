@@ -10,8 +10,8 @@ and generates executable code/JSON. It handles:
 """
 
 from .compiler import Compiler, CompilerOutput
-from .uo_expander import UOExpander
 from .device_mapper import DeviceMapper, DeviceRegistry
+from .uo_expander import UOExpander
 
 __all__ = [
     "Compiler",

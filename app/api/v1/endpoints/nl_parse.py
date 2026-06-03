@@ -438,7 +438,7 @@ _INSTRUMENT_FALSE_POSITIVES = frozenset({
     "error", "warning", "info", "debug", "log", "event", "message",
     "phase", "stage", "status", "code", "key", "field", "column",
     "row", "table", "index", "id", "uuid", "hash",
-    "instruction", "example", "section", "note", "tip", "rule",
+    "instruction", "example", "section", "tip", "rule",
     # Chinese generic terms
     "实验", "优化", "协议", "参数", "样品", "试剂", "溶液",
     "缓冲液", "分析", "结果", "数据", "目标", "代理", "系统",

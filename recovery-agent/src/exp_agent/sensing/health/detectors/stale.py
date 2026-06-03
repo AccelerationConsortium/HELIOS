@@ -7,8 +7,7 @@ A sensor is considered stale if:
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -31,10 +30,10 @@ class StalenessState:
 
     sensor_id: str
     expected_period_ms: float = 1000.0
-    last_seen: Optional[datetime] = None
-    first_seen: Optional[datetime] = None
+    last_seen: datetime | None = None
+    first_seen: datetime | None = None
     is_stale: bool = False
-    stale_since: Optional[datetime] = None
+    stale_since: datetime | None = None
     stale_count: int = 0  # How many times this sensor went stale
 
 
@@ -49,7 +48,7 @@ class StaleDetector:
         is_stale = detector.check("temp_1")
     """
 
-    def __init__(self, config: Optional[StaleConfig] = None):
+    def __init__(self, config: StaleConfig | None = None):
         self.config = config or StaleConfig()
         self._sensors: dict[str, StalenessState] = {}
 
@@ -64,13 +63,13 @@ class StaleDetector:
             expected_period_ms=expected_period_ms,
         )
 
-    def update(self, sensor_id: str, timestamp: Optional[datetime] = None) -> None:
+    def update(self, sensor_id: str, timestamp: datetime | None = None) -> None:
         """Record that a sensor reported at the given time."""
         if sensor_id not in self._sensors:
             self.register_sensor(sensor_id)
 
         state = self._sensors[sensor_id]
-        now = timestamp or datetime.now(timezone.utc)
+        now = timestamp or datetime.now(UTC)
 
         if state.first_seen is None:
             state.first_seen = now
@@ -82,7 +81,7 @@ class StaleDetector:
 
         state.last_seen = now
 
-    def check(self, sensor_id: str, now: Optional[datetime] = None) -> bool:
+    def check(self, sensor_id: str, now: datetime | None = None) -> bool:
         """
         Check if a sensor is stale.
 
@@ -92,7 +91,7 @@ class StaleDetector:
             return True  # Unknown sensor = stale
 
         state = self._sensors[sensor_id]
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
 
         # Not seen yet
         if state.last_seen is None:
@@ -120,27 +119,27 @@ class StaleDetector:
 
         return is_stale
 
-    def check_all(self, now: Optional[datetime] = None) -> dict[str, bool]:
+    def check_all(self, now: datetime | None = None) -> dict[str, bool]:
         """Check staleness for all registered sensors."""
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         return {
             sensor_id: self.check(sensor_id, now)
             for sensor_id in self._sensors
         }
 
-    def get_stale_sensors(self, now: Optional[datetime] = None) -> list[str]:
+    def get_stale_sensors(self, now: datetime | None = None) -> list[str]:
         """Get list of stale sensor IDs."""
         statuses = self.check_all(now)
         return [sensor_id for sensor_id, is_stale in statuses.items() if is_stale]
 
-    def get_state(self, sensor_id: str) -> Optional[StalenessState]:
+    def get_state(self, sensor_id: str) -> StalenessState | None:
         """Get the staleness state for a sensor."""
         return self._sensors.get(sensor_id)
 
-    def get_age_ms(self, sensor_id: str, now: Optional[datetime] = None) -> Optional[float]:
+    def get_age_ms(self, sensor_id: str, now: datetime | None = None) -> float | None:
         """Get how long since the sensor last reported."""
         state = self._sensors.get(sensor_id)
         if state is None or state.last_seen is None:
             return None
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         return (now - state.last_seen).total_seconds() * 1000

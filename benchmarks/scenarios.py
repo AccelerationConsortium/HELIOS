@@ -16,17 +16,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from benchmarks.fault_injector import (
-    FAULT_DECK_CONFLICT,
     FAULT_DISCONNECTION,
-    FAULT_FILE_MISSING,
     FAULT_LIQUID_INSUFFICIENT,
     FAULT_SENSOR_DRIFT,
-    FAULT_TEMP_HYSTERESIS,
     FAULT_TIMEOUT,
     FAULT_TIP_SHORTAGE,
     FaultConfig,
 )
-
 
 # ---------------------------------------------------------------------------
 # Scenario data structure

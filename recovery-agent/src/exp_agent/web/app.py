@@ -9,17 +9,12 @@ Usage:
     # Then open http://localhost:8000
 """
 import asyncio
-import json
-import time
-import uuid
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Any, Optional
-from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
 
 # ============================================================================
 # State Management
@@ -30,24 +25,24 @@ class DeviceState:
     name: str
     device_type: str
     status: str = "idle"
-    telemetry: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    telemetry: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
 
 
 @dataclass
 class PipelineState:
     stage: int = 0
     stage_name: str = "IDLE"
-    device: Optional[str] = None
-    decision: Optional[str] = None
+    device: str | None = None
+    decision: str | None = None
 
 
 @dataclass
 class DashboardState:
-    devices: Dict[str, DeviceState] = field(default_factory=dict)
+    devices: dict[str, DeviceState] = field(default_factory=dict)
     pipeline: PipelineState = field(default_factory=PipelineState)
-    events: List[Dict] = field(default_factory=list)
-    stats: Dict[str, int] = field(default_factory=lambda: {
+    events: list[dict] = field(default_factory=list)
+    stats: dict[str, int] = field(default_factory=lambda: {
         "abort": 0, "degrade": 0, "retry": 0, "skip": 0, "total": 0
     })
 
@@ -71,7 +66,7 @@ state.devices = {
 }
 
 # Connected WebSocket clients
-clients: List[WebSocket] = []
+clients: list[WebSocket] = []
 
 
 # ============================================================================
@@ -599,7 +594,7 @@ async def broadcast(data: dict):
     for client in clients:
         try:
             await client.send_json(data)
-        except:
+        except Exception:
             pass
 
 

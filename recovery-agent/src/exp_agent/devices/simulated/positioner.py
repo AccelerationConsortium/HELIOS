@@ -10,10 +10,10 @@ Fault modes:
 - encoder_error: Position feedback becomes unreliable
 """
 import time
-import math
-from typing import Literal, Optional, Dict
+from typing import Literal
+
+from ...core.types import Action, DeviceState, HardwareError
 from ..base import Device
-from ...core.types import DeviceState, Action, HardwareError
 
 
 class SimPositioner(Device):
@@ -108,7 +108,7 @@ class SimPositioner(Device):
             self.move_start_time = 0.0
             self.velocity = {"x": 0.0, "y": 0.0, "z": 0.0}
 
-    def _check_limits(self) -> Optional[str]:
+    def _check_limits(self) -> str | None:
         """Check if any axis exceeds limits."""
         for axis, (low, high) in self.limits.items():
             if self.position[axis] < low or self.position[axis] > high:

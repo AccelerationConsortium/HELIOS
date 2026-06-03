@@ -4,11 +4,10 @@ Plugin Base Classes for Lab Automation
 Defines the abstract base classes that all instrument plugins must implement.
 """
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
-import re
+from typing import Any
 
 
 @dataclass
@@ -16,11 +15,11 @@ class OperationDef:
     """Definition of an operation supported by a plugin."""
     name: str
     action: str  # e.g., "liquid_handler.transfer", "potentiostat.run_eis"
-    keywords: Dict[str, List[str]]  # {"en": ["transfer", "move"], "zh": ["转移"]}
-    params_schema: Dict[str, Any] = field(default_factory=dict)  # Parameter definitions
+    keywords: dict[str, list[str]]  # {"en": ["transfer", "move"], "zh": ["转移"]}
+    params_schema: dict[str, Any] = field(default_factory=dict)  # Parameter definitions
     description: str = ""
 
-    def matches(self, text: str, language: str = "en") -> Tuple[bool, float]:
+    def matches(self, text: str, language: str = "en") -> tuple[bool, float]:
         """Check if text matches this operation's keywords."""
         text_lower = text.lower()
         keywords = self.keywords.get(language, self.keywords.get("en", []))
@@ -57,7 +56,7 @@ class ParserBase(ABC):
     """Base class for natural language parsers."""
 
     @abstractmethod
-    def parse(self, instruction: str) -> Dict[str, Any]:
+    def parse(self, instruction: str) -> dict[str, Any]:
         """
         Parse a natural language instruction.
 
@@ -79,7 +78,7 @@ class ParserBase(ABC):
         chinese_chars = len(re.findall(r'[\u4e00-\u9fff]', text))
         return "zh" if chinese_chars > len(text) * 0.1 else "en"
 
-    def extract_number(self, text: str, patterns: List[str]) -> Optional[float]:
+    def extract_number(self, text: str, patterns: list[str]) -> float | None:
         """Extract a number from text using patterns."""
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -90,12 +89,12 @@ class ParserBase(ABC):
                     continue
         return None
 
-    def extract_well(self, text: str) -> Optional[str]:
+    def extract_well(self, text: str) -> str | None:
         """Extract well position like A1, B12, etc."""
         match = re.search(r'\b([A-Ha-h][1-9]|[A-Ha-h]1[0-2])\b', text)
         return match.group(1).upper() if match else None
 
-    def extract_well_range(self, text: str) -> Optional[List[str]]:
+    def extract_well_range(self, text: str) -> list[str] | None:
         """Extract well range like A1-A12, B1-B4."""
         match = re.search(r'\b([A-Ha-h])(\d+)-([A-Ha-h])(\d+)\b', text, re.IGNORECASE)
         if match:
@@ -135,9 +134,9 @@ class PluginBase(ABC):
     description: str = "Base plugin"
 
     def __init__(self):
-        self._operations: Dict[str, OperationDef] = {}
-        self._adapters: Dict[str, Any] = {}
-        self._parser: Optional[ParserBase] = None
+        self._operations: dict[str, OperationDef] = {}
+        self._adapters: dict[str, Any] = {}
+        self._parser: ParserBase | None = None
         self._register_operations()
 
     @abstractmethod
@@ -161,19 +160,19 @@ class PluginBase(ABC):
         """Register an operation."""
         self._operations[op.name] = op
 
-    def get_operations(self) -> Dict[str, OperationDef]:
+    def get_operations(self) -> dict[str, OperationDef]:
         """Get all registered operations."""
         return self._operations
 
-    def get_operation(self, name: str) -> Optional[OperationDef]:
+    def get_operation(self, name: str) -> OperationDef | None:
         """Get a specific operation by name."""
         return self._operations.get(name)
 
-    def parse(self, instruction: str) -> Dict[str, Any]:
+    def parse(self, instruction: str) -> dict[str, Any]:
         """Parse a natural language instruction using this plugin's parser."""
         return self.parser.parse(instruction)
 
-    def can_handle(self, instruction: str) -> Tuple[bool, float]:
+    def can_handle(self, instruction: str) -> tuple[bool, float]:
         """
         Check if this plugin can handle the given instruction.
 
@@ -189,15 +188,15 @@ class PluginBase(ABC):
         """Register a hardware adapter."""
         self._adapters[name] = adapter
 
-    def get_adapter(self, name: str) -> Optional[Any]:
+    def get_adapter(self, name: str) -> Any | None:
         """Get a registered adapter."""
         return self._adapters.get(name)
 
-    def list_adapters(self) -> List[str]:
+    def list_adapters(self) -> list[str]:
         """List all registered adapters."""
         return list(self._adapters.keys())
 
-    def to_step_dict(self, parsed: Dict[str, Any], step_id: str) -> Dict[str, Any]:
+    def to_step_dict(self, parsed: dict[str, Any], step_id: str) -> dict[str, Any]:
         """
         Convert parsed instruction to workflow step dictionary.
 

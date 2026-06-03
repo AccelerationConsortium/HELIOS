@@ -14,14 +14,13 @@ GET /api/v1/query/entities
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.agents.query_agent import QueryAgent
 from app.contracts.query_contract import QueryConstraints, QueryRequest, QueryResult
-from app.contracts.query_dsl import ENTITY_SOURCE, ExperimentQuery, _VALID_COLUMNS
+from app.contracts.query_dsl import _VALID_COLUMNS, ENTITY_SOURCE, ExperimentQuery
 
 logger = logging.getLogger(__name__)
 

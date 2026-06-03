@@ -7,10 +7,9 @@ Checks for issues like:
 - Missing required steps
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Set, Optional
+from dataclasses import dataclass
 
-from ..ir import UnitOperation, UOType, DeviceAction
+from ..ir import DeviceAction, UnitOperation, UOType
 
 
 @dataclass
@@ -54,7 +53,7 @@ class TopologyChecker:
         """Initialize topology checker."""
         pass
 
-    def check(self, unit_operations: List[UnitOperation]) -> List[TopologyIssue]:
+    def check(self, unit_operations: list[UnitOperation]) -> list[TopologyIssue]:
         """
         Check workflow topology.
 
@@ -68,7 +67,7 @@ class TopologyChecker:
 
         # Get UO types in order
         uo_types = [uo.uo_type for uo in unit_operations]
-        seen_types: Set[UOType] = set()
+        seen_types: set[UOType] = set()
 
         for i, uo in enumerate(unit_operations):
             # Check preconditions
@@ -91,8 +90,8 @@ class TopologyChecker:
     def _check_preconditions(
         self,
         uo: UnitOperation,
-        seen_types: Set[UOType]
-    ) -> List[TopologyIssue]:
+        seen_types: set[UOType]
+    ) -> list[TopologyIssue]:
         """Check if preconditions are met."""
         issues = []
 
@@ -114,8 +113,8 @@ class TopologyChecker:
         self,
         uo: UnitOperation,
         index: int,
-        all_types: List[UOType]
-    ) -> List[TopologyIssue]:
+        all_types: list[UOType]
+    ) -> list[TopologyIssue]:
         """Check if UO is in expected position."""
         issues = []
 
@@ -127,7 +126,7 @@ class TopologyChecker:
             return issues
 
         # Check if any later-ordered UO appears before this one
-        for j, other_type in enumerate(all_types[:index]):
+        for _j, other_type in enumerate(all_types[:index]):
             try:
                 other_pos = self.OER_STANDARD_ORDER.index(other_type)
                 if other_pos > expected_pos:
@@ -144,7 +143,7 @@ class TopologyChecker:
 
         return issues
 
-    def _check_missing_steps(self, uo_types: List[UOType]) -> List[TopologyIssue]:
+    def _check_missing_steps(self, uo_types: list[UOType]) -> list[TopologyIssue]:
         """Check for missing essential steps."""
         issues = []
         type_set = set(uo_types)
@@ -173,7 +172,7 @@ class TopologyChecker:
 
         return issues
 
-    def check_device_actions(self, actions: List[DeviceAction]) -> List[TopologyIssue]:
+    def check_device_actions(self, actions: list[DeviceAction]) -> list[TopologyIssue]:
         """
         Check device action ordering (lower level check).
 
@@ -186,7 +185,6 @@ class TopologyChecker:
         issues = []
 
         # Track state
-        has_pick_up_tip = False
         has_current_tip = False
 
         for action in actions:
@@ -206,7 +204,6 @@ class TopologyChecker:
 
                 if cmd == "pick_up_tip":
                     has_current_tip = True
-                    has_pick_up_tip = True
 
                 if cmd == "drop_tip":
                     has_current_tip = False

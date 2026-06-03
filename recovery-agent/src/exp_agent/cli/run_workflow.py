@@ -7,7 +7,6 @@ multiple loops and step dependencies.
 
 import argparse
 import sys
-from pathlib import Path
 
 from ..orchestrator.workflow_manager import WorkflowManager, create_sample_prep_workflow
 from ..recovery.workflow_policy import WorkflowRecoveryPolicy
@@ -156,13 +155,14 @@ def main():
 def load_custom_workflow(config_path: str):
     """Load custom workflow from configuration file."""
     import json
+
     from ..orchestrator.workflow_manager import (
-        WorkflowStep,
-        WorkflowPhase,
         StepDependency,
+        WorkflowPhase,
+        WorkflowStep,
     )
 
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         config = json.load(f)
 
     steps = []

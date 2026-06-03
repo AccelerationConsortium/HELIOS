@@ -8,9 +8,9 @@ Provides comprehensive workflow validation including:
 - Human-in-the-loop checkpoints
 """
 
-from .workflow_validator import WorkflowValidator, EnhancedValidationResult, Checkpoint
 from .resource_checker import ResourceChecker, ResourceConflict
 from .topology_checker import TopologyChecker, TopologyIssue
+from .workflow_validator import Checkpoint, EnhancedValidationResult, WorkflowValidator
 
 __all__ = [
     "WorkflowValidator",

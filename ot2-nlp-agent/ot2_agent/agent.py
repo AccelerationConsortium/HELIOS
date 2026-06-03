@@ -2,17 +2,17 @@
 OT-2 NLP Agent - Main interface for natural language protocol creation.
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
+from .compiler import Compiler, CompilerOutput
+from .custom_labware import CustomLabwareDefinition, get_labware_manager
 from .operations import Operation, OperationMapper, OperationType
 from .parser import NLParser, ParsedIntent
-from .protocol import LabwareConfig, PipetteConfig, Protocol, ProtocolGenerator
-from .validator import ProtocolValidator, ValidationResult
-from .custom_labware import CustomLabwareDefinition, CustomLabwareManager, get_labware_manager
 
 # New Planner/Compiler imports
-from .planner import Planner, PlannerOutput, WorkflowDraft, ConfirmedWorkflow
-from .compiler import Compiler, CompilerOutput
+from .planner import ConfirmedWorkflow, Planner, PlannerOutput
+from .protocol import Protocol, ProtocolGenerator
+from .validator import ProtocolValidator, ValidationResult
 
 
 class OT2Agent:
@@ -81,7 +81,7 @@ class OT2Agent:
     def plan(
         self,
         intent: str,
-        context: Dict[str, Any] = None
+        context: dict[str, Any] = None
     ) -> PlannerOutput:
         """
         Generate candidate workflows from user intent.
@@ -148,8 +148,8 @@ class OT2Agent:
     def plan_and_compile(
         self,
         intent: str,
-        parameters: Dict[str, Any],
-        context: Dict[str, Any] = None,
+        parameters: dict[str, Any],
+        context: dict[str, Any] = None,
         candidate_idx: int = 0
     ) -> CompilerOutput:
         """
@@ -197,9 +197,9 @@ class OT2Agent:
     def get_missing_parameters(
         self,
         intent: str,
-        context: Dict[str, Any] = None,
+        context: dict[str, Any] = None,
         candidate_idx: int = 0
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Get list of parameters needed for an intent.
 
@@ -282,7 +282,7 @@ class OT2Agent:
     def add_custom_labware(
         self,
         protocol: Protocol,
-        labware: Union[str, CustomLabwareDefinition],
+        labware: str | CustomLabwareDefinition,
         slot: int,
         name: str = None,
         json_path: str = None
@@ -340,7 +340,7 @@ class OT2Agent:
         if json_path:
             labware_def.save_json(json_path)
 
-    def list_custom_labware_templates(self) -> List[str]:
+    def list_custom_labware_templates(self) -> list[str]:
         """List available custom labware templates."""
         manager = get_labware_manager()
         return manager.list_templates()
@@ -423,7 +423,7 @@ class OT2Agent:
         """
         return self.parser.parse(instruction)
 
-    def parse_multi(self, instruction: str) -> List[ParsedIntent]:
+    def parse_multi(self, instruction: str) -> list[ParsedIntent]:
         """
         Parse a multi-step instruction.
 
@@ -442,7 +442,7 @@ class OT2Agent:
         protocol: Protocol,
         instruction: str,
         auto_tips: bool = False
-    ) -> List[Operation]:
+    ) -> list[Operation]:
         """
         Add an instruction to the protocol.
 
@@ -478,9 +478,9 @@ class OT2Agent:
     def add_instructions(
         self,
         protocol: Protocol,
-        instructions: List[str],
+        instructions: list[str],
         auto_tips: bool = False
-    ) -> List[Operation]:
+    ) -> list[Operation]:
         """
         Add multiple instructions to the protocol.
 
@@ -579,7 +579,7 @@ class OT2Agent:
         self,
         protocol: Protocol,
         source: str,
-        destination: Union[str, List[str]],
+        destination: str | list[str],
         volume: float
     ):
         """
@@ -606,7 +606,7 @@ class OT2Agent:
         self,
         protocol: Protocol,
         source: str,
-        destinations: List[str],
+        destinations: list[str],
         volume_per_well: float
     ):
         """
@@ -633,7 +633,7 @@ class OT2Agent:
     def quick_serial_dilution(
         self,
         protocol: Protocol,
-        wells: List[str],
+        wells: list[str],
         initial_volume: float,
         dilution_factor: float = 2.0,
         mix_reps: int = 3

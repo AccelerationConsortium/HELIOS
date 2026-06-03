@@ -35,7 +35,6 @@ try:
         return _yaml.safe_load(text) or {}
 
 except ImportError:
-    import json as _json
 
     def _parse_yaml(text: str) -> dict[str, Any]:  # type: ignore[misc]
         """Fallback: convert YAML-ish frontmatter to JSON-parseable form.

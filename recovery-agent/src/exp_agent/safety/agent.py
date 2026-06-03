@@ -9,11 +9,12 @@ Interface design based on plan.md section 4:
 - answer(question, context) -> SafetyGuidance: Runtime safety queries
 """
 
-from typing import Protocol, Optional, Dict, Any, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
+
 from exp_agent.core.safety_types import (
-    SafetyPacket,
-    SafetyGuidance,
     ExperimentSummary,
+    SafetyGuidance,
+    SafetyPacket,
 )
 
 
@@ -92,7 +93,7 @@ class SafetyAgent(Protocol):
     async def answer(
         self,
         question: str,
-        context: Optional[Dict[str, Any]] = None
+        context: dict[str, Any] | None = None
     ) -> SafetyGuidance:
         """Query safety agent about a specific situation.
 
@@ -138,7 +139,7 @@ class SafetyAssessmentError(SafetyAgentError):
 class SafetyGateError(SafetyAgentError):
     """Experiment blocked by safety gate."""
 
-    def __init__(self, rationale: str, packet: Optional[SafetyPacket] = None):
+    def __init__(self, rationale: str, packet: SafetyPacket | None = None):
         self.rationale = rationale
         self.packet = packet
         super().__init__(f"Safety gate denied: {rationale}")

@@ -114,7 +114,6 @@ class CleaningAgent(BaseAgent[CleaningInput, CleaningOutput]):
     async def process(self, input_data: CleaningInput) -> CleaningOutput:
         from app.services.cleaning_skills import (
             compose_workflow,
-            expand_workflow,
             get_cleaning_workflow,
             validate_skill_composition,
         )

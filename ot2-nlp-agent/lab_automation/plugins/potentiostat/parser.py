@@ -5,9 +5,10 @@ Parses natural language instructions for electrochemistry operations.
 """
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any
+
 from ...core.plugin_base import ParserBase
-from .operations import ElectrochemOperation, ELECTROCHEM_OPERATIONS
+from .operations import ELECTROCHEM_OPERATIONS, ElectrochemOperation
 
 
 class PotentiostatParser(ParserBase):
@@ -50,7 +51,7 @@ class PotentiostatParser(ParserBase):
     def __init__(self):
         self._operations = ELECTROCHEM_OPERATIONS
 
-    def parse(self, instruction: str) -> Dict[str, Any]:
+    def parse(self, instruction: str) -> dict[str, Any]:
         """Parse electrochemistry instruction."""
         language = self.detect_language(instruction)
 
@@ -92,7 +93,7 @@ class PotentiostatParser(ParserBase):
         instruction: str,
         op_type: ElectrochemOperation,
         language: str
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Extract parameters based on operation type."""
         params = {}
 
@@ -116,7 +117,7 @@ class PotentiostatParser(ParserBase):
 
         return params
 
-    def _extract_eis_params(self, text: str) -> Dict[str, Any]:
+    def _extract_eis_params(self, text: str) -> dict[str, Any]:
         """Extract EIS parameters."""
         params = {}
 
@@ -139,7 +140,7 @@ class PotentiostatParser(ParserBase):
 
         return params
 
-    def _extract_cv_params(self, text: str) -> Dict[str, Any]:
+    def _extract_cv_params(self, text: str) -> dict[str, Any]:
         """Extract CV parameters."""
         params = {}
 
@@ -163,7 +164,7 @@ class PotentiostatParser(ParserBase):
 
         return params
 
-    def _extract_cp_params(self, text: str) -> Dict[str, Any]:
+    def _extract_cp_params(self, text: str) -> dict[str, Any]:
         """Extract CP (chronopotentiometry) parameters."""
         params = {}
 
@@ -179,7 +180,7 @@ class PotentiostatParser(ParserBase):
 
         return params
 
-    def _extract_ca_params(self, text: str) -> Dict[str, Any]:
+    def _extract_ca_params(self, text: str) -> dict[str, Any]:
         """Extract CA (chronoamperometry) parameters."""
         params = {}
 
@@ -195,7 +196,7 @@ class PotentiostatParser(ParserBase):
 
         return params
 
-    def _extract_ocv_params(self, text: str) -> Dict[str, Any]:
+    def _extract_ocv_params(self, text: str) -> dict[str, Any]:
         """Extract OCV parameters."""
         params = {}
 
@@ -206,7 +207,7 @@ class PotentiostatParser(ParserBase):
 
         return params
 
-    def _extract_sweep_params(self, text: str) -> Dict[str, Any]:
+    def _extract_sweep_params(self, text: str) -> dict[str, Any]:
         """Extract linear sweep parameters."""
         params = {}
 
@@ -233,7 +234,7 @@ class PotentiostatParser(ParserBase):
                 voltages.append(val)
         return voltages
 
-    def _extract_current(self, text: str) -> Optional[float]:
+    def _extract_current(self, text: str) -> float | None:
         """Extract current value in Amps."""
         for pattern in self.CURRENT_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)
@@ -246,7 +247,7 @@ class PotentiostatParser(ParserBase):
                 return val
         return None
 
-    def _extract_time(self, text: str) -> Optional[float]:
+    def _extract_time(self, text: str) -> float | None:
         """Extract time in seconds."""
         for pattern in self.TIME_PATTERNS:
             match = re.search(pattern, text, re.IGNORECASE)

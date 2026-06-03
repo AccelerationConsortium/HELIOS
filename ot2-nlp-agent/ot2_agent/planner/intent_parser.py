@@ -6,7 +6,6 @@ a structured Intent object.
 """
 
 import re
-from typing import Dict, List, Optional, Tuple
 
 from ..ir import Intent, PlanningContext
 
@@ -174,7 +173,7 @@ class IntentParser:
         text = re.sub(r'\s+', ' ', text).strip()
         return text
 
-    def _detect_domain(self, text: str, language: str) -> Tuple[str, float]:
+    def _detect_domain(self, text: str, language: str) -> tuple[str, float]:
         """
         Detect the domain of the experiment.
 
@@ -198,7 +197,7 @@ class IntentParser:
 
         return best_domain, confidence
 
-    def _extract_goal(self, text: str, language: str) -> Optional[str]:
+    def _extract_goal(self, text: str, language: str) -> str | None:
         """Extract the main goal from the text."""
         patterns = self.GOAL_PATTERNS.get(language, [])
 
@@ -212,7 +211,7 @@ class IntentParser:
 
         return None
 
-    def _extract_metrics(self, text: str, language: str) -> List[str]:
+    def _extract_metrics(self, text: str, language: str) -> list[str]:
         """Extract target metrics from the text."""
         metrics = []
         patterns = self.METRIC_PATTERNS.get(language, {})
@@ -225,7 +224,7 @@ class IntentParser:
 
         return list(set(metrics))
 
-    def _extract_conditions(self, text: str, language: str) -> Dict[str, str]:
+    def _extract_conditions(self, text: str, language: str) -> dict[str, str]:
         """Extract known experimental conditions."""
         conditions = {}
 
@@ -240,7 +239,7 @@ class IntentParser:
 
         return conditions
 
-    def _infer_goal(self, domain: str, metrics: List[str]) -> str:
+    def _infer_goal(self, domain: str, metrics: list[str]) -> str:
         """Infer a goal if none was explicitly stated."""
         if domain == "electrochemistry":
             if "overpotential" in metrics or "tafel_slope" in metrics:

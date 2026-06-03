@@ -10,7 +10,7 @@ Usage:
 import argparse
 import random
 
-from ..core.types import PlanStep, Action
+from ..core.types import Action, PlanStep
 from ..devices.simulated.heater import SimHeater
 from ..orchestrator.workflow_supervisor import WorkflowSupervisor
 
