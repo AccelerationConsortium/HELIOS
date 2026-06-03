@@ -47,6 +47,13 @@ tests/
 # Node modules
 node_modules/
 
+# Runtime logs
+logs/
+*.log
+*.mov
+*.mp4
+helios-demo*
+
 # Presentation / slides
 recovery-agent/presentation/
 
