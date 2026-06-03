@@ -178,13 +178,64 @@ async def test_stage_runner_executes_control_plane_calls_as_stage():
     cp.register(RuntimeAgent().agent)
 
     runner = AgentStageRunner(cp)
+    emitted: list[dict] = []
     result = await runner.run_parallel(
         "runtime",
         [AgentStageCall("runtime_agent", RuntimeInput(round_number=1))],
+        emit=emitted.append,
     )
 
     assert result.success
     assert result.outputs["runtime_agent"]["saw_context"] is True
+    assert [event["type"] for event in emitted] == [
+        "agent_stage_start",
+        "agent_stage_end",
+    ]
+
+
+async def test_orchestrator_plan_only_emits_stage_graph_events():
+    from app.agents.orchestrator import OrchestratorAgent, OrchestratorInput
+    from app.core.db import init_db
+    from app.services.campaign_events import replay_events
+
+    init_db()
+    campaign_id = f"camp-stage-graph-{uuid.uuid4().hex[:8]}"
+    orchestrator = OrchestratorAgent()
+
+    result = await orchestrator.process(
+        OrchestratorInput(
+            contract_id="contract",
+            objective_kpi="yield",
+            direction="maximize",
+            max_rounds=1,
+            batch_size=1,
+            dimensions=[
+                {"name": "temperature", "type": "float", "min": 20, "max": 80},
+            ],
+            protocol_template={"steps": []},
+            campaign_id=campaign_id,
+            plan_only=True,
+        )
+    )
+
+    assert result.status == "planned"
+    events = replay_events(campaign_id)
+    event_types = [event["event_type"] for event in events]
+    assert "agent_stage_graph" in event_types
+    assert "agent_stage_start" in event_types
+    assert "agent_stage_end" in event_types
+    graph_payload = next(
+        event["payload"]["graph"]
+        for event in events
+        if event["event_type"] == "agent_stage_graph"
+    )
+    assert [node["name"] for node in graph_payload["nodes"]] == [
+        "planning",
+        "design",
+        "compile",
+        "safety",
+        "analyze",
+    ]
 
 
 async def test_durable_backend_status_cancel_and_events():
@@ -286,5 +337,131 @@ async def test_orchestrate_api_uses_durable_backend_contract():
         assert stopped["status"] == "cancelled"
         assert events["backend"] == "fake"
         assert events["events"][0]["type"] == "durable_run_started"
+    finally:
+        set_durable_backend(previous)
+
+
+async def test_orchestrate_http_lifecycle_start_status_events_stop_resume():
+    import httpx
+
+    from app.main import app
+    from app.services.campaign_state import create_campaign
+    from app.services.durable_execution import (
+        DurableRunEvent,
+        DurableRunHandle,
+        DurableRunStatus,
+        get_durable_backend,
+        set_durable_backend,
+    )
+
+    class FakeBackend:
+        name = "fake_http"
+
+        def __init__(self) -> None:
+            self.campaign_id = ""
+            self.status = "running"
+            self.starts = 0
+
+        async def start_campaign(self, input_data, **kwargs):
+            self.campaign_id = input_data.campaign_id
+            self.status = "running"
+            self.starts += 1
+            return DurableRunHandle(self.campaign_id, self.name, "running")
+
+        async def get_status(self, campaign_id):
+            if campaign_id != self.campaign_id:
+                return None
+            return DurableRunStatus(
+                campaign_id=campaign_id,
+                backend=self.name,
+                status=self.status,
+                result={"starts": self.starts},
+            )
+
+        async def get_result(self, campaign_id):
+            return None
+
+        async def cancel_campaign(self, campaign_id):
+            if campaign_id != self.campaign_id:
+                return None
+            self.status = "cancelled"
+            return await self.get_status(campaign_id)
+
+        async def list_events(self, campaign_id):
+            return [
+                DurableRunEvent(
+                    campaign_id=campaign_id,
+                    type="durable_run_started",
+                    payload={"backend": self.name, "starts": self.starts},
+                    created_at="2026-01-01T00:00:00+00:00",
+                )
+            ]
+
+    previous = get_durable_backend()
+    fake = FakeBackend()
+    set_durable_backend(fake)
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            start_response = await client.post(
+                "/api/v1/orchestrate/start",
+                json={
+                    "contract_id": "contract",
+                    "objective_kpi": "yield",
+                    "direction": "maximize",
+                    "max_rounds": 1,
+                    "batch_size": 1,
+                    "dimensions": [
+                        {"name": "temperature", "type": "float", "min": 20, "max": 80}
+                    ],
+                    "protocol_template": {"steps": []},
+                },
+            )
+            assert start_response.status_code == 200
+            campaign_id = start_response.json()["campaign_id"]
+
+            status_response = await client.get(f"/api/v1/orchestrate/{campaign_id}/status")
+            events_response = await client.get(
+                f"/api/v1/orchestrate/{campaign_id}/durable-events"
+            )
+            stop_response = await client.post(f"/api/v1/orchestrate/{campaign_id}/stop")
+
+            create_campaign(
+                campaign_id,
+                {
+                    "contract_id": "contract",
+                    "objective_kpi": "yield",
+                    "direction": "maximize",
+                    "max_rounds": 1,
+                    "batch_size": 1,
+                    "strategy": "lhs",
+                    "target_value": None,
+                    "dimensions": [
+                        {"name": "temperature", "type": "float", "min": 20, "max": 80}
+                    ],
+                    "protocol_template": {"steps": []},
+                    "policy_snapshot": {},
+                    "protocol_pattern_id": "",
+                    "dry_run": False,
+                    "plan_only": False,
+                },
+                direction="maximize",
+            )
+            resume_response = await client.post(
+                f"/api/v1/orchestrate/{campaign_id}/resume"
+            )
+
+        assert status_response.status_code == 200
+        assert status_response.json()["status"] == "running"
+        assert events_response.status_code == 200
+        assert events_response.json()["events"][0]["type"] == "durable_run_started"
+        assert stop_response.status_code == 200
+        assert stop_response.json()["status"] == "cancelled"
+        assert resume_response.status_code == 200
+        assert resume_response.json()["status"] == "resuming"
+        assert fake.starts == 2
     finally:
         set_durable_backend(previous)

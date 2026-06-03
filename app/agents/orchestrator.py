@@ -158,8 +158,10 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
 
         # v2: ControlPlane for cross-agent routing and audit
         from app.agents.control_plane import ControlPlane
+        from app.agents.stage import AgentStageRunner
         self._control_plane = ControlPlane()
         self._control_plane.set_pause_handler(self._handle_pause)
+        self._stage_runner = AgentStageRunner(self._control_plane)
 
     def _emit(self, campaign_id: str, event: dict[str, Any]) -> None:
         """Persist event to DB, then publish to SSE subscribers (best-effort)."""
@@ -215,6 +217,43 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             self.recovery,
         ]:
             self._control_plane.register(agent)
+
+    def _campaign_stage_graph(self) -> dict[str, Any]:
+        """Return the explicit stage graph used by the main campaign loop."""
+        from app.agents.stage import AgentStageGraph
+
+        graph = AgentStageGraph.linear(
+            "orchestrator_main",
+            [
+                ("planning", ("planner_agent",)),
+                ("design", ("design_agent",)),
+                ("compile", ("compiler_agent",)),
+                ("safety", ("safety_agent",)),
+                ("analyze", ("analyzer_agent",)),
+            ],
+        )
+        return graph.to_dict()
+
+    async def _call_stage(
+        self,
+        *,
+        campaign_id: str,
+        stage_name: str,
+        agent_name: str,
+        input_data: BaseModel,
+        trace_id: str | None = None,
+        timeout_s: float = 300.0,
+    ) -> AgentResult[Any]:
+        """Run a single-agent stage through the shared stage runner."""
+        return await self._stage_runner.run_single(
+            stage_name,
+            agent_name,
+            input_data,
+            caller="orchestrator",
+            trace_id=trace_id,
+            timeout_s=timeout_s,
+            emit=lambda event: self._emit(campaign_id, event),
+        )
 
     # ------------------------------------------------------------------
     # v2: Pause handler — persists to DB, emits SSE, polls for decision
@@ -357,6 +396,10 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             "phase": "planning" if resume_from_round is None else "resuming",
             "message": "Starting campaign planning..." if resume_from_round is None else f"Resuming from round {resume_from_round}...",
         })
+        self._emit(campaign_id, {
+            "type": "agent_stage_graph",
+            "graph": self._campaign_stage_graph(),
+        })
 
         # ---- Phase 1: Planning (skip if resuming) ----
         from app.agents.planner_agent import PlannerInput
@@ -384,10 +427,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 dimensions=input_data.dimensions,
                 protocol_template=input_data.protocol_template,
             )
-            plan_result = await self._control_plane.call(
-                "planner_agent",
-                plan_input,
-                caller="orchestrator",
+            plan_result = await self._call_stage(
+                campaign_id=campaign_id,
+                stage_name="planning",
+                agent_name="planner_agent",
+                input_data=plan_input,
             )
             if not plan_result.success:
                 return OrchestratorOutput(
@@ -423,10 +467,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 protocol_template=input_data.protocol_template,
             )
 
-            plan_result = await self._control_plane.call(
-                "planner_agent",
-                plan_input,
-                caller="orchestrator",
+            plan_result = await self._call_stage(
+                campaign_id=campaign_id,
+                stage_name="planning",
+                agent_name="planner_agent",
+                input_data=plan_input,
             )
             agent_trace.append({
                 "agent": "planner_agent",
@@ -926,10 +971,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "message": f"Designing {planned_round.batch_size} candidate parameters (strategy: {round_strategy})...",
                 })
 
-                design_result = await self._control_plane.call(
-                    "design_agent",
-                    design_input,
-                    caller="orchestrator",
+                design_result = await self._call_stage(
+                    campaign_id=campaign_id,
+                    stage_name="design",
+                    agent_name="design_agent",
+                    input_data=design_input,
                 )
                 agent_trace.append({
                     "agent": "design_agent",
@@ -1011,10 +1057,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "message": f"Compiling protocol for candidate {i}...",
                 })
 
-                compile_result = await self._control_plane.call(
-                    "compiler_agent",
-                    compile_input,
-                    caller="orchestrator",
+                compile_result = await self._call_stage(
+                    campaign_id=campaign_id,
+                    stage_name="compile",
+                    agent_name="compiler_agent",
+                    input_data=compile_input,
                 )
                 if not compile_result.success:
                     self._emit(campaign_id, {
@@ -1066,10 +1113,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "message": f"Running safety preflight for candidate {i}...",
                 })
 
-                safety_result = await self._control_plane.call(
-                    "safety_agent",
-                    safety_input,
-                    caller="orchestrator",
+                safety_result = await self._call_stage(
+                    campaign_id=campaign_id,
+                    stage_name="safety",
+                    agent_name="safety_agent",
+                    input_data=safety_input,
                 )
                 if safety_result.success and not safety_result.output.allowed:
                     logger.warning(
@@ -1480,10 +1528,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 step_history=list(step_history),
                 emit=lambda event: self._emit(campaign_id, event),
             )
-            analyzer_result = await self._control_plane.call(
-                "analyzer_agent",
-                analyzer_input,
-                caller="orchestrator",
+            analyzer_result = await self._call_stage(
+                campaign_id=campaign_id,
+                stage_name="analyze",
+                agent_name="analyzer_agent",
+                input_data=analyzer_input,
             )
             if analyzer_result.success:
                 self._emit(campaign_id, {
