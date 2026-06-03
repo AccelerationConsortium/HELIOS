@@ -2313,3 +2313,215 @@ body {
     color: var(--text-muted);
     margin-right: 6px;
 }
+
+/* ==========================================================================
+   Memory Panel — episodic / semantic / procedural three-layer view
+   ========================================================================== */
+.memory-panel {
+    padding: 16px 20px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    overflow-y: auto;
+}
+
+.memory-panel-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.memory-panel-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-bright);
+}
+
+.memory-panel-meta {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.memory-section {
+    background: var(--bg-input);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+}
+
+.memory-section h4 {
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.memory-section-sub {
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--text-muted);
+    margin-left: 8px;
+    font-size: 11px;
+}
+
+.memory-table-wrap {
+    overflow-x: auto;
+    max-height: 220px;
+    overflow-y: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+}
+
+.memory-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    color: var(--text-secondary);
+    font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+}
+
+.memory-table th {
+    text-align: left;
+    padding: 6px 8px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border-default);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.memory-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.memory-table tr:last-child td {
+    border-bottom: none;
+}
+
+.memory-outcome-success { color: var(--accent-success); font-weight: 600; }
+.memory-outcome-failure { color: var(--accent-danger);  font-weight: 600; }
+.memory-prior-low       { color: var(--accent-warning); }
+
+.memory-empty {
+    text-align: center;
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 18px;
+}
+
+.memory-recipes {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.memory-recipe {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-left: 3px solid var(--accent-warning);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+}
+
+.memory-recipe-trigger {
+    color: var(--text-primary);
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.memory-recipe-error {
+    color: var(--accent-warning);
+    font-weight: 500;
+}
+
+.memory-recipe-steps {
+    color: var(--text-muted);
+    font-size: 10px;
+    margin-top: 4px;
+    line-height: 1.4;
+}
+
+.memory-recipe-meta {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+    color: var(--text-muted);
+    font-size: 10px;
+}
+
+/* ===== Memory Recall Banner ===== */
+.memory-recall-banner {
+    position: fixed;
+    top: 60px;
+    right: 24px;
+    z-index: 1000;
+    max-width: 420px;
+    background: linear-gradient(135deg, rgba(123, 94, 167, 0.95), rgba(91, 107, 148, 0.95));
+    color: white;
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    animation: memory-recall-slide-in 0.35s ease-out;
+}
+
+@keyframes memory-recall-slide-in {
+    from { transform: translateX(120%); opacity: 0; }
+    to   { transform: translateX(0);    opacity: 1; }
+}
+
+.memory-recall-icon {
+    font-size: 22px;
+    flex-shrink: 0;
+}
+
+.memory-recall-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.memory-recall-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.85;
+    margin-bottom: 2px;
+}
+
+.memory-recall-text {
+    font-size: 12px;
+    line-height: 1.4;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+    overflow-wrap: break-word;
+}
+
+.memory-recall-banner .btn {
+    color: white;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.memory-recall-banner .btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}

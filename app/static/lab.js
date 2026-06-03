@@ -465,6 +465,14 @@ async function launchCampaign(input) {
         showCampaignStatus();
         stopBtn.style.display = '';
 
+        // Memory recall: surface what HELIOS already knows about these primitives
+        if (typeof window.showMemoryRecall === 'function') {
+            const primitives = (input && input.protocol_template && input.protocol_template.steps)
+                ? input.protocol_template.steps.map(s => s && s.primitive).filter(Boolean)
+                : [];
+            window.showMemoryRecall(primitives);
+        }
+
         // Connect SSE
         connectSSE(data.campaign_id);
 
@@ -806,6 +814,10 @@ function handleSSEEvent(type, data) {
             onCampaignDone();
             // Auto-select complete step to show results
             selectStep('complete');
+            // Refresh memory panel — new episodes + priors may have landed
+            if (typeof window.loadMemorySnapshot === 'function') {
+                window.loadMemorySnapshot();
+            }
             break;
 
         // Detailed execution events
@@ -2007,25 +2019,30 @@ function escapeHtml(str) {
 
 const tabWorkflow   = $('#tabWorkflow');
 const tabLive       = $('#tabLive');
+const tabMemory     = $('#tabMemory');
 const tabQuery      = $('#tabQuery');
 const queryPanel    = $('#queryPanel');
 const livePanel     = $('#livePanel');
+const memoryPanel   = $('#memoryPanel');
 const instrumentBar = $('#instrumentBar');
 
-/** Switch between Workflow, Live, and Query tabs in the middle panel. */
+/** Switch between Workflow, Live, Memory, and Query tabs in the middle panel. */
 function switchMiddleTab(tab) {
-    const isQuery = tab === 'query';
-    const isLive  = tab === 'live';
+    const isQuery  = tab === 'query';
+    const isLive   = tab === 'live';
+    const isMemory = tab === 'memory';
 
-    if (tabWorkflow) tabWorkflow.classList.toggle('active', !isQuery && !isLive);
+    if (tabWorkflow) tabWorkflow.classList.toggle('active', !isQuery && !isLive && !isMemory);
     if (tabLive)     tabLive.classList.toggle('active',     isLive);
+    if (tabMemory)   tabMemory.classList.toggle('active',   isMemory);
     if (tabQuery)    tabQuery.classList.toggle('active',    isQuery);
 
-    if (pipelineContainer) pipelineContainer.style.display = (isQuery || isLive) ? 'none' : '';
-    if (queryPanel)        queryPanel.style.display        = isQuery ? '' : 'none';
-    if (livePanel)         livePanel.style.display         = isLive  ? '' : 'none';
+    if (pipelineContainer) pipelineContainer.style.display = (isQuery || isLive || isMemory) ? 'none' : '';
+    if (queryPanel)        queryPanel.style.display        = isQuery  ? '' : 'none';
+    if (livePanel)         livePanel.style.display         = isLive   ? '' : 'none';
+    if (memoryPanel)       memoryPanel.style.display       = isMemory ? '' : 'none';
     if (instrumentBar) {
-        instrumentBar.style.display = (isQuery || isLive) ? 'none' : (Object.keys(state.instrumentStatus).length ? '' : 'none');
+        instrumentBar.style.display = (isQuery || isLive || isMemory) ? 'none' : (Object.keys(state.instrumentStatus).length ? '' : 'none');
     }
 
     if (isQuery && !queryState.entitiesLoaded) {
@@ -2034,10 +2051,14 @@ function switchMiddleTab(tab) {
     if (isLive) {
         if (window.kpiChart) requestAnimationFrame(() => window.kpiChart.resize());
     }
+    if (isMemory) {
+        loadMemorySnapshot();
+    }
 }
 
 if (tabWorkflow) tabWorkflow.addEventListener('click', () => switchMiddleTab('workflow'));
 if (tabLive)     tabLive.addEventListener('click',     () => switchMiddleTab('live'));
+if (tabMemory)   tabMemory.addEventListener('click',   () => switchMiddleTab('memory'));
 if (tabQuery)    tabQuery.addEventListener('click',    () => switchMiddleTab('query'));
 
 // ---------------------------------------------------------------------------
@@ -2758,5 +2779,168 @@ onboardBackBtn.addEventListener('click', () => {
 
     if (typeof state !== 'undefined' && state.campaignId) {
         renderForCampaign(state.campaignId);
+    }
+})();
+
+// ===========================================================================
+// Memory Panel — fetch the three-layer snapshot and render tables
+// Hooks into the "Memory" tab and the "Memory Recall" banner that pops
+// up when a campaign launches, showing priors relevant to the chosen
+// primitives.
+// ===========================================================================
+
+(function setupMemoryPanel() {
+    const episodesTbody = document.querySelector('#memoryEpisodesTable tbody');
+    const priorsTbody   = document.querySelector('#memoryPriorsTable tbody');
+    const recipesList   = document.querySelector('#memoryRecipesList');
+    const episodePill   = document.querySelector('#memoryEpisodePill');
+    const priorPill     = document.querySelector('#memoryPriorPill');
+    const recipePill    = document.querySelector('#memoryRecipePill');
+    const refreshBtn    = document.querySelector('#memoryRefreshBtn');
+    const recallBanner  = document.querySelector('#memoryRecallBanner');
+    const recallText    = document.querySelector('#memoryRecallText');
+    const recallDismiss = document.querySelector('#memoryRecallDismiss');
+
+    let _loading = false;
+    let _loaded = false;
+
+    function fmtTs(s) {
+        if (!s) return '—';
+        try {
+            const d = new Date(s);
+            return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        } catch (_) {
+            return s;
+        }
+    }
+
+    function fmtNum(v, digits) {
+        if (v == null || isNaN(v)) return '—';
+        if (Math.abs(v) >= 1000) return v.toExponential(2);
+        return Number(v).toFixed(digits == null ? 3 : digits);
+    }
+
+    function renderEpisodes(episodes) {
+        if (!episodesTbody) return;
+        if (!episodes || episodes.length === 0) {
+            episodesTbody.innerHTML = '<tr><td colspan="4" class="memory-empty">No episodes yet — run a campaign to start building memory.</td></tr>';
+            return;
+        }
+        episodesTbody.innerHTML = episodes.map(function (e) {
+            const cls = e.outcome === 'succeeded' ? 'memory-outcome-success' : 'memory-outcome-failure';
+            const runShort = e.run_id ? e.run_id.slice(-8) : '—';
+            return '<tr>' +
+                '<td title="' + escapeHtml(e.run_id || '') + '">' + escapeHtml(runShort) + '</td>' +
+                '<td>' + escapeHtml(e.primitive || '—') + '</td>' +
+                '<td class="' + cls + '">' + escapeHtml(e.outcome || '—') + '</td>' +
+                '<td>' + escapeHtml(fmtTs(e.created_at)) + '</td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    function renderPriors(priors) {
+        if (!priorsTbody) return;
+        if (!priors || priors.length === 0) {
+            priorsTbody.innerHTML = '<tr><td colspan="6" class="memory-empty">No parameter priors yet — accumulated as campaigns run.</td></tr>';
+            return;
+        }
+        priorsTbody.innerHTML = priors.map(function (p) {
+            const sr = p.success_rate != null ? (p.success_rate * 100).toFixed(0) + '%' : '—';
+            const srCls = p.success_rate < 0.7 ? 'memory-prior-low' : '';
+            return '<tr>' +
+                '<td>' + escapeHtml(p.primitive || '—') + '</td>' +
+                '<td>' + escapeHtml(p.param_name || '—') + '</td>' +
+                '<td>' + fmtNum(p.mean) + '</td>' +
+                '<td>' + fmtNum(p.stddev) + '</td>' +
+                '<td class="' + srCls + '">' + sr + '</td>' +
+                '<td>' + (p.sample_count != null ? p.sample_count : '—') + '</td>' +
+                '</tr>';
+        }).join('');
+    }
+
+    function renderRecipes(recipes) {
+        if (!recipesList) return;
+        if (!recipes || recipes.length === 0) {
+            recipesList.innerHTML = '<p class="memory-empty">No repair recipes yet — these are learned automatically when RecoveryAgent fixes a failure.</p>';
+            return;
+        }
+        recipesList.innerHTML = recipes.map(function (r) {
+            const steps = (r.recipe || []).map(function (s) {
+                return escapeHtml(s.primitive || JSON.stringify(s));
+            }).join(' → ');
+            return '<div class="memory-recipe">' +
+                '<div class="memory-recipe-trigger">if <strong>' + escapeHtml(r.trigger_primitive || '—') + '</strong> fails with <span class="memory-recipe-error">' + escapeHtml(r.trigger_error_pattern || '—') + '</span></div>' +
+                (steps ? '<div class="memory-recipe-steps">try: ' + steps + '</div>' : '') +
+                '<div class="memory-recipe-meta">' +
+                    '<span>source: ' + escapeHtml(r.source || '—') + '</span>' +
+                    '<span>·</span>' +
+                    '<span>used ' + (r.hit_count || 0) + ' times</span>' +
+                '</div>' +
+                '</div>';
+        }).join('');
+    }
+
+    function updatePills(snap) {
+        if (episodePill) episodePill.textContent = (snap.episodes_count || 0) + ' episodes';
+        if (priorPill)   priorPill.textContent   = (snap.priors_count   || 0) + ' priors';
+        if (recipePill)  recipePill.textContent  = (snap.recipes_count  || 0) + ' recipes';
+    }
+
+    window.loadMemorySnapshot = async function loadMemorySnapshot() {
+        if (_loading) return;
+        _loading = true;
+        try {
+            const resp = await fetch(API + '/memory/snapshot');
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const snap = await resp.json();
+            updatePills(snap);
+            renderEpisodes(snap.episodes);
+            renderPriors(snap.priors);
+            renderRecipes(snap.recipes);
+            _loaded = true;
+        } catch (err) {
+            if (episodesTbody) {
+                episodesTbody.innerHTML = '<tr><td colspan="4" class="memory-empty">Failed to load: ' + escapeHtml(err.message) + '</td></tr>';
+            }
+        } finally {
+            _loading = false;
+        }
+    };
+
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', () => loadMemorySnapshot());
+    }
+
+    if (recallDismiss) {
+        recallDismiss.addEventListener('click', () => {
+            if (recallBanner) recallBanner.style.display = 'none';
+        });
+    }
+
+    // ---- Memory Recall banner (shown on campaign launch) ----
+    window.showMemoryRecall = async function showMemoryRecall(primitives) {
+        if (!recallBanner || !recallText) return;
+        const primStr = (primitives || []).filter(Boolean).join(',');
+        if (!primStr) {
+            recallText.textContent = 'No primitives to recall for this campaign.';
+            recallBanner.style.display = 'flex';
+            return;
+        }
+        try {
+            const resp = await fetch(API + '/memory/recall?primitives=' + encodeURIComponent(primStr));
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            recallText.textContent = data.summary || 'No prior experience for these primitives.';
+            recallBanner.style.display = 'flex';
+            // Auto-dismiss after 12s
+            setTimeout(() => { if (recallBanner) recallBanner.style.display = 'none'; }, 12000);
+        } catch (_) {
+            // Silently skip — non-critical
+        }
+    };
+
+    // Refresh memory panel after every campaign completes (so the new episodes show up)
+    if (typeof state !== 'undefined') {
+        // Lazy: poll-style refresh by hooking into the existing campaign_complete path below
     }
 })();

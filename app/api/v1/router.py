@@ -11,6 +11,7 @@ from app.api.v1.endpoints.events_stream import router as events_stream_router
 from app.api.v1.endpoints.evolution import router as evolution_router
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.init import router as init_router
+from app.api.v1.endpoints.memory import router as memory_router
 from app.api.v1.endpoints.metrics import router as metrics_router
 from app.api.v1.endpoints.nl_parse import router as nl_parse_router
 from app.api.v1.endpoints.onboarding import router as onboarding_router
@@ -35,6 +36,7 @@ api_router.include_router(evolution_router)
 api_router.include_router(events_stream_router)
 api_router.include_router(triggers_router)
 api_router.include_router(metrics_router)
+api_router.include_router(memory_router)
 api_router.include_router(reviews_router)
 api_router.include_router(runs_router)
 api_router.include_router(workflows_router)

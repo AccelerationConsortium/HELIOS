@@ -80,6 +80,16 @@
         </div>
     </div>
 
+    <!-- ===== Memory Recall Banner (shown when a campaign launches) ===== -->
+    <div class="memory-recall-banner" id="memoryRecallBanner" style="display:none;">
+        <div class="memory-recall-icon">🧠</div>
+        <div class="memory-recall-content">
+            <div class="memory-recall-title">Memory recall</div>
+            <div class="memory-recall-text" id="memoryRecallText">Loading prior experience…</div>
+        </div>
+        <button class="btn btn-sm btn-ghost" id="memoryRecallDismiss">Dismiss</button>
+    </div>
+
     <!-- ===== Plan Confirmation Modal ===== -->
     <div class="modal-overlay" id="planModal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="planModalTitle">
         <div class="modal-card">
@@ -194,6 +204,7 @@
                 <div class="middle-tabs">
                     <button class="middle-tab active" id="tabWorkflow" data-tab="workflow">Workflow</button>
                     <button class="middle-tab" id="tabLive" data-tab="live">Live</button>
+                    <button class="middle-tab" id="tabMemory" data-tab="memory">Memory</button>
                     <button class="middle-tab" id="tabQuery" data-tab="query">Query</button>
                 </div>
                 <div class="header-actions">
@@ -224,6 +235,47 @@
                     <p class="text-muted">Each step &mdash; parsing, planning, designing, compiling, executing, QC &mdash; is shown in real time.</p>
                 </div>
                 <!-- Pipeline steps injected dynamically by lab.js -->
+            </div>
+
+            <!-- ===== Memory Panel (hidden until Memory tab selected) ===== -->
+            <div class="memory-panel" id="memoryPanel" style="display:none;">
+                <div class="memory-panel-header">
+                    <h3>Memory — what HELIOS has learned</h3>
+                    <div class="memory-panel-meta">
+                        <span class="live-pill" id="memoryEpisodePill">0 episodes</span>
+                        <span class="live-pill" id="memoryPriorPill">0 priors</span>
+                        <span class="live-pill" id="memoryRecipePill">0 recipes</span>
+                        <button class="btn btn-sm btn-ghost" id="memoryRefreshBtn" title="Refresh">↻</button>
+                    </div>
+                </div>
+                <div class="memory-section">
+                    <h4>Episodic <span class="memory-section-sub">recent per-step outcomes</span></h4>
+                    <div class="memory-table-wrap">
+                        <table class="memory-table" id="memoryEpisodesTable">
+                            <thead>
+                                <tr><th>Run</th><th>Primitive</th><th>Outcome</th><th>When</th></tr>
+                            </thead>
+                            <tbody><tr><td colspan="4" class="memory-empty">Loading…</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="memory-section">
+                    <h4>Semantic <span class="memory-section-sub">parameter priors (running stats)</span></h4>
+                    <div class="memory-table-wrap">
+                        <table class="memory-table" id="memoryPriorsTable">
+                            <thead>
+                                <tr><th>Primitive</th><th>Param</th><th>Mean</th><th>σ</th><th>Success</th><th>n</th></tr>
+                            </thead>
+                            <tbody><tr><td colspan="6" class="memory-empty">Loading…</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="memory-section">
+                    <h4>Procedural <span class="memory-section-sub">repair recipes</span></h4>
+                    <div class="memory-recipes" id="memoryRecipesList">
+                        <p class="memory-empty">Loading…</p>
+                    </div>
+                </div>
             </div>
 
             <!-- ===== Live KPI Panel (hidden until Live tab selected) ===== -->
