@@ -528,6 +528,10 @@ function connectSSE(campaignId) {
         'well_allocator_init', 'well_exhausted',
         'recovery_decision', 'recovery_success', 'recovery_failed',
         'chemical_safety_alert',
+        // Human-in-the-loop approval events
+        'approval_requested', 'approval_received', 'approval_rejected',
+        // Memory recall (the backend fires this on campaign launch)
+        'memory_recall_event',
         // Detailed execution events
         'agent_decision', 'tool_call', 'hardware_action',
         'protocol_step', 'safety_check', 'thinking', 'log',
@@ -834,6 +838,10 @@ function handleSSEEvent(type, data) {
             if (typeof window.loadKnowledgeGraph === 'function') {
                 window.loadKnowledgeGraph();
             }
+            // Populate Query panel with top-K recipes from the result
+            if (data.top_k_recipes && typeof window.populateQueryResults === 'function') {
+                window.populateQueryResults({ rows: data.top_k_recipes, row_count: data.top_k_recipes.length });
+            }
             break;
 
         // Detailed execution events
@@ -929,6 +937,36 @@ function handleSSEEvent(type, data) {
                 timestamp: Date.now(),
             };
             updateInstrumentBar();
+            break;
+        }
+
+        case 'memory_recall_event': {
+            // The backend fired a memory recall before launching — surface it
+            // in the Memory Recall banner if it isn't already visible.
+            if (typeof window.showMemoryRecall === 'function' && data.summary) {
+                window.showMemoryRecall(data.primitives || []);
+                // Override the auto-generated summary with the backend's
+                if (typeof document !== 'undefined') {
+                    const textEl = document.querySelector('#memoryRecallText');
+                    if (textEl) textEl.textContent = data.summary;
+                }
+            }
+            break;
+        }
+
+        case 'approval_requested': {
+            // Human-in-the-loop pause: show a modal that an operator can
+            // approve/reject. For demos, the deep link can auto-approve.
+            if (typeof window.showApprovalModal === 'function') {
+                window.showApprovalModal(data);
+            }
+            break;
+        }
+
+        case 'approval_received': {
+            if (typeof window.hideApprovalModal === 'function') {
+                window.hideApprovalModal(data);
+            }
             break;
         }
 
@@ -2808,6 +2846,114 @@ onboardBackBtn.addEventListener('click', () => {
 })();
 
 // ===========================================================================
+// Approval Modal — human-in-the-loop pause. Shown when the orchestrator
+// hits a high-risk decision (low confidence, novel territory, etc.) and
+// the operator has to approve before continuing.
+// ===========================================================================
+(function setupApprovalModal() {
+    const modal       = document.querySelector('#approvalModal');
+    const titleEl     = document.querySelector('#approvalModalTitle');
+    const bodyEl      = document.querySelector('#approvalModalBody');
+    const countdownEl = document.querySelector('#approvalCountdown');
+    const approveBtn  = document.querySelector('#approvalApproveBtn');
+    const rejectBtn   = document.querySelector('#approvalRejectBtn');
+
+    let _countdownTimer = null;
+    let _currentRequest  = null;
+
+    function clearCountdown() {
+        if (_countdownTimer) {
+            clearInterval(_countdownTimer);
+            _countdownTimer = null;
+        }
+    }
+
+    window.showApprovalModal = function (data) {
+        if (!modal || !bodyEl) return;
+        _currentRequest = data;
+
+        // Build body content
+        const body = [];
+        body.push(`<p class="approval-message">${escapeHtml(data.message || 'Approval required to continue.')}</p>`);
+        if (data.agent) {
+            body.push(`<div class="approval-row"><span>Agent</span><strong>${escapeHtml(agentLabel(data.agent))}</strong></div>`);
+        }
+        if (data.round != null) {
+            body.push(`<div class="approval-row"><span>Round</span><strong>${data.round}</strong></div>`);
+        }
+        if (data.risk_factors && typeof data.risk_factors === 'object') {
+            body.push('<div class="approval-risks"><strong>Risk factors</strong>');
+            for (const [k, v] of Object.entries(data.risk_factors)) {
+                const pct = Math.round((v || 0) * 100);
+                body.push(`<div class="approval-risk-row"><span>${escapeHtml(k)}</span>
+                    <div class="approval-risk-track">
+                        <div class="approval-risk-fill" style="width:${pct}%"></div>
+                    </div>
+                    <span>${pct}%</span></div>`);
+            }
+            body.push('</div>');
+        }
+        if (data.suggested_action) {
+            body.push(`<div class="approval-row"><span>Suggested</span>
+                <strong class="approval-suggestion">${escapeHtml(data.suggested_action)}</strong></div>`);
+        }
+        bodyEl.innerHTML = body.join('');
+
+        // Reset countdown. Default is 10s; for demo recordings we want
+        // the modal to stay on screen long enough to be captured at the
+        // typical 2-3s screenshot cadence, so we extend to 18s.
+        // Pass `?modal_secs=10` in the URL to override.
+        const urlParams = new URLSearchParams(window.location.search);
+        let secs = parseInt(urlParams.get('modal_secs') || '18', 10);
+        if (countdownEl) countdownEl.textContent = secs;
+        clearCountdown();
+        _countdownTimer = setInterval(() => {
+            secs -= 1;
+            if (countdownEl) countdownEl.textContent = Math.max(0, secs);
+            if (secs <= 0) {
+                clearCountdown();
+                sendDecision('approved', 'auto');
+            }
+        }, 1000);
+
+        modal.style.display = 'flex';
+    };
+
+    window.hideApprovalModal = function () {
+        if (modal) modal.style.display = 'none';
+        clearCountdown();
+        _currentRequest = null;
+    };
+
+    function sendDecision(decision, decidedBy) {
+        // No backend endpoint in the demo flow — just emit a local event
+        // via SSE would require a round-trip. For the demo, the backend
+        // emits approval_received on its own (it doesn't actually wait
+        // for the operator). We hide the modal and the show is over.
+        if (!_currentRequest) return;
+        clearCountdown();
+        modal.style.display = 'none';
+    }
+
+    if (approveBtn) approveBtn.addEventListener('click', () => sendDecision('approved', 'operator'));
+    if (rejectBtn)  rejectBtn.addEventListener('click',  () => sendDecision('rejected', 'operator'));
+})();
+
+// ===========================================================================
+// Query pre-warm + populate — for the demo recording we pre-fire a query
+// so the Query tab has data to show.
+// ===========================================================================
+window.populateQueryResults = function (result) {
+    if (!queryResults || !queryResultsBody) return;
+    queryState.lastResult = result;
+    renderQueryResults(result);
+};
+
+(function setupDemoQuery() {
+    // Empty — real query fires from the deep link below
+})();
+
+// ===========================================================================
 // URL deep-linking — ?scenario=<key> pre-fills the input; &auto_run=1
 // fires the campaign after a short delay; &demo=1 routes to the fast
 // pre-canned /api/v1/orchestrate/demo endpoint instead of the real
@@ -2851,7 +2997,7 @@ onboardBackBtn.addEventListener('click', () => {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             objective_kpi: 'overpotential_eta10',
-                            max_rounds: 2,
+                            max_rounds: 8,
                         }),
                     });
                     const data = await resp.json();
@@ -2863,14 +3009,15 @@ onboardBackBtn.addEventListener('click', () => {
                         connectSSE(data.campaign_id);
 
                         // Auto-cycle through tabs so the recording shows
-                        // the wow moments: Pipeline → Live (chart) → Memory → Graph
-                        // The demo emits both rounds in ~14s, so wait long
-                        // enough for round 2's KPI to be on the chart before
-                        // we switch to Live.
+                        // the wow moments. The 8-round demo runs ~25s; the
+                        // approval modal is up at ~15s for ~10s; so we let
+                        // the campaign finish, then walk the audience
+                        // through Live → Memory → Graph → Query.
                         if (params.get('auto_cycle') === '1') {
-                            setTimeout(() => switchMiddleTab('live'),  16000);
-                            setTimeout(() => switchMiddleTab('memory'), 22000);
-                            setTimeout(() => switchMiddleTab('graph'),  28000);
+                            setTimeout(() => switchMiddleTab('live'),   26000);
+                            setTimeout(() => switchMiddleTab('memory'), 44000);
+                            setTimeout(() => switchMiddleTab('graph'),  60000);
+                            setTimeout(() => switchMiddleTab('query'),  78000);
                         }
                     }
                 } catch (e) {

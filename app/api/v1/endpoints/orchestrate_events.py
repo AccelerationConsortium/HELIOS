@@ -21,12 +21,28 @@ _campaign_queues: dict[str, list[asyncio.Queue]] = {}
 
 
 def publish_campaign_event(campaign_id: str, event: dict[str, Any]) -> None:
-    """Publish an event to all SSE subscribers for a campaign."""
+    """Publish an event to all SSE subscribers for a campaign.
+
+    Also persists the event to the campaign_events DB table so the SSE
+    replay phase can deliver it to late subscribers. (The real
+    orchestrator events are persisted by the event-bus listener; the
+    demo endpoint calls this function directly so it gets the same
+    guarantee.)
+    """
     for queue in _campaign_queues.get(campaign_id, []):
         try:
             queue.put_nowait(event)
         except asyncio.QueueFull:
             pass  # Drop if subscriber is slow
+
+    # Best-effort DB persistence so SSE replay can deliver this event
+    # even if the subscriber wasn't connected when it was published.
+    event_type = event.get("type") or event.get("action") or "agent_event"
+    try:
+        from app.services.campaign_events import log_event
+        log_event(campaign_id, event_type, event)
+    except Exception:
+        pass  # best-effort — if the table doesn't exist yet, skip
 
 
 async def _campaign_event_generator(

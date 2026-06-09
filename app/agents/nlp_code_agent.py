@@ -68,7 +68,7 @@ class NLPCodeOutput(BaseModel):
         ...,
         description=(
             "Status: needs_confirmation | confirmed | rejected | "
-            "auto_approved | error"
+            "auto_approved | needs_clarification | unsupported | unsafe | error"
         ),
     )
 
@@ -81,6 +81,8 @@ class NLPCodeOutput(BaseModel):
         description="Compiler-ready protocol steps (available after confirmation)",
     )
     plan_candidates: list[dict[str, Any]] = Field(default_factory=list)
+    parsed_requirements: dict[str, Any] = Field(default_factory=dict)
+    clarifying_questions: list[str] = Field(default_factory=list)
     validation_errors: list[str] = Field(default_factory=list)
     validation_warnings: list[str] = Field(default_factory=list)
 
@@ -135,12 +137,49 @@ class NLPCodeAgent(BaseAgent[NLPCodeInput, NLPCodeOutput]):
 
     async def _handle_generate(self, input_data: NLPCodeInput) -> NLPCodeOutput:
         from app.agents.code_writer_agent import CodeWriterAgent, CodeWriterInput
+        from app.agents.requirement_parser_agent import (
+            RequirementParseInput,
+            RequirementParserAgent,
+        )
         from app.services.code_confirmation import (
             CodeConfirmationRequest,
             request_code_confirmation,
         )
 
-        # Step 1: Generate code via CodeWriterAgent
+        # Step 1: Parse into a typed requirements contract before planning.
+        parser = RequirementParserAgent()
+        parse_result = await parser.run(
+            RequirementParseInput(
+                intent=input_data.intent,
+                context=input_data.context,
+            )
+        )
+
+        if not parse_result.success or parse_result.output is None:
+            return NLPCodeOutput(
+                status="error",
+                chat_message=(
+                    "Requirement parsing failed: "
+                    + "; ".join(parse_result.errors)
+                ),
+                validation_errors=parse_result.errors,
+            )
+
+        parsed = parse_result.output
+        parsed_dict = parsed.model_dump(mode="json")
+
+        if parsed.status in {"needs_clarification", "unsupported", "unsafe"}:
+            return NLPCodeOutput(
+                status=parsed.status,
+                parsed_requirements=parsed_dict,
+                clarifying_questions=parsed.clarifying_questions,
+                validation_errors=parsed.safety_flags + parsed.unsupported_terms,
+                validation_warnings=parsed.assumptions,
+                chat_message=self._build_parse_blocking_message(parsed_dict),
+                serialised_result={"parsed_requirements": parsed_dict},
+            )
+
+        # Step 2: Generate code via CodeWriterAgent
         writer = CodeWriterAgent()
         writer_input = CodeWriterInput(
             intent=input_data.intent,
@@ -157,6 +196,7 @@ class NLPCodeAgent(BaseAgent[NLPCodeInput, NLPCodeOutput]):
                     "Code generation failed: "
                     + "; ".join(writer_result.errors)
                 ),
+                parsed_requirements=parsed_dict,
                 validation_errors=writer_result.errors,
             )
 
@@ -167,7 +207,7 @@ class NLPCodeAgent(BaseAgent[NLPCodeInput, NLPCodeOutput]):
             output.workflow_json, output.device_actions
         )
 
-        # Step 2: Create confirmation request
+        # Step 3: Create confirmation request
         confirmation_req = CodeConfirmationRequest(
             python_code=output.python_code,
             workflow_json=output.workflow_json,
@@ -188,6 +228,7 @@ class NLPCodeAgent(BaseAgent[NLPCodeInput, NLPCodeOutput]):
             "workflow_json": output.workflow_json,
             "protocol_steps": protocol_steps,
             "plan_candidates": output.plan_candidates,
+            "parsed_requirements": parsed_dict,
         }
 
         if input_data.auto_approve:
@@ -198,6 +239,8 @@ class NLPCodeAgent(BaseAgent[NLPCodeInput, NLPCodeOutput]):
                 workflow_json=output.workflow_json,
                 protocol_steps=protocol_steps,
                 plan_candidates=output.plan_candidates,
+                parsed_requirements=parsed_dict,
+                clarifying_questions=parsed.clarifying_questions,
                 validation_errors=output.validation_errors,
                 validation_warnings=output.validation_warnings,
                 chat_message="Code auto-approved and ready for injection.",
@@ -230,6 +273,8 @@ class NLPCodeAgent(BaseAgent[NLPCodeInput, NLPCodeOutput]):
             workflow_json=output.workflow_json,
             protocol_steps=protocol_steps,
             plan_candidates=output.plan_candidates,
+            parsed_requirements=parsed_dict,
+            clarifying_questions=parsed.clarifying_questions,
             validation_errors=output.validation_errors,
             validation_warnings=output.validation_warnings,
             chat_message=chat_msg,
@@ -283,6 +328,23 @@ class NLPCodeAgent(BaseAgent[NLPCodeInput, NLPCodeOutput]):
     # ------------------------------------------------------------------ #
     # Conversion helpers
     # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _build_parse_blocking_message(parsed: dict[str, Any]) -> str:
+        status = parsed.get("status", "needs_clarification")
+        if status == "unsafe":
+            flags = parsed.get("safety_flags", [])
+            return "Requirement parsing found safety flags: " + "; ".join(flags)
+        if status == "unsupported":
+            terms = parsed.get("unsupported_terms", [])
+            return "Requirement uses unsupported operations: " + ", ".join(terms)
+
+        questions = parsed.get("clarifying_questions", [])
+        if not questions:
+            return "Requirement parsing needs clarification before code generation."
+        return "I need clarification before generating protocol code:\n" + "\n".join(
+            f"- {q}" for q in questions
+        )
 
     @staticmethod
     def _convert_workflow_to_steps(

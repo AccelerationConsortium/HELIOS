@@ -304,6 +304,17 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             ),
         })
 
+        if getattr(self, "_auto_approve_pauses", False):
+            self._emit(campaign_id, {
+                "type": "agent_pause_resolved",
+                "pause_id": pause_id,
+                "agent": agent_name,
+                "decision": "approved",
+                "decided_by": "auto",
+                "message": f"Auto-approved {agent_name} pause for dry-run/benchmark execution",
+            })
+            return PauseResult(decision="approved", decided_by="auto")
+
         # 3. Poll for decision
         _POLL_INTERVAL = 2.0
         _elapsed = 0.0
@@ -364,6 +375,9 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         agent_trace: list[dict[str, Any]] = []
         # Store manual confirmation flag for _execute_real_run and cleaning hooks
         self._require_manual_confirmation = input_data.require_manual_confirmation
+        self._auto_approve_pauses = bool(
+            input_data.dry_run or input_data.policy_snapshot.get("auto_approve_pauses", False)
+        )
         # v2: Track campaign_id for pause handler
         self._current_campaign_id = campaign_id
         self._register_campaign_agents(campaign_id)
@@ -1262,10 +1276,30 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 })
 
                 if input_data.dry_run:
-                    # Simulate a KPI value
-                    import random
-                    run_kpi = random.gauss(100, 20)
-                    run_step_result = {"simulated_kpi": run_kpi}
+                    if input_data.policy_snapshot.get("simulation_oracle") == "electrochem":
+                        from app.services.electrochem_surrogate import (
+                            ElectrochemSurrogateConfig,
+                            evaluate_electrochem_candidate,
+                        )
+
+                        oracle_seed = int(input_data.policy_snapshot.get("simulation_seed", 0))
+                        oracle_noise = float(input_data.policy_snapshot.get("simulation_noise_std_mv", 2.0))
+                        fault_profile = str(input_data.policy_snapshot.get("simulation_fault_profile", "none"))
+                        observation = evaluate_electrochem_candidate(
+                            candidate_params if isinstance(candidate_params, dict) else {},
+                            config=ElectrochemSurrogateConfig(
+                                seed=oracle_seed + round_num * 1000 + i,
+                                noise_std_mv=oracle_noise,
+                                fault_profile=fault_profile,
+                            ),
+                        )
+                        run_kpi = observation.overpotential_mv
+                        run_step_result = observation.to_step_result()
+                    else:
+                        # Simulate a KPI value for generic dry-run campaigns.
+                        import random
+                        run_kpi = random.gauss(100, 20)
+                        run_step_result = {"simulated_kpi": run_kpi}
                 else:
                     # Real execution with recovery: create run → dispatch to worker → collect results
                     # RecoveryAgent provides retry/abort/degrade strategies on failure

@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 
@@ -43,6 +44,33 @@ def main() -> None:
         action="store_true",
         help="Enable verbose logging",
     )
+    parser.add_argument(
+        "--study-e2e",
+        action="store_true",
+        help="Run the HELIOS end-to-end electrochem research study instead of scenario pack",
+    )
+    parser.add_argument(
+        "--study-baselines",
+        default="helios_full,random,lhs,single_bo,no_adaptive",
+        help="Comma-separated e2e study baselines",
+    )
+    parser.add_argument(
+        "--study-seeds",
+        default="0,1,2",
+        help="Comma-separated integer seeds for --study-e2e",
+    )
+    parser.add_argument(
+        "--study-rounds",
+        type=int,
+        default=3,
+        help="Rounds per e2e study run",
+    )
+    parser.add_argument(
+        "--study-batch-size",
+        type=int,
+        default=3,
+        help="Candidates per round for --study-e2e",
+    )
     args = parser.parse_args()
 
     # Configure logging
@@ -51,6 +79,24 @@ def main() -> None:
         level=level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
+
+    if args.study_e2e:
+        from benchmarks.e2e_study import StudySpec, run_study_sync
+
+        seeds = tuple(int(s.strip()) for s in args.study_seeds.split(",") if s.strip())
+        baselines = tuple(
+            b.strip() for b in args.study_baselines.split(",") if b.strip()
+        )
+        report = run_study_sync(
+            StudySpec(
+                seeds=seeds,
+                baselines=baselines,  # type: ignore[arg-type]
+                max_rounds=args.study_rounds,
+                batch_size=args.study_batch_size,
+            )
+        )
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+        return
 
     # Import scenarios (triggers registration)
     from benchmarks.reporter import Reporter

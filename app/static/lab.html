@@ -91,6 +91,27 @@
         <button class="btn btn-sm btn-ghost" id="memoryRecallDismiss">Dismiss</button>
     </div>
 
+    <!-- ===== Approval Modal (human-in-the-loop pause) ===== -->
+    <div class="modal-overlay" id="approvalModal" style="display:none;" role="dialog" aria-modal="true">
+        <div class="modal-card approval-card">
+            <div class="modal-header">
+                <h2 id="approvalModalTitle">Approval required</h2>
+                <span class="modal-countdown-wrap">
+                    <span class="modal-countdown-label">Auto-approve in</span>
+                    <span class="modal-countdown" id="approvalCountdown">18</span>
+                    <span class="modal-countdown-label">s</span>
+                </span>
+            </div>
+            <div class="modal-body" id="approvalModalBody">
+                <!-- Filled dynamically by showApprovalModal() -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-primary" id="approvalApproveBtn">✓ Approve</button>
+                <button class="btn btn-danger"  id="approvalRejectBtn">✕ Reject</button>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== Plan Confirmation Modal ===== -->
     <div class="modal-overlay" id="planModal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="planModalTitle">
         <div class="modal-card">

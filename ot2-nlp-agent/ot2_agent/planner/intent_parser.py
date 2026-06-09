@@ -163,7 +163,7 @@ class IntentParser:
             return "en"
 
         chinese_ratio = chinese_chars / total_chars
-        return "zh" if chinese_ratio > 0.3 else "en"
+        return "zh" if chinese_chars >= 2 and chinese_ratio >= 0.2 else "en"
 
     def _normalize_text(self, text: str) -> str:
         """Normalize text for processing."""

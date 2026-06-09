@@ -527,7 +527,7 @@ class ControlPlane:
 
         # ── Update reputation from the obtained result ───────────
         self._update_reputation(agent_name, result)
-        harvest_agent_result(context=runtime_context, result=result)
+        await harvest_agent_result(context=runtime_context, result=result)
         self._emit_trace_span(
             call_id=call_id,
             caller=caller,
@@ -694,6 +694,11 @@ class ControlPlane:
             "success": result.success,
             "duration_ms": result.duration_ms,
             "errors": result.errors[:3],
+            "warning_count": len(result.warnings),
+            "pause_count": len(result.pause_decisions),
+            "granularity_used": (
+                str(result.granularity_used) if result.granularity_used is not None else ""
+            ),
             "round_number": context_snapshot.get("round_number"),
             "candidate_index": context_snapshot.get("candidate_index"),
             "knowledge_event_count": context_snapshot.get("knowledge_event_count", 0),

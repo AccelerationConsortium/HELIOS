@@ -102,7 +102,8 @@ class NLParser:
         total_chars = len(text.replace(' ', ''))
         if total_chars == 0:
             return 'en'
-        return 'zh' if chinese_chars / total_chars > 0.3 else 'en'
+        chinese_ratio = chinese_chars / total_chars
+        return 'zh' if chinese_chars >= 2 and chinese_ratio >= 0.2 else 'en'
 
     def parse(self, text: str) -> ParsedIntent:
         """

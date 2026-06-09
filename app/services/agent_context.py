@@ -135,14 +135,10 @@ async def build_agent_context(
                 for key, entry in sorted(entries.items()):
                     lines.append(
                         f"- **[{key}]** {entry.value!r} "
-                        f"(confidence {entry.confidence:.0%}, from {entry.author})"
+                        f"(type {entry.entry_type}, confidence "
+                        f"{entry.confidence:.0%}, from {entry.author})"
                     )
-                    blackboard_entries[key] = {
-                        "value": entry.value,
-                        "author": entry.author,
-                        "confidence": entry.confidence,
-                        "timestamp": entry.timestamp,
-                    }
+                    blackboard_entries[key] = entry.to_dict()
                 prompt_parts.append("\n".join(lines) + "\n")
         except Exception:
             logger.debug("Agent context blackboard read failed", exc_info=True)
@@ -180,39 +176,59 @@ def persist_agent_context_snapshot(context: AgentRuntimeContext | None) -> None:
         logger.debug("Agent context snapshot persistence failed", exc_info=True)
 
 
-def harvest_agent_result(
+async def harvest_agent_result(
     *,
     context: AgentRuntimeContext | None,
     result: AgentResult,
 ) -> None:
-    """Publish useful post-call observations back to the KnowledgeBus."""
+    """Publish useful post-call observations to collaboration memory."""
     if context is None or context.round_number is None or not result.success:
         return
     output = result.output
     if output is None:
         return
 
-    summaries = _extract_output_summaries(output)
-    if not summaries:
+    observations = _extract_output_observations(output)
+    if not observations:
         return
 
     try:
         from app.services.knowledge_bus import KnowledgeEvent, get_bus
 
         bus = get_bus(context.campaign_id)
-        for key, text, confidence in summaries:
+        for observation in observations:
             bus.publish(
                 KnowledgeEvent(
                     source_agent=context.agent_name,
-                    key=key,
-                    delta_text=text,
-                    confidence=confidence,
+                    key=observation.key,
+                    delta_text=observation.prompt_text,
+                    confidence=observation.confidence,
                     round_id=str(context.round_number),
                     ttl_rounds=3,
                 )
             )
     except Exception:
         logger.debug("Agent context result harvest failed", exc_info=True)
+
+    try:
+        from app.agents.blackboard import manager
+
+        board = manager.get_or_create(str(context.round_number), context.campaign_id)
+        written_entries = []
+        for observation in observations:
+            entry = await board.write(
+                observation.key,
+                observation.value,
+                author=context.agent_name,
+                confidence=observation.confidence,
+                entry_type=observation.entry_type,
+                tags=observation.tags,
+                metadata=observation.metadata,
+            )
+            written_entries.append(entry.to_dict())
+        _persist_blackboard_entries(context, written_entries)
+    except Exception:
+        logger.debug("Agent blackboard result harvest failed", exc_info=True)
 
 
 def _extract_int(model: BaseModel, *names: str) -> int | None:
@@ -227,8 +243,19 @@ def _extract_int(model: BaseModel, *names: str) -> int | None:
     return None
 
 
-def _extract_output_summaries(output: Any) -> list[tuple[str, str, float]]:
-    items: list[tuple[str, str, float]] = []
+@dataclass(frozen=True)
+class _OutputObservation:
+    key: str
+    value: Any
+    prompt_text: str
+    confidence: float
+    entry_type: str
+    tags: tuple[str, ...] = ()
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def _extract_output_observations(output: Any) -> list[_OutputObservation]:
+    items: list[_OutputObservation] = []
 
     confidence = 0.75
     for attr in ("confidence", "convergence_confidence"):
@@ -243,18 +270,77 @@ def _extract_output_summaries(output: Any) -> list[tuple[str, str, float]]:
     for attr in ("narrative", "recommendation", "summary", "notes", "chat_message"):
         text = getattr(output, attr, None)
         if isinstance(text, str) and text.strip():
-            items.append((
-                f"agent.{output.__class__.__name__}.{attr}",
-                text.strip()[:500],
-                confidence,
-            ))
+            trimmed = text.strip()[:500]
+            items.append(
+                _OutputObservation(
+                    key=f"agent.{output.__class__.__name__}.{attr}",
+                    value=trimmed,
+                    prompt_text=trimmed,
+                    confidence=confidence,
+                    entry_type="observation",
+                    tags=("agent_output", attr),
+                    metadata={
+                        "output_model": output.__class__.__name__,
+                        "field": attr,
+                    },
+                )
+            )
 
     decision_nodes = getattr(output, "decision_nodes", None)
     if decision_nodes:
-        items.append((
-            f"agent.{output.__class__.__name__}.decision_nodes",
-            f"Produced {len(decision_nodes)} decision node(s).",
-            confidence,
-        ))
+        safe_nodes = _json_safe(decision_nodes)
+        count = len(decision_nodes)
+        items.append(
+            _OutputObservation(
+                key=f"agent.{output.__class__.__name__}.decision_nodes",
+                value=safe_nodes,
+                prompt_text=f"Produced {count} decision node(s).",
+                confidence=confidence,
+                entry_type="decision",
+                tags=("agent_output", "decision_nodes"),
+                metadata={
+                    "output_model": output.__class__.__name__,
+                    "field": "decision_nodes",
+                    "count": count,
+                },
+            )
+        )
 
     return items
+
+
+def _persist_blackboard_entries(
+    context: AgentRuntimeContext,
+    entries: list[dict[str, Any]],
+) -> None:
+    if not entries:
+        return
+    try:
+        from app.services.campaign_events import log_event
+
+        log_event(
+            context.campaign_id,
+            "blackboard_entries",
+            {
+                "type": "blackboard_entries",
+                "campaign_id": context.campaign_id,
+                "round_number": context.round_number,
+                "agent": context.agent_name,
+                "trace_id": context.trace_id,
+                "entries": _json_safe(entries),
+            },
+        )
+    except Exception:
+        logger.debug("Blackboard event persistence failed", exc_info=True)
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return repr(value)

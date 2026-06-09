@@ -14,6 +14,18 @@ from app.contracts.campaign_plan import (
     RoundSpec,
     new_campaign_plan_id,
 )
+from app.contracts.mission import (
+    AgentProposal,
+    ArbiterDecision,
+    AutonomyLevel,
+    EvidenceItem,
+    GovernanceEnvelope,
+    MissionContract,
+    MissionLaunchResult,
+    MissionObjective,
+    new_mission_id,
+    new_proposal_id,
+)
 from app.contracts.query_contract import (
     ColumnSpec,
     QueryConstraints,
@@ -62,6 +74,17 @@ __all__ = [
     "StopCondition",
     "TaskContract",
     "new_task_contract_id",
+    # Agent-led mission contracts
+    "AgentProposal",
+    "ArbiterDecision",
+    "AutonomyLevel",
+    "EvidenceItem",
+    "GovernanceEnvelope",
+    "MissionContract",
+    "MissionLaunchResult",
+    "MissionObjective",
+    "new_mission_id",
+    "new_proposal_id",
     # L2 -> L1
     "CampaignPlan",
     "ResourceRequirements",

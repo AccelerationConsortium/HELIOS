@@ -271,6 +271,19 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                 duration_ms=(time.monotonic() - start) * 1000,
             )
 
+        granularity_used: Granularity | None = None
+        warnings: list[str] = []
+        try:
+            granularity_used = await self.assess_granularity(input_data)
+        except Exception as exc:
+            warnings.append(f"granularity assessment failed: {exc}")
+            self.logger.debug(
+                "%s granularity assessment failed (trace=%s)",
+                self.name,
+                trace_id,
+                exc_info=True,
+            )
+
         # Process
         try:
             output = await self.process(input_data)
@@ -285,6 +298,8 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                 agent_name=self.name,
                 trace_id=trace_id,
                 duration_ms=duration,
+                warnings=warnings,
+                granularity_used=granularity_used,
                 pause_decisions=list(self._run_pause_decisions),
             )
         except AgentPauseRejected as exc:
@@ -299,6 +314,8 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                 agent_name=self.name,
                 trace_id=trace_id,
                 duration_ms=duration,
+                warnings=warnings,
+                granularity_used=granularity_used,
                 pause_decisions=list(self._run_pause_decisions),
             )
         except Exception as exc:
@@ -314,5 +331,7 @@ class BaseAgent(ABC, Generic[InputT, OutputT]):
                 agent_name=self.name,
                 trace_id=trace_id,
                 duration_ms=duration,
+                warnings=warnings,
+                granularity_used=granularity_used,
                 pause_decisions=list(self._run_pause_decisions),
             )

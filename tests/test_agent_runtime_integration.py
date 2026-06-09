@@ -48,6 +48,60 @@ class RuntimeAgent:
         self.agent = _Agent()
 
 
+class CollaborationInput(BaseModel):
+    round_number: int
+
+
+class CollaborationOutput(BaseModel):
+    narrative: str
+    confidence: float = 0.9
+    decision_nodes: list[dict] = []
+
+
+class CollaborationAgent:
+    name = "collaboration_agent"
+    layer = "test"
+    capabilities: ClassVar[list] = []
+
+    def __init__(self) -> None:
+        from app.agents.base import AgentCapability, BaseAgent
+        from app.agents.pause import Granularity
+
+        class _Agent(BaseAgent[CollaborationInput, CollaborationOutput]):
+            name = "collaboration_agent"
+            layer = "test"
+            capabilities: ClassVar[list] = [
+                AgentCapability("collaboration.publish", "Publishes shared observations")
+            ]
+
+            def validate_input(self, input_data: CollaborationInput) -> list[str]:
+                return []
+
+            async def assess_granularity(
+                self,
+                input_data: CollaborationInput,
+                context: dict | None = None,
+            ) -> Granularity:
+                return Granularity.FINE
+
+            async def process(self, input_data: CollaborationInput) -> CollaborationOutput:
+                return CollaborationOutput(
+                    narrative="Catalyst trend stabilized after the latest measurement.",
+                    confidence=0.92,
+                    decision_nodes=[
+                        {
+                            "id": "stability",
+                            "label": "Stability check",
+                            "options": ["stable", "unstable"],
+                            "selected": "stable",
+                            "reason": "Synthetic test output",
+                        }
+                    ],
+                )
+
+        self.agent = _Agent()
+
+
 async def test_control_plane_injects_runtime_context_from_knowledge_bus():
     from app.agents.control_plane import ControlPlane
     from app.core.db import init_db
@@ -86,6 +140,76 @@ async def test_control_plane_injects_runtime_context_from_knowledge_bus():
     events = replay_events(campaign_id)
     assert any(ev["event_type"] == "agent_context_snapshot" for ev in events)
     assert any(ev["event_type"] == "agent_trace_span" for ev in events)
+
+
+async def test_control_plane_harvests_agent_output_to_collaboration_memory():
+    from app.agents.blackboard import manager
+    from app.agents.control_plane import ControlPlane
+    from app.agents.pause import Granularity
+    from app.core.db import init_db
+    from app.services.campaign_events import replay_events
+    from app.services.campaign_state import create_campaign
+
+    init_db()
+    campaign_id = f"camp-collab-test-{uuid.uuid4().hex[:8]}"
+    create_campaign(campaign_id, {"contract_id": "contract"}, direction="maximize")
+
+    cp = ControlPlane()
+    cp.set_campaign_id(campaign_id)
+    cp.register(CollaborationAgent().agent)
+    cp.register(RuntimeAgent().agent)
+
+    result = await cp.call(
+        "collaboration_agent",
+        CollaborationInput(round_number=4),
+        caller="test",
+        trace_id="trace-collab",
+    )
+
+    assert result.success
+    assert result.granularity_used == Granularity.FINE
+
+    board = manager.get_existing("4", campaign_id)
+    assert board is not None
+    entry = board.read("agent.CollaborationOutput.narrative")
+    assert entry is not None
+    assert entry.author == "collaboration_agent"
+    assert entry.entry_type == "observation"
+    assert entry.metadata["output_model"] == "CollaborationOutput"
+    assert entry.metadata["field"] == "narrative"
+    assert "Catalyst trend stabilized" in entry.value
+    decision_entry = board.read("agent.CollaborationOutput.decision_nodes")
+    assert decision_entry is not None
+    assert decision_entry.entry_type == "decision"
+    assert decision_entry.metadata["count"] == 1
+
+    runtime_result = await cp.call(
+        "runtime_agent",
+        RuntimeInput(round_number=4),
+        caller="test",
+        trace_id="trace-runtime",
+    )
+    assert runtime_result.success
+    assert runtime_result.output is not None
+    assert "Catalyst trend stabilized" in runtime_result.output.prompt_block
+
+    spans = [
+        event["payload"]
+        for event in replay_events(campaign_id)
+        if event["event_type"] == "agent_trace_span"
+    ]
+    collab_span = next(span for span in spans if span["agent"] == "collaboration_agent")
+    assert collab_span["granularity_used"] == "fine"
+    assert collab_span["warning_count"] == 0
+    blackboard_events = [
+        event["payload"]
+        for event in replay_events(campaign_id)
+        if event["event_type"] == "blackboard_entries"
+    ]
+    assert blackboard_events
+    assert blackboard_events[0]["agent"] == "collaboration_agent"
+    event_entries = blackboard_events[0]["entries"]
+    assert any(item["entry_type"] == "decision" for item in event_entries)
 
 
 async def test_context_read_does_not_create_empty_blackboard():
