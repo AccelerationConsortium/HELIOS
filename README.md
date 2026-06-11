@@ -15,25 +15,63 @@
 
 # HELIOS — Holistic Experiment Learning Intelligent Orchestration System
 
-HELIOS is an **agent-native orchestrator** for self-driving laboratories (SDLs). It composes 25 specialist agents into 4 cooperating swarms behind a single natural-language interface — so scientists describe experiments in plain language, and HELIOS plans, validates, executes, and iterates autonomously, closing the loop between hypothesis and hardware.
+HELIOS is an **agent-native orchestrator** for self-driving laboratories (SDLs). It composes 27 specialist agents into 4 cooperating swarms behind a single natural-language interface — so scientists describe experiments in plain language, and HELIOS plans, validates, executes, and iterates autonomously, closing the loop between hypothesis and hardware.
+
+Most "AI lab assistants" are LLM wrappers: a human stays in the driver's seat and the model translates their words into button clicks. HELIOS inverts that — **agents are the operators**. Contracts, leases, skills, the event bus, and recovery are all designed for agents as first-class citizens. The cleanest test: mock out the LLM (`LLM_PROVIDER=mock`) and the entire campaign loop still closes, because the intelligence lives in the orchestration and optimization layers, not in prompt glue.
+
+---
+
+## How a Campaign Flows Through the Agents
+
+What actually happens between a scientist typing one sentence and HELIOS handing back an optimized recipe:
+
+**1. One sentence in → a typed contract out.**
+The user writes, e.g., *"Screen OER catalysts to minimize overpotential at 10 mA/cm²; Fe/Co/Ni ratios are tunable; budget 30 rounds."* The **conversation engine** and **RequirementParserAgent** run a multi-turn clarification dialogue — missing KPI? unclear bounds? which steps need a human signature? — and emit a **`TaskContract`**: a versioned, schema-validated object holding the objective, the exploration space, stop conditions, a safety envelope, and the human-gate policy. From this point on, every agent works off the contract, not the chat history. Contracts carry `schema_version` and migrate forward automatically, so a campaign archived months ago still loads after upgrades.
+
+**2. Devices are exposed as skills.**
+Every instrument registers a skill (`agent/skills/*.md`): its primitives, their typed parameters, a safety class (e.g. `HAZARDOUS`), and precondition/effect contracts ("channel must be idle"). Agents can only invoke declared primitives with type-checked arguments — **the machine's capabilities are fixed, so the LLM cannot hallucinate an operation that doesn't exist**. New instruments are onboarded by the **OnboardingAgent**, which discovers primitives, generates integration code and the skill definition, and writes them to disk after human review — hours, not weeks.
+
+**3. The orchestrator runs the round loop.**
+The **OrchestratorAgent** takes over and drives one pipeline per round, each stage a dedicated agent:
 
 ```
-Scientist (natural language) → NL Parser → Campaign Planner → Safety Gate
-→ Protocol Compiler → Hardware Execution → Data Collection → Bayesian / RL Optimization
-→ ... (next round)
+PlannerAgent          expands the contract into a round plan
+DesignAgent           proposes candidates — an inner RL loop picks the search
+                      strategy per round (LHS early, GP+EI/MES mid, refinement late)
+SafetyAgent           checks every candidate against the contract's safety envelope
+CompilerAgent         compiles recipes into an executable hardware DAG
+Execution layer       dispatches to OT-2, PLC pumps, potentiostat (or simulation)
+SensingAgent /        QC + analysis of returning data
+AnalyzerAgent
+StopAgent             converged? budget exhausted? continue or stop
 ```
+
+All agents share one shape: a common `BaseAgent` base class, typed Pydantic I/O, and a mandatory **decision tree** record per decision (options considered, choice, rationale). Cross-agent calls go through the **ControlPlane** — lease first, call second, audit always — which is why 27 agents don't collapse into chaos.
+
+**4. Hard problems convene a swarm.**
+When the pipeline hits something that needs judgment — an anomalous data pattern, a hypothesis worth stress-testing — the **SwarmFactory** spawns an ephemeral consult: **Scientist** (hypotheses), **Engineer** (feasibility/cost), **Analyst** (data interpretation), **Validator** (tries to break the other three). They coordinate over a shared **blackboard** and disband when done. Racing swarms and adversarial hypothesis loops let cheap compute fight it out before expensive robot time is spent.
+
+**5. Two things run through everything: safety and the event bus.**
+Safety appears at three levels — the contract's safety envelope, per-primitive safety classes and preconditions, and the per-round SafetyAgent; human approval is a first-class **pause state**, resumable from checkpoint. Meanwhile every agent action streams onto the **event bus**, persists to the DB, and broadcasts live over **SSE** with exactly-once delivery — watch agents think in the browser, replay the full decision chain afterwards.
+
+**6. Failure is a planned-for state.**
+Contracts isolate failures to their layer; the **RecoveryAgent** fixes forward (re-plans the round, not the campaign). If the whole process dies, campaigns resume from their last SQLite checkpoint via `/resume`.
+
+**7. The data stays alive.**
+Results, uncertainties, and decision chains land in campaign memory — queryable in natural language ("which recipe won last week? plot its CV"). **RGPE transfer learning** warm-starts the next related campaign with interpretable ranking weights: the more HELIOS runs, the smarter the next campaign starts.
 
 ---
 
 ## Features
 
-- **Natural language intake** — paste a free-text experiment description; the NL parser extracts objective KPIs, parameter spaces, instrument requirements, and round counts
-- **Agent-native orchestration** — 25 specialist agents grouped into 4 swarms (Scientist / Engineer / Analyst / Validator), composed as a stage graph that branches, retries, and remembers
-- **Real-time reasoning stream** — every agent step emits SSE events; the browser shows a live decision tree of what each agent considered and why
+- **Natural language intake** — a multi-turn clarification dialogue turns a free-text experiment description into a versioned, schema-validated `TaskContract`
+- **Agent-native orchestration** — 27 specialist agents grouped into 4 swarms (Scientist / Engineer / Analyst / Validator), composed as a stage graph that branches, retries, and remembers; all cross-agent calls go through a ControlPlane with agent leases and a full audit trail
+- **Devices as skills** — instruments expose typed primitives with safety classes and precondition/effect contracts; agents cannot invoke operations that don't exist
+- **Real-time reasoning stream** — every agent step emits SSE events with exactly-once delivery and DB-backed replay; the browser shows a live decision tree of what each agent considered and why
 - **Hardware agnostic** — runs in `simulated` mode for development; switches to live Opentrons OT-2, PLC relays, and electrochemistry sensors by changing one env var
-- **Adaptive optimization** — Bayesian Optimization (Ax), DQN, PPO, genetic algorithms, and multi-objective Pareto search, selected automatically per campaign phase
-- **Safety-first** — preflight checks before every round; human-in-the-loop confirmation gates for high-risk operations; full audit trail
-- **Persistent state** — SQLite-backed campaign history survives restarts; SSE replays all missed events on reconnect
+- **Research-grade optimization** — ARD-Matérn GP surrogates with EI / UCB / TS / MES / KG acquisition, multi-fidelity BO, RGPE transfer learning, conformal uncertainty, and causal discovery; an inner RL loop selects the strategy per campaign phase
+- **Safety-first** — contract safety envelopes, per-primitive safety classes, preflight checks before every round, and human-in-the-loop gates as resumable pause states
+- **Durable execution** — SQLite-backed campaign checkpoints survive restarts; crashed campaigns resume from the last completed round
 
 ---
 
@@ -43,10 +81,10 @@ Scientist (natural language) → NL Parser → Campaign Planner → Safety Gate
 
 | Layer | Role | Key Components |
 |-------|------|----------------|
-| **L3 Intake** | Campaign coordination | `Orchestrator`, `NLParser` |
-| **L2 Planning** | Experimental design & strategy | `PlannerAgent`, `DesignAgent`, `SafetyAgent` |
-| **L1 Compilation** | Protocol → executable code | `CompilerAgent`, `CodeWriterAgent`, `DeckLayoutAgent` |
-| **L0 Execution** | Hardware control & monitoring | `MonitorAgent`, `SensingAgent`, `RecoveryAgent` |
+| **L3 Orchestration** | Task contracts, admission control, agent lease pool | `OrchestratorAgent`, `ControlPlane`, `RequirementParserAgent` |
+| **L2 Planning** | Experimental design & adaptive strategy | `PlannerAgent`, `DesignAgent`, `SafetyAgent`, inner RL strategy router |
+| **L1 Execution** | Protocol compilation & hardware abstraction | `CompilerAgent`, `CodeWriterAgent`, `DeckLayoutAgent`, hardware dispatcher |
+| **L0 Evidence** | Campaign memory, uncertainty, causal updates | `AnalyzerAgent`, `SensingAgent`, `MonitorAgent`, `RecoveryAgent` |
 
 ### Agent Roster
 
@@ -168,8 +206,11 @@ Base URL: `http://localhost:8000`
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/v1/orchestrate/start` | Start a campaign from a `TaskContract` |
+| `POST` | `/api/v1/orchestrate/from-session/{session_id}` | Start a campaign from an init conversation session |
 | `GET` | `/api/v1/orchestrate/{campaign_id}/status` | Query campaign state and progress |
-| `GET` | `/api/v1/orchestrate/{campaign_id}/events/stream` | SSE event stream for a campaign |
+| `POST` | `/api/v1/orchestrate/{campaign_id}/stop` | Cancel a running campaign |
+| `POST` | `/api/v1/orchestrate/{campaign_id}/resume` | Resume a paused/crashed campaign from its checkpoint |
+| `GET` | `/api/v1/orchestrate/{campaign_id}/events/stream` | SSE event stream (supports `Last-Event-ID` replay) |
 
 ### Natural Language Interface
 
@@ -183,7 +224,10 @@ Base URL: `http://localhost:8000`
 |--------|------|-------------|
 | `POST` | `/api/v1/init/start` | Start interactive setup session |
 | `POST` | `/api/v1/init/{session_id}/respond` | Respond to initialization prompts |
-| `POST` | `/api/v1/onboarding/start` | Onboard a new hardware device |
+| `POST` | `/api/v1/onboarding/discover` | Auto-discover primitives for a new instrument |
+| `POST` | `/api/v1/onboarding/generate` | Generate integration code for a new instrument |
+| `POST` | `/api/v1/onboarding/confirm` | Approve safety/config confirmations |
+| `POST` | `/api/v1/onboarding/write` | Write approved integration files to disk |
 
 ### Data & Metrics
 
@@ -252,20 +296,20 @@ pytest tests/
 pytest -v --cov=app tests/
 
 # Specific module
-pytest tests/test_strategy_router.py
-
-# End-to-end simulated campaign
-ADAPTER_MODE=simulated LLM_PROVIDER=mock python tests/e2e_simulated.py
+pytest tests/test_multi_agent_v3.py
 ```
 
 | Test File | Coverage Area |
 |-----------|--------------|
-| `test_spectral_store.py` | Spectroscopic data persistence |
-| `test_strategy_router.py` | Optimization strategy routing |
-| `test_query_dsl.py` | Query language parsing |
-| `test_nexus_integration.py` | Causal inference (Nexus) |
-| `test_simulation.py` | Physics simulation validation |
-| `e2e_simulated.py` | Full campaign end-to-end (simulated) |
+| `test_agent_runtime_integration.py` | Multi-agent orchestration, pause/approval workflows |
+| `test_multi_agent_v3.py` | ControlPlane, agent leasing, concurrency |
+| `test_durable_execution.py` | Campaign lifecycle: duplicate-start guard, recovery, bounded retention |
+| `test_sse_events.py` | Exactly-once SSE delivery, replay/live handover, queue cleanup |
+| `test_e2e_study.py` | Full campaign end-to-end (simulated) |
+| `test_gp_surrogate.py` | GP surrogate model and acquisition functions |
+| `test_simulation.py` | Protocol simulation engine |
+| `test_mission_control.py` | Mission/workflow API |
+| `test_requirement_parser_agent.py` | Natural-language requirement parsing |
 
 Type checking and lint:
 
@@ -282,9 +326,9 @@ ruff format app/
 ```
 HELIOS/
 ├── app/
-│   ├── agents/              # 25 specialist agents + 4 swarm coordinators
+│   ├── agents/              # 27 specialist agents + swarm/control-plane runtime
 │   ├── api/v1/endpoints/    # FastAPI route handlers
-│   ├── services/            # 73+ domain services
+│   ├── services/            # 85+ domain services
 │   │   ├── bayesian_opt.py  # Bayesian Optimization (Ax)
 │   │   ├── campaign_loop.py # Campaign execution loop
 │   │   ├── campaign_events.py # SSE event persistence & replay
@@ -390,15 +434,15 @@ Campaign events are persisted to the `campaign_events` table so SSE streams repl
 ## Contributing
 
 1. Fork and create a feature branch
-2. Follow the code style rules in [CLAUDE.md](.claude/CLAUDE.md):
-   - Type hints always; `mypy --strict` for new code
+2. Code style:
+   - Type hints always; typed Pydantic models for all agent I/O
    - `ruff check` + `ruff format` before committing
    - Conventional commits (`feat/fix/refactor/chore/test/docs`)
 3. Write tests alongside implementation, not after
-4. Open a PR — CI runs type check, lint, and the full test suite
+4. Open a PR with type check, lint, and the full test suite passing
 
 ---
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+MIT — see [LICENSE](LICENSE) for details.
