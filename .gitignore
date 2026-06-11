@@ -65,3 +65,10 @@ recovery-agent/presentation/
 
 # Local backup files created during refactors
 *.bak
+
+# Conference / presentation material (local only, not for the public repo)
+posters/
+docs/DEMO_RECORDING.md
+scripts/record_demo*.py
+start_browser_recording.py
+trigger_demo_ui.py

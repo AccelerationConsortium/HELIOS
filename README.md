@@ -121,9 +121,6 @@ Results, uncertainties, and decision chains land in campaign memory — queryabl
 
 ## Quick Start
 
-> **Demo prep?** Read [`docs/DEMO_RECORDING.md`](docs/DEMO_RECORDING.md) for the
-> 90-second script, pre-flight checklist, and hero-video recipe.
-
 ### Simulated Mode (no hardware required)
 
 ```bash
