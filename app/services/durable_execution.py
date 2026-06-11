@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -72,10 +73,21 @@ class DurableExecutionBackend(Protocol):
     async def list_events(self, campaign_id: str) -> list[DurableRunEvent]: ...
 
 
+class CampaignAlreadyRunningError(RuntimeError):
+    """Raised when starting a campaign whose id is already running."""
+
+    def __init__(self, campaign_id: str) -> None:
+        super().__init__(f"Campaign '{campaign_id}' is already running")
+        self.campaign_id = campaign_id
+
+
 class InProcessDurableBackend:
     """Current durable backend: in-process task plus orchestrator checkpoints."""
 
     name = "in_process_sqlite"
+
+    # Finished runs kept in memory for status queries before falling back to DB.
+    MAX_FINISHED_RUNS = 200
 
     def __init__(self) -> None:
         self._tasks: dict[str, asyncio.Task[OrchestratorOutput]] = {}
@@ -89,8 +101,16 @@ class InProcessDurableBackend:
         restored_state: dict[str, Any] | None = None,
     ) -> DurableRunHandle:
         agent = OrchestratorAgent()
-        campaign_id = input_data.campaign_id
-        effective_campaign_id = campaign_id or input_data.campaign_id or "pending"
+        effective_campaign_id = input_data.campaign_id or f"orch-{uuid.uuid4().hex[:12]}"
+        input_data.campaign_id = effective_campaign_id
+
+        # Guard: never silently overwrite a live task for the same campaign id.
+        # Overwriting would orphan the old task and let its done-callback
+        # finalize the *new* run with the *old* result.
+        existing = self._tasks.get(effective_campaign_id)
+        if existing is not None and not existing.done():
+            raise CampaignAlreadyRunningError(effective_campaign_id)
+
         self._ensure_campaign_state(effective_campaign_id, input_data)
         task = asyncio.create_task(
             agent.process(
@@ -98,7 +118,7 @@ class InProcessDurableBackend:
                 resume_from_round=resume_from_round,
                 restored_state=restored_state,
             ),
-            name=f"orchestrator-{campaign_id or 'new'}",
+            name=f"orchestrator-{effective_campaign_id}",
         )
         self._tasks[effective_campaign_id] = task
         run = _InProcessRun(
@@ -180,7 +200,7 @@ class InProcessDurableBackend:
         ]
 
     def _refresh_run(self, run: _InProcessRun) -> None:
-        if run.task.done() and run.status == "running":
+        if run.task.done() and run.status in {"running", "cancelling"}:
             self._finalize_task(run.campaign_id, run.task)
 
     def _finalize_task(
@@ -190,6 +210,10 @@ class InProcessDurableBackend:
     ) -> None:
         run = self._runs.get(campaign_id)
         if run is None:
+            return
+        if run.task is not done:
+            # Stale callback from a superseded task (e.g. a resumed campaign):
+            # never let an old task finalize the current run.
             return
         if run.status not in {"running", "cancelling"}:
             return
@@ -226,6 +250,26 @@ class InProcessDurableBackend:
                 "durable_run_failed",
                 {"backend": self.name, "error": str(exc)},
             )
+        finally:
+            # The task handle is no longer needed once finished; campaign
+            # status/results remain available via self._runs and the DB.
+            self._tasks.pop(campaign_id, None)
+            self._evict_finished_runs()
+
+    def _evict_finished_runs(self) -> None:
+        """Cap in-memory finished runs; status queries fall back to the DB.
+
+        Without this, every campaign ever started stays in memory for the
+        lifetime of the server (task result, error string, event list).
+        """
+        finished = [
+            cid
+            for cid, run in self._runs.items()
+            if run.status not in {"running", "cancelling"}
+        ]
+        overflow = len(finished) - self.MAX_FINISHED_RUNS
+        for cid in finished[:max(0, overflow)]:
+            self._runs.pop(cid, None)
 
     def _run_status(self, run: _InProcessRun) -> DurableRunStatus:
         return DurableRunStatus(

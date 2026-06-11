@@ -6,7 +6,6 @@ the existing conversation/init flow via session_id.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from typing import Any
@@ -14,21 +13,19 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app.agents.orchestrator import OrchestratorInput, OrchestratorOutput
+from app.agents.orchestrator import OrchestratorInput
 from app.services.contract_bridge import (
     injection_pack_to_task_contract,
     task_contract_to_orchestrator_input,
 )
-from app.services.durable_execution import get_durable_backend
+from app.services.durable_execution import (
+    CampaignAlreadyRunningError,
+    get_durable_backend,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/orchestrate", tags=["orchestrate"])
-
-# Module-level store for running orchestrator campaign tasks.
-_running_campaigns: dict[str, asyncio.Task] = {}
-_campaign_results: dict[str, OrchestratorOutput] = {}
-_campaign_errors: dict[str, str] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -83,25 +80,6 @@ class OrchestrateStatusResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _track_orchestrator_task(campaign_id: str, task: asyncio.Task) -> None:
-    """Populate legacy in-memory result stores from a durable backend task."""
-
-    def _done(done: asyncio.Task) -> None:
-        try:
-            output = done.result()
-            if isinstance(output, OrchestratorOutput):
-                _campaign_results[campaign_id] = output
-            else:
-                _campaign_errors[campaign_id] = "Unexpected orchestrator result"
-        except asyncio.CancelledError:
-            _campaign_errors[campaign_id] = "Campaign cancelled"
-        except Exception as exc:
-            logger.exception("Orchestrator campaign %s failed", campaign_id)
-            _campaign_errors[campaign_id] = str(exc)
-
-    task.add_done_callback(_done)
-
-
 async def _start_durable_campaign(
     campaign_id: str,
     orch_input: OrchestratorInput,
@@ -110,17 +88,14 @@ async def _start_durable_campaign(
     restored_state: dict[str, Any] | None = None,
 ) -> None:
     backend = get_durable_backend()
-    handle = await backend.start_campaign(
-        orch_input,
-        resume_from_round=resume_from_round,
-        restored_state=restored_state,
-    )
-    get_task = getattr(backend, "get_task", None)
-    if callable(get_task):
-        task = get_task(campaign_id)
-        if task is not None:
-            _running_campaigns[campaign_id] = task
-            _track_orchestrator_task(campaign_id, task)
+    try:
+        handle = await backend.start_campaign(
+            orch_input,
+            resume_from_round=resume_from_round,
+            restored_state=restored_state,
+        )
+    except CampaignAlreadyRunningError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     logger.info(
         "orchestrate.durable_started",
         extra={
