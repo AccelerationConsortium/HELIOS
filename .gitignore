@@ -41,11 +41,7 @@ auto_*.py
 auto_*.sh
 app/static/auto_*.html
 
-# Test suite is mostly tracked already; keep local scratch tests hidden while
-# allowing this research-regression test to be committed.
-tests/*
-!tests/test_e2e_study.py
-!tests/test_mission_control.py
+# Test caches
 tests/**/__pycache__/
 
 # Node modules
