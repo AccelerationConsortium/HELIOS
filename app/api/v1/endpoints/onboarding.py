@@ -30,8 +30,19 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/onboarding", tags=["onboarding"])
 
-# Session store: onboarding_id → serialised OnboardingResult
+# Session store: onboarding_id → serialised OnboardingResult.
+# Bounded FIFO: oldest sessions are evicted past the cap so abandoned
+# onboarding flows don't accumulate for the lifetime of the process.
+_MAX_ONBOARDING_SESSIONS = 256
 _onboarding_sessions: dict[str, dict[str, Any]] = {}
+
+
+def _store_session(onboarding_id: str, payload: dict[str, Any]) -> None:
+    _onboarding_sessions.pop(onboarding_id, None)  # refresh insertion order
+    _onboarding_sessions[onboarding_id] = payload
+    while len(_onboarding_sessions) > _MAX_ONBOARDING_SESSIONS:
+        oldest = next(iter(_onboarding_sessions))
+        del _onboarding_sessions[oldest]
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +172,7 @@ async def onboarding_discover(
         )
 
     # Store discovered primitives so the wizard can carry them forward
-    _onboarding_sessions[onboarding_id] = result.output.serialised_result
+    _store_session(onboarding_id, result.output.serialised_result)
 
     return _output_to_response(onboarding_id, result.output)
 
@@ -200,7 +211,7 @@ async def onboarding_generate(
         )
 
     # Store session state
-    _onboarding_sessions[onboarding_id] = result.output.serialised_result
+    _store_session(onboarding_id, result.output.serialised_result)
 
     return _output_to_response(onboarding_id, result.output)
 
@@ -239,7 +250,7 @@ async def onboarding_confirm(
         )
 
     # Update session state
-    _onboarding_sessions[payload.onboarding_id] = result.output.serialised_result
+    _store_session(payload.onboarding_id, result.output.serialised_result)
 
     return _output_to_response(payload.onboarding_id, result.output)
 
@@ -275,7 +286,7 @@ async def onboarding_write(
         )
 
     # Update session state
-    _onboarding_sessions[payload.onboarding_id] = result.output.serialised_result
+    _store_session(payload.onboarding_id, result.output.serialised_result)
 
     # Hot-reload primitives registry so newly written skill files are visible
     # immediately without requiring a server restart.
