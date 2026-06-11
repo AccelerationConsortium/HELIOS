@@ -72,3 +72,14 @@ docs/DEMO_RECORDING.md
 scripts/record_demo*.py
 start_browser_recording.py
 trigger_demo_ui.py
+
+# Lab-internal hardware integrations and protocol templates (research-specific)
+app/adapters/battery_lab.py
+app/hardware/dispatcher.py
+app/hardware/plc_controller.py
+app/hardware/relay_controller.py
+agent/skills/plc.md
+agent/skills/relay.md
+agent/skills/squidstat.md
+ot2-nlp-agent/ot2_agent/templates/oer/
+ot2-nlp-agent/lab_automation/plugins/potentiostat/adapters/squidstat.py

@@ -70,12 +70,16 @@ def list_templates(domain: str = None) -> dict[str, list[str]]:
     return {d: TemplateRegistry.list_templates(d) for d in TemplateRegistry.list_domains()}
 
 
-# Import domain templates to register them
-from . import oer  # noqa: E402
+# Import domain templates to register them. Domain template packages are
+# optional: lab-specific protocol templates may be kept out of the public
+# distribution, in which case the registry simply starts empty for them.
+try:
+    from . import oer  # noqa: E402, F401
+except ImportError:  # pragma: no cover - template pack not installed
+    oer = None
 
 __all__ = [
     "TemplateRegistry",
     "get_template",
     "list_templates",
-    "oer",
 ]

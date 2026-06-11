@@ -47,7 +47,15 @@ def _create_adapter() -> InstrumentAdapter:
     mode = settings.adapter_mode
 
     if mode == "battery_lab":
-        from app.adapters.battery_lab import BatteryLabAdapter
+        try:
+            from app.adapters.battery_lab import BatteryLabAdapter
+        except ImportError as exc:  # pragma: no cover - lab-internal adapter
+            raise RuntimeError(
+                "ADAPTER_MODE=battery_lab requires the lab-internal hardware "
+                "adapter package, which is not part of the public "
+                "distribution. Use ADAPTER_MODE=simulated, or install the "
+                "internal adapter."
+            ) from exc
         return BatteryLabAdapter(dry_run=settings.adapter_dry_run)
 
     # Default: simulated

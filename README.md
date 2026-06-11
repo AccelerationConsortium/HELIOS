@@ -423,8 +423,8 @@ Campaign events are persisted to the `campaign_events` table so SSE streams repl
 | **Opentrons OT-2 / Flex** | Liquid-handling robotics |
 | **Ax (Meta)** | Bayesian Optimization service |
 | **Nexus Advisor** | Causal inference for experimental design |
-| **Squidstat potentiostat** | Electrochemical measurements |
-| **PLC controllers** | Relay and process control |
+| **Potentiostats** | Electrochemical measurements (serial adapters) |
+| **PLC / relay controllers** | Pump, stirrer, and process control |
 
 ---
 
