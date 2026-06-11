@@ -3,6 +3,7 @@ name = "lab-orchestrator-mvp"
 version = "0.1.0"
 description = "MVP laboratory orchestrator with persistent state, trigger routing, isolation, safety gates, locks, and audit trails"
 readme = "README.md"
+license = {text = "MIT"}
 requires-python = ">=3.11"
 dependencies = [
   # Web framework
