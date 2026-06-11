@@ -1,7 +1,7 @@
 [project]
-name = "lab-orchestrator-mvp"
+name = "helios-sdl"
 version = "0.1.0"
-description = "MVP laboratory orchestrator with persistent state, trigger routing, isolation, safety gates, locks, and audit trails"
+description = "HELIOS — agent-native orchestrator for self-driving laboratories: typed contracts, specialist agent swarms, safety gates, durable campaigns, and research-grade Bayesian optimization"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
@@ -46,7 +46,7 @@ dev = [
 ]
 # Install everything
 all = [
-  "lab-orchestrator-mvp[hardware,ml,frontend,demo,dev]",
+  "helios-sdl[hardware,ml,frontend,demo,dev]",
 ]
 
 [tool.setuptools.packages.find]

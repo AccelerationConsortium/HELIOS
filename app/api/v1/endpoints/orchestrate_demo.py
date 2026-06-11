@@ -312,7 +312,8 @@ async def _run_demo_campaign(campaign_id: str, max_rounds: int = 8) -> None:
     """Run a realistic-looking demo campaign with full agent trace."""
     from app.api.v1.endpoints.orchestrate_events import publish_campaign_event
 
-    emit = lambda evt: publish_campaign_event(campaign_id, evt)
+    def emit(evt: dict) -> None:
+        publish_campaign_event(campaign_id, evt)
 
     try:
         # ---- 0. Memory recall banner (UI picks this up as a top-right toast) ----

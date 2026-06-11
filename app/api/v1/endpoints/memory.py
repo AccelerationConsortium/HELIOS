@@ -10,11 +10,11 @@ Read-only. Writes happen via the `MemoryListener` on the event bus.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi import APIRouter, Query
 
-from app.core.db import parse_json, row_to_dict, run_txn
+from app.core.db import parse_json, run_txn
 
 router = APIRouter(prefix="/memory", tags=["memory"])
 
@@ -22,7 +22,7 @@ router = APIRouter(prefix="/memory", tags=["memory"])
 @router.get("/snapshot")
 async def memory_snapshot(
     episodes_limit: int = Query(20, ge=1, le=200),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return a single snapshot of the three memory layers.
 
     Designed for the Lab UI's Memory tab — one round trip, ready to render.
@@ -51,7 +51,7 @@ async def memory_snapshot(
     except Exception:
         episodes_raw, priors_raw, recipes_raw = [], [], []
 
-    episodes: List[Dict[str, Any]] = []
+    episodes: list[dict[str, Any]] = []
     for r in episodes_raw:
         episodes.append({
             "id": r["id"],
@@ -64,7 +64,7 @@ async def memory_snapshot(
             "created_at": r["created_at"],
         })
 
-    priors: List[Dict[str, Any]] = []
+    priors: list[dict[str, Any]] = []
     for r in priors_raw:
         priors.append({
             "primitive": r["primitive"],
@@ -78,7 +78,7 @@ async def memory_snapshot(
             "updated_at": r["updated_at"],
         })
 
-    recipes: List[Dict[str, Any]] = []
+    recipes: list[dict[str, Any]] = []
     for r in recipes_raw:
         recipes.append({
             "id": r["id"],
@@ -104,7 +104,7 @@ async def memory_snapshot(
 async def memory_recall(
     primitives: str = Query("", description="Comma-separated list of primitives to recall priors for"),
     limit: int = Query(5, ge=1, le=50),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Targeted memory recall for a planned experiment.
 
     Returns the priors + top recipes relevant to the given primitives.
@@ -112,8 +112,8 @@ async def memory_recall(
     """
     primitive_list = [p.strip() for p in primitives.split(",") if p.strip()]
 
-    priors: List[Dict[str, Any]] = []
-    recipes: List[Dict[str, Any]] = []
+    priors: list[dict[str, Any]] = []
+    recipes: list[dict[str, Any]] = []
 
     if primitive_list:
         placeholders = ",".join("?" for _ in primitive_list)
@@ -164,7 +164,7 @@ async def memory_recall(
         except Exception:
             pass
 
-    summary_parts: List[str] = []
+    summary_parts: list[str] = []
     if priors:
         top = priors[0]
         summary_parts.append(
@@ -187,7 +187,7 @@ async def memory_recall(
 
 
 @router.get("/graph")
-async def memory_graph() -> Dict[str, Any]:
+async def memory_graph() -> dict[str, Any]:
     """Knowledge graph of past campaigns, primitives, failures, and recipes.
 
     Returns a node/edge list suitable for a D3 force-directed graph. The
@@ -206,8 +206,8 @@ async def memory_graph() -> Dict[str, Any]:
       - "fails_with"    — primitive → error_pattern
       - "recovered_by"  — error_pattern → recipe
     """
-    nodes: Dict[str, Dict[str, Any]] = {}
-    edges: List[Dict[str, Any]] = []
+    nodes: dict[str, dict[str, Any]] = {}
+    edges: list[dict[str, Any]] = []
 
     def node(node_id: str, ntype: str, label: str, **extra) -> None:
         # First-write-wins; merges extra fields into existing record
@@ -238,7 +238,7 @@ async def memory_graph() -> Dict[str, Any]:
 
     # Track per-(primitive, error_pattern) failure counts so we can emit
     # primitive → error_pattern edges with sensible weights.
-    fail_counts: Dict[tuple[str, str], int] = {}
+    fail_counts: dict[tuple[str, str], int] = {}
 
     for r in episode_rows:
         run_id    = r["run_id"] or "unknown"
@@ -290,8 +290,8 @@ async def memory_graph() -> Dict[str, Any]:
             edge(err_id, f"recipe:{rid}", "recovered_by", max(1, r["hit_count"] or 1))
 
     # ---- Annotate primitives with run counts from episodes ----
-    prim_runs: Dict[str, int] = {}
-    prim_success: Dict[str, int] = {}
+    prim_runs: dict[str, int] = {}
+    prim_success: dict[str, int] = {}
     for r in episode_rows:
         p = r["primitive"] or "unknown"
         prim_runs[p] = prim_runs.get(p, 0) + 1

@@ -33,6 +33,7 @@ from app.services.instrument_onboarding import (
     ParamInput,
     PrimitiveInput,
 )
+
 # Lazy import to break circular dependency with llm_gateway ↔ agent_context
 # (llm_gateway imports agent_context which imports app.agents.base which
 # imports onboarding_agent which would re-import llm_gateway).

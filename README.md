@@ -248,8 +248,8 @@ Base URL: `http://localhost:8000`
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Liveness probe (always 200 OK) |
-| `GET` | `/health/ready` | Readiness (DB + event bus) |
-| `GET` | `/health/detail` | Full diagnostic status |
+| `GET` | `/api/v1/health/ready` | Readiness (DB + event bus) |
+| `GET` | `/api/v1/health/detail` | Full diagnostic status |
 
 Full interactive docs at `http://localhost:8000/docs`.
 
@@ -393,9 +393,9 @@ docker build --build-arg EXTRAS=all -t helios:full .
 ### Health Checks
 
 ```bash
-curl http://localhost:8000/health          # Liveness
-curl http://localhost:8000/health/ready    # Readiness
-curl http://localhost:8000/health/detail   # Full diagnostic
+curl http://localhost:8000/health                  # Liveness
+curl http://localhost:8000/api/v1/health/ready     # Readiness
+curl http://localhost:8000/api/v1/health/detail    # Full diagnostic
 ```
 
 ---
