@@ -38,6 +38,15 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/orchestrate", tags=["orchestrate"])
 
+# Registry of running demo tasks. Holds a strong reference so tasks aren't
+# garbage-collected mid-flight; entries remove themselves on completion.
+_demo_tasks: dict[str, asyncio.Task] = {}
+
+
+def is_demo_campaign(campaign_id: str) -> bool:
+    """True if this id belongs to a demo campaign (running or recently run)."""
+    return campaign_id.startswith("demo-")
+
 
 # Hand-curated KPI trajectory — looks like a real BO run
 ETA10_TRAJECTORY = [198.0, 165.0, 142.0, 118.0, 105.0, 88.0, 72.0, 58.0]
@@ -448,12 +457,27 @@ async def orquestrate_demo(payload: DemoRequest) -> DemoResponse:
     """
     campaign_id = f"demo-{uuid.uuid4().hex[:12]}"
 
+    # Register a campaign_state row first: campaign_events has a FOREIGN KEY
+    # on campaign_state, so without this row every demo event silently fails
+    # to persist and SSE reconnection replay delivers nothing.
+    try:
+        from app.services.campaign_state import create_campaign
+        create_campaign(
+            campaign_id,
+            {"demo": True, "objective_kpi": payload.objective_kpi, "max_rounds": payload.max_rounds},
+            direction="minimize",
+        )
+    except Exception:
+        logger.debug("Demo campaign_state registration failed", exc_info=True)
+
     task = asyncio.create_task(
         _run_demo_campaign(campaign_id, payload.max_rounds),
         name=f"demo-{campaign_id}",
     )
 
-    from app.api.v1.endpoints.orchestrate import _running_campaigns
-    _running_campaigns[campaign_id] = task
+    # Keep a strong reference while running; self-clean on completion so
+    # demo tasks don't accumulate in memory for the life of the process.
+    _demo_tasks[campaign_id] = task
+    task.add_done_callback(lambda _t: _demo_tasks.pop(campaign_id, None))
 
     return DemoResponse(campaign_id=campaign_id, status="started")
