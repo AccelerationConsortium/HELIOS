@@ -171,56 +171,25 @@ def select_strategy(
     # ----- Compute diagnostics (now includes calibration + drift) -----
     diag = compute_diagnostics(snapshot, config)
 
-    # ----- Optional Nexus enrichment (v5) -----
-    nexus_evidence: list[EvidenceItem] = []
-    nexus_weight_adj: dict[str, float] = {}
-    if config.enable_nexus:
+    # ----- Optional optimization intelligence enrichment (v5) -----
+    intelligence_evidence: list[EvidenceItem] = []
+    intelligence_weight_adj: dict[str, float] = {}
+    if config.enable_nexus or config.enable_optimization_intelligence:
         try:
-            from app.services.nexus_advisor import NexusAdvisor
-            _nexus = NexusAdvisor()
+            from app.services.optimization_intelligence import OptimizationIntelligenceAdvisor
 
-            # Build causal data from snapshot history
-            _causal_data: list[list[float]] | None = None
-            _var_names: list[str] | None = None
-            if snapshot.all_params and snapshot.all_kpis:
-                _sample_keys = sorted(snapshot.all_params[0].keys()) if snapshot.all_params else []
-                _numeric_keys = [
-                    k for k in _sample_keys
-                    if isinstance(snapshot.all_params[0].get(k), (int, float))
-                ]
-                if _numeric_keys:
-                    _var_names = _numeric_keys + ["kpi"]
-                    _causal_data = [
-                        [float(p.get(k, 0)) for k in _numeric_keys] + [kpi]
-                        for p, kpi in zip(snapshot.all_params, snapshot.all_kpis, strict=False)
-                    ]
-
-            # Try to get a campaign_id from snapshot metadata (best-effort)
-            _campaign_id = getattr(snapshot, "nexus_campaign_id", None) or "default"
-
-            insights = _nexus.get_enhanced_diagnostics(
-                campaign_id=_campaign_id,
-                causal_data=_causal_data,
-                var_names=_var_names,
-            )
-            if insights is not None:
-                # Inject causal edges as evidence items
-                for edge in insights.causal_edges:
-                    if edge.strength > 0.3:
-                        nexus_evidence.append(EvidenceItem(
-                            signal_name=f"nexus_causal_{edge.source}→{edge.target}",
-                            signal_value=edge.strength,
-                            target_action="exploit" if edge.strength > 0.7 else "explore",
-                            contribution=round(edge.strength * 0.15, 4),
-                            description=f"Nexus causal: {edge.source}→{edge.target} (str={edge.strength:.2f})",
-                        ))
-
-            meta = _nexus.get_meta_learning_advice(campaign_id=_campaign_id)
-            if meta is not None and meta.weight_adjustments:
-                nexus_weight_adj = meta.weight_adjustments
-                logger.info("Nexus meta-learning advice: %s", nexus_weight_adj)
+            intelligence = OptimizationIntelligenceAdvisor().advise(snapshot)
+            intelligence_evidence = list(intelligence.evidence)
+            intelligence_weight_adj = intelligence.weight_adjustments
+            if intelligence.has_signal:
+                logger.info(
+                    "Optimization intelligence advice: sources=%s weights=%s phase=%s",
+                    intelligence.sources,
+                    intelligence_weight_adj,
+                    intelligence.recommended_phase,
+                )
         except Exception:
-            logger.debug("Nexus enrichment skipped (unavailable or error)", exc_info=True)
+            logger.debug("Optimization intelligence skipped (unavailable or error)", exc_info=True)
 
     # ----- Phase posterior -----
     posterior = compute_phase_posterior(snapshot, diag, config)
@@ -230,11 +199,11 @@ def select_strategy(
     if config.enable_adaptive_weights:
         weights = schedule_weights(diag, posterior, config)
 
-    # ----- Apply Nexus meta-learning weight adjustments (v5) -----
-    if nexus_weight_adj and weights is not None:
-        w_imp = weights.w_improvement + nexus_weight_adj.get("w_improvement", 0.0)
-        w_info = weights.w_info_gain + nexus_weight_adj.get("w_info_gain", 0.0)
-        w_risk = weights.w_risk + nexus_weight_adj.get("w_risk", 0.0)
+    # ----- Apply cross-campaign meta-learning weight adjustments (v5) -----
+    if intelligence_weight_adj and weights is not None:
+        w_imp = weights.w_improvement + intelligence_weight_adj.get("w_improvement", 0.0)
+        w_info = weights.w_info_gain + intelligence_weight_adj.get("w_info_gain", 0.0)
+        w_risk = weights.w_risk + intelligence_weight_adj.get("w_risk", 0.0)
         # Re-normalize
         w_imp = max(0.1, w_imp)
         w_info = max(0.1, w_info)
@@ -244,7 +213,7 @@ def select_strategy(
             w_improvement=round(w_imp / total, 4),
             w_info_gain=round(w_info / total, 4),
             w_risk=round(w_risk / total, 4),
-            reason=weights.reason + "; nexus meta-learning adj",
+            reason=weights.reason + "; optimization intelligence meta-learning adj",
         )
 
     # ----- Generate action candidates with adaptive weights -----
@@ -302,9 +271,9 @@ def select_strategy(
     )
     evidence = compute_evidence(diag, eff_weights)
 
-    # ----- Merge Nexus evidence (v5) -----
-    if nexus_evidence:
-        merged = list(evidence) + nexus_evidence
+    # ----- Merge optimization intelligence evidence (v5) -----
+    if intelligence_evidence:
+        merged = list(evidence) + intelligence_evidence
         merged.sort(key=lambda e: abs(e.contribution), reverse=True)
         evidence = tuple(merged)
 

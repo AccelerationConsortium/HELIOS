@@ -260,21 +260,36 @@ class PhaseConfig:
     stabilize_top_k: int = 2  # how many top points to consider
     stabilize_budget_fraction: float = 0.15  # max fraction of remaining rounds for stabilization
 
-    # --- Nexus MCP integration (v5, opt-in) ---
-    enable_nexus: bool = False  # enable causal-discovery & meta-learning via Nexus advisor
+    # --- Optimization intelligence integration (v5, opt-in) ---
+    enable_nexus: bool = False  # backward-compatible alias for Nexus-backed optimization intelligence
+    enable_optimization_intelligence: bool = False  # causal + cross-campaign meta-learning advice
 
     # --- Backend preferences ---
+    # Order: existing optional backends first (no behaviour change when they are
+    # installed), then Nexus equivalents (enrichment when optuna/scipy/pymoo are
+    # absent), then built_in as the guaranteed fallback.
     exploitation_backends: tuple[str, ...] = (
         "optuna_tpe",
+        "nexus_tpe",
+        "nexus_gp_bo",
         "built_in",
     )
     refinement_backends: tuple[str, ...] = (
         "optuna_cmaes",
+        "nexus_cmaes",
         "scipy_de",
+        "nexus_de",
         "built_in",
     )
     high_dim_backends: tuple[str, ...] = (
         "pymoo_nsga2",
+        "nexus_nsga2",
         "optuna_tpe",
+        "nexus_turbo",
         "built_in",
+    )
+    explore_backends: tuple[str, ...] = (
+        "lhs",
+        "nexus_lhs",
+        "nexus_sobol",
     )

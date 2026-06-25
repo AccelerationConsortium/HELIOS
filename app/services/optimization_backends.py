@@ -1048,3 +1048,17 @@ def build_optimizer(
             space, buffer=buffer, retrain_threshold=retrain_threshold, **kwargs
         )
     raise ValueError(f"Unknown optimizer mode '{mode}'. Use 'bayesian' or 'rl'.")
+
+
+# ---------------------------------------------------------------------------
+# Optional Nexus algorithm portfolio
+# ---------------------------------------------------------------------------
+# Importing the bridge registers the ``nexus_*`` backends in this module's
+# registry.  Each is gated by ``is_available()`` (Nexus installed?) and falls
+# back to ``built_in`` when absent, so loading it here can never break the core
+# backends.  Done at the bottom (after ``register_backend``/``Observation`` are
+# defined) to keep the import cycle resolvable regardless of import order.
+try:
+    from app.optimization import nexus_backend as _nexus_backend  # noqa: F401
+except Exception:  # pragma: no cover - never block core optimization
+    logger.debug("Nexus backend bridge unavailable", exc_info=True)

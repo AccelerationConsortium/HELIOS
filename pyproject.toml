@@ -48,6 +48,12 @@ dev = [
 all = [
   "helios-sdl[hardware,ml,frontend,demo,dev]",
 ]
+# Nexus optimization-intelligence portfolio (optional, in-process).
+# HELIOS uses only Nexus's pure-Python core (backends/plugins/profiler/
+# diagnostics/core/dsl) -- never its server/LLM stack.  Nexus declares those
+# server deps as core, so install the core WITHOUT them:
+#     uv pip install -e /path/to/Nexus --no-deps
+# When absent, HELIOS falls back to the built-in optimizer automatically.
 
 [tool.setuptools.packages.find]
 include = ["app*"]
