@@ -13,6 +13,8 @@ seam (monkeypatched advisor), exactly how Nexus's fingerprint would arrive.
 """
 from __future__ import annotations
 
+import dataclasses
+
 from app.services.optimization_intelligence import OptimizationIntelligence
 from app.services.strategy_models import CampaignSnapshot, PhaseConfig
 from app.services.strategy_selector import select_strategy
@@ -137,6 +139,16 @@ def test_backend_choice_is_deterministic(monkeypatch):
 
 
 # --- Phase policy still dominant: phase is never overridden by fingerprint ----
+
+def test_recent_failure_history_vetoes_backend_through_selector():
+    # The phase default 'lhs' has hit the veto threshold; the selector must
+    # pick another available, phase-compatible backend instead.
+    base = _explore_snapshot(_ALL_AVAIL)
+    snap = dataclasses.replace(base, backend_failure_counts={"lhs": 3})
+    decision = select_strategy(snap, PhaseConfig())
+    assert decision.backend_name != "lhs"
+    assert decision.backend_name in ("nexus_lhs", "nexus_sobol")
+
 
 def test_fingerprint_does_not_change_phase(monkeypatch):
     baseline = select_strategy(_explore_snapshot(_ALL_AVAIL), _cfg())

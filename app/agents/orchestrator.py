@@ -675,6 +675,10 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             all_rounds = list(restored_state.get("all_rounds", []))
             best_kpi = restored_state.get("best_kpi")
             total_runs = restored_state.get("total_runs", 0)
+            # Per-backend recent-failure history (best-effort restore).
+            backend_failure_counts: dict[str, int] = dict(
+                restored_state.get("backend_failure_counts", {})
+            )
         else:
             kpi_history: list[float] = []
             all_kpis: list[float] = []
@@ -682,6 +686,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             all_rounds: list[int] = []
             best_kpi: float | None = None
             total_runs = 0
+            backend_failure_counts = {}
 
         step_history: list[dict[str, Any]] = []
 
@@ -783,6 +788,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         all_params=tuple(all_params),
                         all_kpis=tuple(all_kpis),
                         qc_fail_rate=qc_fail_rate,
+                        # Δ2: recent per-backend failures bias backend ranking.
+                        backend_failure_counts=dict(backend_failure_counts),
                     )
                     # Route through RL or rule-based strategy router
                     if self._strategy_router is not None:
@@ -1514,6 +1521,20 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     )
                 except Exception:
                     logger.debug("RL post-round hook failed", exc_info=True)
+
+            # --- Per-backend recent-failure history (feeds rank_backends) ---
+            # Attribute this round's execution outcome (any QC failure) to the
+            # backend the strategy selector chose for it.  Only adaptive rounds
+            # set strategy_decision, so other rounds are skipped.
+            if round_batch_kpis and strategy_decision is not None:
+                from app.optimization.failure_history import update_backend_failures
+
+                _round_had_failure = any(k is None for k in round_batch_kpis)
+                backend_failure_counts = update_backend_failures(
+                    backend_failure_counts,
+                    strategy_decision.backend_name,
+                    round_had_failure=_round_had_failure,
+                )
 
             # 2e-ext. Causal model update (async, non-blocking)
             # After each round, update the causal graph with new observations.
