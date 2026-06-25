@@ -16,6 +16,7 @@ surfaced only as a *recommendation* in the rationale.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 from typing import Any
 
@@ -121,3 +122,17 @@ class NexusOptimizationProvider:
             fingerprint=fingerprint,
             seed=request.seed,
         )
+
+    # -- top-k portfolio (Δ1, Phase 1) -----------------------------------
+
+    def suggest_top_k(self, request: OptimizationRequest, k: int = 3) -> CandidateSuggestion:
+        """Return up to ``k`` candidates with **shared** fingerprint/diagnostics.
+
+        Phase 1: candidates come from the chosen ``nexus_*`` backend with
+        ``n=k``; the fingerprint and diagnostics describe the whole batch, and
+        ``per_candidate`` is empty (so downstream deltas are 0 and candidates
+        inherit their authority archetype's utility).  Per-candidate diagnostics
+        are a Phase-2 enhancement (Δ4).
+        """
+        topk_request = dataclasses.replace(request, n=max(1, k))
+        return self.suggest(topk_request)

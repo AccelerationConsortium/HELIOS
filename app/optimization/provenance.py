@@ -18,6 +18,31 @@ from app.optimization.schemas import (
 ProvenanceSink = Callable[[dict[str, Any]], None]
 
 
+def _serialize_scored_pool(
+    decision: DecisionResult,
+    selected: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Serialise the scored portfolio, flagging which candidates were selected.
+
+    Empty for legacy ``evaluate()`` verdicts (which carry no ``scored_pool``).
+    """
+    pool: list[dict[str, Any]] = []
+    for s in decision.scored_pool:
+        params = dict(s.candidate.params)
+        pool.append({
+            "params": params,
+            "source": s.candidate.source,
+            "source_action": s.candidate.source_action,
+            "generator_backend": s.candidate.generator_backend,
+            "base_utility": s.base_utility,
+            "delta": s.delta,
+            "redundancy": s.redundancy,
+            "utility": s.utility,
+            "selected": params in selected,
+        })
+    return pool
+
+
 class ProvenanceLogger:
     """Build and retain provenance records; optionally forward to a sink."""
 
@@ -31,6 +56,7 @@ class ProvenanceLogger:
         suggestion: CandidateSuggestion,
         decision: DecisionResult,
     ) -> dict[str, Any]:
+        selected = [dict(c) for c in decision.final_candidates]
         return {
             "campaign_id": request.campaign_id,
             "round_index": request.round_index,
@@ -42,12 +68,14 @@ class ProvenanceLogger:
             "problem_fingerprint": suggestion.fingerprint,
             "diagnostics": suggestion.diagnostics,
             "candidates_proposed": [dict(c) for c in suggestion.candidates],
-            "candidates_accepted": [dict(c) for c in decision.final_candidates],
+            "candidates_accepted": selected,
             "candidates_rejected": [dict(c) for c in decision.rejected],
             "rejection_reasons": list(decision.rejection_reasons),
             "accepted": decision.accepted,
             "requires_human_review": decision.requires_human_review,
             "decision_trace": list(decision.decision_trace),
+            # Δ1: full scored portfolio -- "why this, why not the alternatives".
+            "candidate_pool": _serialize_scored_pool(decision, selected),
         }
 
     def record(
