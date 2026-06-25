@@ -119,14 +119,13 @@ def rank_backends(
 
     phase_only = scoring_pool[0]  # what phase policy alone would pick
     biased = selected != phase_only
-    # A choice of the fallback backend is only a "fallback" when it was not the
-    # intended top preference (e.g. richer options were unavailable).
-    fallback = selected == fallback_backend and pool[0] != fallback_backend
+    # Fallback status: the run is using the universal fallback optimizer.
+    fallback = selected == fallback_backend
 
     if biased:
         reason = f"fingerprint promoted '{selected}' over phase-default '{phase_only}'"
     elif fallback:
-        reason = f"degraded to '{fallback_backend}' (no richer backend viable)"
+        reason = f"using fallback backend '{fallback_backend}'"
     else:
         reason = f"phase policy selected '{selected}'"
 

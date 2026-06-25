@@ -11,7 +11,10 @@ Public types:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.optimization.backend_selection import BackendSelection
 
 # ---------------------------------------------------------------------------
 # Campaign snapshot — enriched with batch-level data
@@ -53,6 +56,9 @@ class CampaignSnapshot:
 
     # --- QC data ---
     qc_fail_rate: float = 0.0  # fraction of candidates that failed QC
+
+    # --- Per-backend recent failure history (Δ2: penalize/veto in ranking) ---
+    backend_failure_counts: dict[str, int] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +204,8 @@ class StrategyDecision:
     drift_score: float | None = None
     evidence: tuple[EvidenceItem, ...] = ()
     stabilize_spec: StabilizeSpec | None = None
+    # Δ2: provenance for backend ranking (phase pool, fingerprint bias, scores)
+    backend_selection: BackendSelection | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -293,3 +301,13 @@ class PhaseConfig:
         "nexus_lhs",
         "nexus_sobol",
     )
+
+    # --- Backend ranking weights (Δ2: conservative fingerprint soft-bias) ---
+    # Phase policy dominates; the fingerprint recommendation is a secondary
+    # additive boost; recent per-backend failures penalize and (past the
+    # threshold) veto.  Defaults are tuned so a recommendation can flip an
+    # adjacent preference but cannot overturn a clearly-preferred backend.
+    backend_phase_weight: float = 1.0
+    backend_fingerprint_weight: float = 0.3
+    backend_failure_penalty: float = 0.5
+    backend_failure_veto_threshold: int = 3

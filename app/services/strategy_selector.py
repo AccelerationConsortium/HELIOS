@@ -174,6 +174,7 @@ def select_strategy(
     # ----- Optional optimization intelligence enrichment (v5) -----
     intelligence_evidence: list[EvidenceItem] = []
     intelligence_weight_adj: dict[str, float] = {}
+    intelligence_recommended_backends: tuple[str, ...] = ()
     if config.enable_nexus or config.enable_optimization_intelligence:
         try:
             from app.services.optimization_intelligence import OptimizationIntelligenceAdvisor
@@ -181,6 +182,7 @@ def select_strategy(
             intelligence = OptimizationIntelligenceAdvisor().advise(snapshot)
             intelligence_evidence = list(intelligence.evidence)
             intelligence_weight_adj = intelligence.weight_adjustments
+            intelligence_recommended_backends = intelligence.recommended_backends
             if intelligence.has_signal:
                 logger.info(
                     "Optimization intelligence advice: sources=%s weights=%s phase=%s",
@@ -259,7 +261,40 @@ def select_strategy(
 
     confidence = compute_confidence(snapshot, diag, phase)
 
-    backend = best_action.backend_name
+    # ----- Backend ratification: conservative fingerprint soft-bias (Δ2) -----
+    # The phase-policy default (best_action.backend_name) is re-ranked against
+    # the action's preference pool.  A fingerprint recommendation can promote an
+    # *available, phase-compatible* alternative; it can never select an
+    # unavailable or out-of-pool backend, nor change the campaign phase.  With no
+    # recommendation and no recent failures this is a no-op.
+    from app.optimization.backend_selection import rank_backends
+
+    base_pool = _action_backend_pool(best_action.name, snapshot, config)
+    if best_action.backend_name == "built_in":
+        # Degraded default: keep the natural preference order (built_in last).
+        backend_pool = base_pool if "built_in" in base_pool else (*base_pool, "built_in")
+    else:
+        # Deliberate phase pick (incl. multimodal/refine specials) leads the pool.
+        backend_pool = (best_action.backend_name, *base_pool)
+    backend_pool = tuple(dict.fromkeys(backend_pool))
+
+    # The phase already committed to best_action.backend_name, so it is always a
+    # valid choice regardless of the caller-supplied availability map.
+    available_for_rank = {**available, best_action.backend_name: True}
+
+    backend_selection = rank_backends(
+        phase=best_action.name,
+        pool=backend_pool,
+        available=available_for_rank,
+        recommended=intelligence_recommended_backends,
+        failure_counts=snapshot.backend_failure_counts,
+        phase_weight=config.backend_phase_weight,
+        fingerprint_weight=config.backend_fingerprint_weight,
+        failure_penalty=config.backend_failure_penalty,
+        failure_veto_threshold=config.backend_failure_veto_threshold,
+        fallback_backend="built_in",
+    )
+    backend = backend_selection.selected_backend
     fallback = "built_in" if backend != "built_in" else "lhs"
 
     # ----- Evidence decomposition (v4) -----
@@ -326,7 +361,29 @@ def select_strategy(
         drift_score=diag.drift_score,
         evidence=evidence,
         stabilize_spec=stabilize_spec,
+        backend_selection=backend_selection,
     )
+
+
+def _action_backend_pool(
+    action_name: str,
+    snapshot: CampaignSnapshot,
+    config: PhaseConfig,
+) -> tuple[str, ...]:
+    """Return the ordered backend preference pool for a winning action.
+
+    Mirrors the per-action preference used by ``generate_action_candidates`` so
+    the Δ2 re-rank operates over the same phase-compatible candidates.
+    """
+    if action_name == "exploit":
+        return config.exploitation_backends
+    if action_name == "refine":
+        if snapshot.n_dimensions >= config.high_dim_threshold:
+            return config.high_dim_backends + config.refinement_backends
+        return config.refinement_backends
+    if action_name == "explore":
+        return config.explore_backends
+    return ("built_in",)  # stabilize re-evaluates with the built-in optimizer
 
 
 # ---------------------------------------------------------------------------
