@@ -83,3 +83,6 @@ agent/skills/relay.md
 agent/skills/squidstat.md
 ot2-nlp-agent/ot2_agent/templates/oer/
 ot2-nlp-agent/lab_automation/plugins/potentiostat/adapters/squidstat.py
+
+# git worktrees (isolated workspaces)
+.worktrees/
