@@ -69,3 +69,29 @@ def test_diagnose_returns_fingerprint_and_diagnostics_dicts():
     fp, diag = NexusOptimizationProvider().diagnose(_request())
     assert isinstance(fp, dict) and "noise_regime" in fp
     assert isinstance(diag, dict) and "exploration_coverage" in diag
+
+
+# -- suggest_top_k: Phase 1 (shared diagnostics, no per-candidate) -----------
+
+
+def test_suggest_top_k_returns_at_most_k():
+    sug = NexusOptimizationProvider().suggest_top_k(_request(n=1), k=3)
+    assert sug.source == "nexus"
+    assert 1 <= len(sug.candidates) <= 3
+    for c in sug.candidates:
+        assert 0.0 <= c["x"] <= 10.0
+
+
+def test_suggest_top_k_attaches_shared_diagnostics_no_per_candidate():
+    sug = NexusOptimizationProvider().suggest_top_k(_request(), k=3)
+    # Phase 1: fingerprint/diagnostics are shared across the batch...
+    assert "noise_regime" in sug.fingerprint
+    assert "exploration_coverage" in sug.diagnostics
+    # ...and there are no per-candidate diagnostics yet (delta will be 0 downstream)
+    assert sug.per_candidate == ()
+
+
+def test_suggest_top_k_is_deterministic_with_seed():
+    a = NexusOptimizationProvider().suggest_top_k(_request(seed=21), k=3)
+    b = NexusOptimizationProvider().suggest_top_k(_request(seed=21), k=3)
+    assert a.candidates == b.candidates
