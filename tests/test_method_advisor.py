@@ -8,8 +8,22 @@ dependency direction is app <- (data), never app -> benchmarks.
 """
 from __future__ import annotations
 
+import pytest
+
 from app.optimization.method_advisor import problem_profile, recommend_backends
 from app.services.strategy_models import CampaignSnapshot, DiagnosticSignals
+
+
+@pytest.fixture(autouse=True)
+def _expert_prior_table(monkeypatch):
+    """Default tests to the expert-prior table (no generated artifact).
+
+    Keeps prior-behavior assertions deterministic and independent of the
+    committed benchmark artifact; artifact-loading tests override this path.
+    """
+    import app.optimization.method_advisor as ma
+
+    monkeypatch.setattr(ma, "DECISION_TABLE_PATH", "/nonexistent/decision_table.json")
 
 
 def _snap(n_dims, *, categorical=False):
@@ -110,3 +124,46 @@ def test_selector_merges_method_advice_into_recommendation():
     rec = decision.backend_selection.fingerprint_recommendation
     # The method advisor's picks for a low-dim smooth problem should be present.
     assert any(b in rec for b in ("bomcp", "built_in", "optuna_tpe"))
+
+
+# --- (b) generated decision table loading ------------------------------------
+
+
+def test_load_decision_table_falls_back_to_default_when_absent():
+    from app.optimization.method_advisor import DEFAULT_DECISION_TABLE, load_decision_table
+
+    table = load_decision_table("/nonexistent/decision_table.json")
+    assert table == DEFAULT_DECISION_TABLE
+
+
+def test_load_decision_table_overrides_per_bucket_from_artifact(tmp_path):
+    import json
+
+    from app.optimization.method_advisor import DEFAULT_DECISION_TABLE, load_decision_table
+
+    artifact = tmp_path / "table.json"
+    artifact.write_text(json.dumps([
+        {"dims": "low", "modality": "unimodal", "noise": "low",
+         "methods": ["scipy_de", "bomcp"]},
+    ]))
+    table = load_decision_table(str(artifact))
+    # Artifact wins for its bucket...
+    assert table[("low", "unimodal", "low")] == ("scipy_de", "bomcp")
+    # ...defaults fill the gaps.
+    assert table[("high", "multimodal", "low")] == \
+        DEFAULT_DECISION_TABLE[("high", "multimodal", "low")]
+
+
+def test_recommend_uses_loaded_artifact(tmp_path, monkeypatch):
+    import json
+
+    import app.optimization.method_advisor as ma
+
+    artifact = tmp_path / "table.json"
+    artifact.write_text(json.dumps([
+        {"dims": "low", "modality": "unimodal", "noise": "low",
+         "methods": ["scipy_de", "bomcp"]},
+    ]))
+    monkeypatch.setattr(ma, "DECISION_TABLE_PATH", str(artifact))
+    recs = ma.recommend_backends(_snap(2), _diag(smoothness=0.9, noise=0.0))
+    assert recs[0] == "scipy_de"

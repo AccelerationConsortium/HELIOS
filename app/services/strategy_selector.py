@@ -293,11 +293,16 @@ def select_strategy(
     available_for_rank = {**available, best_action.backend_name: True}
 
     # Merge recommendation channels: campaign-specific meta-learning first
-    # (most specific), then the problem-class method advice (P3a).  Advice is
-    # filtered to the current action's pool so it only biases choices that are
-    # actually on the table -- it never enlarges the candidate set or muddies the
-    # provenance with backends the phase wouldn't consider.
-    method_advice_in_pool = tuple(b for b in method_advice if b in backend_pool)
+    # (most specific), then the problem-class method advice (P3a).
+    #
+    # Method advice only biases exploit/refine actions -- "which optimizer wins
+    # on this problem class" is meaningful when optimizing, not when the phase
+    # has already committed to space-filling (explore) or replication
+    # (stabilize).  Advice is further filtered to the current action's pool so it
+    # never enlarges the candidate set or muddies the provenance.
+    method_advice_in_pool: tuple[str, ...] = ()
+    if best_action.name in ("exploit", "refine"):
+        method_advice_in_pool = tuple(b for b in method_advice if b in backend_pool)
     recommended = tuple(
         dict.fromkeys((*intelligence_recommended_backends, *method_advice_in_pool))
     )

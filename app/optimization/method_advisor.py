@@ -17,10 +17,23 @@ so the offline table and the live lookup agree.
 """
 from __future__ import annotations
 
+import json
+import logging
+import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.services.strategy_models import CampaignSnapshot, DiagnosticSignals
+
+logger = logging.getLogger(__name__)
+
+# A benchmark run (benchmarks/methods) can emit a generated decision table here;
+# when present it overrides DEFAULT_DECISION_TABLE per bucket (gaps fall back to
+# the default).  Overridable via the HELIOS_DECISION_TABLE env var.
+DECISION_TABLE_PATH = os.environ.get(
+    "HELIOS_DECISION_TABLE",
+    os.path.join(os.path.dirname(__file__), "method_decision_table.json"),
+)
 
 # Bucket thresholds (mirror benchmarks/methods/recommend._dims_class/_noise_class).
 _DIMS_LOW_MAX = 3
@@ -69,6 +82,34 @@ def problem_profile(
     return (dims, modality, noise)
 
 
+def load_decision_table(
+    path: str | None = None,
+) -> dict[tuple[str, str, str], tuple[str, ...]]:
+    """Return the decision table: DEFAULT overlaid with a generated artifact.
+
+    The artifact (if present and readable) is a JSON list of
+    ``{"dims", "modality", "noise", "methods": [...]}`` entries; each overrides
+    its bucket.  Missing buckets keep the expert-prior default.  Any read/parse
+    error degrades silently to the default -- the live path never depends on the
+    benchmark artifact existing.
+    """
+    table = dict(DEFAULT_DECISION_TABLE)
+    artifact_path = path if path is not None else DECISION_TABLE_PATH
+    try:
+        with open(artifact_path) as fh:
+            entries = json.load(fh)
+        for e in entries:
+            key = (e["dims"], e["modality"], e["noise"])
+            methods = tuple(e["methods"])
+            if methods:
+                table[key] = methods
+    except FileNotFoundError:
+        pass
+    except Exception:
+        logger.debug("Decision-table artifact unreadable; using default", exc_info=True)
+    return table
+
+
 def recommend_backends(
     snapshot: CampaignSnapshot,
     diag: DiagnosticSignals | None = None,
@@ -79,7 +120,7 @@ def recommend_backends(
     front, since the (dims, modality, noise) bucket does not capture variable type.
     """
     profile = problem_profile(snapshot, diag)
-    ranking = DEFAULT_DECISION_TABLE.get(profile, _FALLBACK_RANKING)
+    ranking = load_decision_table().get(profile, _FALLBACK_RANKING)
 
     if snapshot.has_categorical:
         ranking = ("optuna_tpe", *[b for b in ranking if b != "optuna_tpe"])
