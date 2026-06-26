@@ -272,6 +272,9 @@ class PhaseConfig:
     enable_nexus: bool = False  # backward-compatible alias for Nexus-backed optimization intelligence
     enable_optimization_intelligence: bool = False  # causal + cross-campaign meta-learning advice
 
+    # --- Method advisor (P3a): benchmark-derived problem-class -> method bias ---
+    enable_method_advisor: bool = True  # soft-bias backend ranking by problem structure
+
     # --- Backend preferences ---
     # Order: existing optional backends first (no behaviour change when they are
     # installed), then Nexus equivalents (enrichment when optuna/scipy/pymoo are

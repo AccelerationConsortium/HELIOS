@@ -193,6 +193,16 @@ def select_strategy(
         except Exception:
             logger.debug("Optimization intelligence skipped (unavailable or error)", exc_info=True)
 
+    # ----- Method advisor (P3a): benchmark-derived problem-class bias -----
+    method_advice: tuple[str, ...] = ()
+    if config.enable_method_advisor:
+        try:
+            from app.optimization.method_advisor import recommend_backends
+
+            method_advice = recommend_backends(snapshot, diag)
+        except Exception:
+            logger.debug("Method advisor skipped (unavailable or error)", exc_info=True)
+
     # ----- Phase posterior -----
     posterior = compute_phase_posterior(snapshot, diag, config)
 
@@ -282,11 +292,21 @@ def select_strategy(
     # valid choice regardless of the caller-supplied availability map.
     available_for_rank = {**available, best_action.backend_name: True}
 
+    # Merge recommendation channels: campaign-specific meta-learning first
+    # (most specific), then the problem-class method advice (P3a).  Advice is
+    # filtered to the current action's pool so it only biases choices that are
+    # actually on the table -- it never enlarges the candidate set or muddies the
+    # provenance with backends the phase wouldn't consider.
+    method_advice_in_pool = tuple(b for b in method_advice if b in backend_pool)
+    recommended = tuple(
+        dict.fromkeys((*intelligence_recommended_backends, *method_advice_in_pool))
+    )
+
     backend_selection = rank_backends(
         phase=best_action.name,
         pool=backend_pool,
         available=available_for_rank,
-        recommended=intelligence_recommended_backends,
+        recommended=recommended,
         failure_counts=snapshot.backend_failure_counts,
         phase_weight=config.backend_phase_weight,
         fingerprint_weight=config.backend_fingerprint_weight,
