@@ -107,6 +107,7 @@ def to_bomcp_spec(space: ParameterSpace, batch_size: int, seed: int | None) -> A
         ConstraintType,
         ObjectiveSpec,
         OptimizationSpec,
+        OutcomeConstraintSpec,
         ParameterSpec,
         ParameterType,
     )
@@ -133,12 +134,16 @@ def to_bomcp_spec(space: ParameterSpace, batch_size: int, seed: int | None) -> A
     # HELIOS objective is already higher = better -> maximize (minimize=False).
     objectives = [ObjectiveSpec(name=_OBJECTIVE_NAME, minimize=False)]
 
-    # HELIOS's only constraint type (simplex) maps cleanly to SUM_EQUALS.
+    def _log_in(names: Any) -> bool:
+        # A linear form over log-scaled params has no linear analogue in log
+        # space; skip such constraints (rare) rather than emit an incorrect one.
+        return any(_is_log(d) for d in space.dimensions if d.param_name in set(names))
+
     constraints: list[Any] = []
+
+    # Simplex maps cleanly to SUM_EQUALS.
     for sc in space.simplex_constraints:
-        # A simplex over log-scaled params has no linear form in log space;
-        # skip it there (rare) rather than emit an incorrect constraint.
-        if any(_is_log(d) for d in space.dimensions if d.param_name in sc.param_names):
+        if _log_in(sc.param_names):
             logger.debug("Skipping simplex constraint over log-scaled params for bomcp")
             continue
         constraints.append(
@@ -149,10 +154,50 @@ def to_bomcp_spec(space: ParameterSpace, batch_size: int, seed: int | None) -> A
             )
         )
 
+    # Linear (in)equalities: unit coefficients collapse to the SUM_* forms;
+    # weighted coefficients use the general LINEAR form.
+    _op_sum = {"<=": ConstraintType.SUM_LESS_THAN,
+               ">=": ConstraintType.SUM_GREATER_THAN,
+               "==": ConstraintType.SUM_EQUALS}
+    for lc in space.linear_constraints:
+        if _log_in(lc.param_names):
+            logger.debug("Skipping linear constraint over log-scaled params for bomcp")
+            continue
+        unit = all(abs(c - 1.0) < 1e-12 for c in lc.coefficients)
+        if unit and lc.op in _op_sum:
+            constraints.append(
+                ConstraintSpec(
+                    type=_op_sum[lc.op],
+                    parameters=list(lc.param_names),
+                    value=float(lc.bound),
+                )
+            )
+        else:
+            constraints.append(
+                ConstraintSpec(
+                    type=ConstraintType.LINEAR,
+                    parameters=list(lc.param_names),
+                    value=float(lc.bound),
+                    coefficients=[float(c) for c in lc.coefficients],
+                )
+            )
+
+    # Outcome constraints: learned feasibility on a measured response.
+    outcome_constraints = [
+        OutcomeConstraintSpec(
+            objective_name=oc.objective_name,
+            threshold=float(oc.threshold),
+            greater_than=bool(oc.greater_than),
+            feasibility_threshold=float(oc.feasibility_threshold),
+        )
+        for oc in space.outcome_constraints
+    ]
+
     return OptimizationSpec(
         parameters=params,
         objectives=objectives,
         constraints=constraints,
+        outcome_constraints=outcome_constraints,
         batch_size=batch_size,
         random_seed=_DEFAULT_SEED if seed is None else int(seed),
     )

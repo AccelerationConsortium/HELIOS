@@ -60,12 +60,47 @@ class SimplexConstraint:
 
 
 @dataclass(frozen=True)
+class LinearConstraint:
+    """A linear (in)equality over named input parameters.
+
+    Feasible iff ``sum(coefficients[i] * params[name_i]) <op> bound``, where
+    ``op`` is one of ``"<="``, ``">="``, ``"=="``.  Generalizes the simplex
+    constraint (which is ``coefficients=all-ones, op="==", bound=target_sum``)
+    to arbitrary weights and inequality directions.
+    """
+
+    param_names: tuple[str, ...]
+    coefficients: tuple[float, ...]
+    op: str  # "<=" | ">=" | "=="
+    bound: float
+    tol: float = 1e-9  # slack for equality / boundary comparisons
+
+
+@dataclass(frozen=True)
+class OutcomeConstraint:
+    """A constraint on a *measured response*, not the input parameters.
+
+    Feasible iff the named objective satisfies the threshold.  Unlike a linear
+    input constraint, feasibility is only known after an experiment runs, so the
+    surrogate must learn it (the bomcp backend models P(feasible | x)).  Used for
+    response limits ("yield >= 0.8") and for learned failure regions (Dim 9).
+    """
+
+    objective_name: str
+    threshold: float
+    greater_than: bool = True  # True: objective >= threshold; False: <= threshold
+    feasibility_threshold: float = 0.5  # min P(feasible) the acquisition requires
+
+
+@dataclass(frozen=True)
 class ParameterSpace:
     """Complete parameter space definition for batch generation."""
 
     dimensions: tuple[SearchDimension, ...]
     protocol_template: dict[str, Any]  # base protocol, params to be overridden
     simplex_constraints: tuple[SimplexConstraint, ...] = ()
+    linear_constraints: tuple[LinearConstraint, ...] = ()
+    outcome_constraints: tuple[OutcomeConstraint, ...] = ()
 
     @property
     def n_dims(self) -> int:
@@ -181,6 +216,70 @@ def sample_random(
             point[dim.param_name] = _sample_dimension(dim, rng)
         candidates.append(point)
     return candidates
+
+
+def is_feasible(params: dict[str, Any], space: ParameterSpace) -> bool:
+    """Return True if ``params`` satisfies every input linear constraint.
+
+    Only *input* constraints are checked here -- outcome constraints depend on a
+    measured response and are enforced by the surrogate, not at sampling time.
+    """
+    for c in space.linear_constraints:
+        lhs = sum(
+            coef * float(params[name])
+            for name, coef in zip(c.param_names, c.coefficients, strict=True)
+        )
+        if c.op == "<=" and lhs > c.bound + c.tol:
+            return False
+        if c.op == ">=" and lhs < c.bound - c.tol:
+            return False
+        if c.op == "==" and abs(lhs - c.bound) > c.tol:
+            return False
+    return True
+
+
+def sample_feasible(
+    space: ParameterSpace,
+    n: int,
+    *,
+    seed: int | None = None,
+    base: str = "random",
+    max_factor: int = 50,
+) -> list[dict[str, Any]]:
+    """Rejection-sample ``n`` points satisfying the space's linear constraints.
+
+    Oversamples with the base sampler (``"random"`` or ``"lhs"``) and keeps only
+    feasible points until ``n`` are collected or the budget (``max_factor * n``
+    draws) is exhausted.  Returns as many feasible points as it found, logging a
+    warning if short -- the caller decides whether a partial batch is acceptable.
+    """
+    if not space.linear_constraints:
+        sampler = sample_lhs if base == "lhs" else sample_random
+        return sampler(space, n, seed=seed)
+
+    sampler = sample_lhs if base == "lhs" else sample_random
+    kept: list[dict[str, Any]] = []
+    draws = 0
+    budget = max(n * max_factor, n)
+    batch = 0
+    while len(kept) < n and draws < budget:
+        # Vary the seed per batch so oversampling explores new points.
+        chunk = sampler(space, n, seed=None if seed is None else seed + batch)
+        for p in chunk:
+            draws += 1
+            if is_feasible(p, space):
+                kept.append(p)
+                if len(kept) == n:
+                    break
+        batch += 1
+
+    if len(kept) < n:
+        logger.warning(
+            "sample_feasible: only %d/%d feasible points after %d draws "
+            "(constraints may be very tight)",
+            len(kept), n, draws,
+        )
+    return kept[:n]
 
 
 def sample_lhs(
