@@ -275,11 +275,15 @@ class PhaseConfig:
     # --- Backend preferences ---
     # Order: existing optional backends first (no behaviour change when they are
     # installed), then Nexus equivalents (enrichment when optuna/scipy/pymoo are
-    # absent), then built_in as the guaranteed fallback.
+    # absent), then ``bomcp`` (real GP-BO via bo-engine) just ahead of the
+    # guaranteed ``built_in`` fallback -- so the KNN heuristic only runs when no
+    # real engine is installed.  Whether ``bomcp`` should outrank optuna/nexus is
+    # deferred to the method-comparison benchmark (dims 4/8).
     exploitation_backends: tuple[str, ...] = (
         "optuna_tpe",
         "nexus_tpe",
         "nexus_gp_bo",
+        "bomcp",
         "built_in",
     )
     refinement_backends: tuple[str, ...] = (
@@ -287,6 +291,7 @@ class PhaseConfig:
         "nexus_cmaes",
         "scipy_de",
         "nexus_de",
+        "bomcp",
         "built_in",
     )
     high_dim_backends: tuple[str, ...] = (
@@ -294,6 +299,7 @@ class PhaseConfig:
         "nexus_nsga2",
         "optuna_tpe",
         "nexus_turbo",
+        "bomcp",
         "built_in",
     )
     explore_backends: tuple[str, ...] = (
