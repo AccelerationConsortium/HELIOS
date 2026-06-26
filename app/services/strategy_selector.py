@@ -547,45 +547,13 @@ def generate_adaptive_candidates(
     # with feasible points, so *every* backend's output steers around coordinates
     # where past experiments failed.  No-op when no failures are recorded.
     if snapshot.failed_params:
-        candidates = _avoid_failure_region(
+        from app.optimization.failure_region import avoid_failure_region
+
+        candidates = avoid_failure_region(
             candidates, space, n, list(snapshot.failed_params), seed
         )
 
     return candidates, decision
-
-
-def _avoid_failure_region(
-    candidates: list[dict[str, Any]],
-    space: Any,  # ParameterSpace
-    n: int,
-    failed: list[dict[str, Any]],
-    seed: int | None,
-) -> list[dict[str, Any]]:
-    """Filter failure-prone candidates and top up with feasible replacements."""
-    from app.optimization.failure_region import FailureRegionModel, filter_failure_prone
-    from app.services.candidate_gen import sample_feasible
-
-    model = FailureRegionModel.fit(failed=failed, space=space)
-    kept = filter_failure_prone(candidates, model)
-    if len(kept) >= n:
-        return kept[:n]
-
-    base = 0 if seed is None else seed
-    tries = 0
-    while len(kept) < n and tries < 50:
-        for p in sample_feasible(space, n, seed=base + tries + 1):
-            if model.predicted_feasible(p) and p not in kept:
-                kept.append(p)
-                if len(kept) == n:
-                    break
-        tries += 1
-
-    if len(kept) < n:
-        logger.warning(
-            "Failure-region avoidance: only %d/%d feasible candidates after top-up",
-            len(kept), n,
-        )
-    return kept[:n]
 
 
 # ---------------------------------------------------------------------------

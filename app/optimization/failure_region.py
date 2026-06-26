@@ -109,6 +109,41 @@ def filter_failure_prone(
     return [c for c in candidates if model.predicted_feasible(c)]
 
 
+def avoid_failure_region(
+    candidates: list[dict[str, Any]],
+    space: ParameterSpace,
+    n: int,
+    failed: list[dict[str, Any]],
+    seed: int | None = None,
+) -> list[dict[str, Any]]:
+    """Filter failure-prone candidates and top up to ``n`` with feasible points.
+
+    Shared by ``generate_adaptive_candidates`` and the DesignAgent so every
+    generation path steers around learned failure coordinates identically.
+    No-op (returns ``candidates`` unchanged) when no failures are recorded.
+    """
+    if not failed:
+        return candidates
+
+    from app.services.candidate_gen import sample_feasible
+
+    model = FailureRegionModel.fit(failed=failed, space=space)
+    kept = filter_failure_prone(candidates, model)
+    if len(kept) >= n:
+        return kept[:n]
+
+    base = 0 if seed is None else seed
+    tries = 0
+    while len(kept) < n and tries < 50:
+        for p in sample_feasible(space, n, seed=base + tries + 1):
+            if model.predicted_feasible(p) and p not in kept:
+                kept.append(p)
+                if len(kept) == n:
+                    break
+        tries += 1
+    return kept[:n]
+
+
 def build_feasibility_observations(
     succeeded: list[Observation],
     failed: list[dict[str, Any]],

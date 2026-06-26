@@ -52,6 +52,10 @@ class DesignInput(BaseModel):
         default_factory=list,
         description="Adversarial refutations from ValidatorSwarm to incorporate",
     )
+    failed_params: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Coordinates of past failed experiments to steer around (Dim 9)",
+    )
 
 
 class DesignOutput(BaseModel):
@@ -150,6 +154,15 @@ class DesignAgent(BaseAgent[DesignInput, DesignOutput]):
         )
 
         candidates = [c.params for c in batch.candidates]
+
+        # Dim 9 / P3b: steer candidates away from learned failure coordinates.
+        if input_data.failed_params:
+            from app.optimization.failure_region import avoid_failure_region
+
+            candidates = avoid_failure_region(
+                candidates, space, input_data.batch_size,
+                list(input_data.failed_params), seed=input_data.seed,
+            )
 
         # ── v3: Similarity-based confidence calibration ───────────────
         candidate_confidence: list[dict[str, Any]] = []

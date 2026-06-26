@@ -161,3 +161,44 @@ def test_generation_unchanged_without_failures():
     )
     cands, _ = generate_adaptive_candidates(space, 10, [], snap, seed=1)
     assert len(cands) == 10
+
+
+def test_avoid_failure_region_filters_and_tops_up():
+    from app.optimization.failure_region import avoid_failure_region
+
+    space = _unit_square()
+    failed = _failures_near(0.8, 0.8, n=8)
+    cands = [
+        {"x0": 0.8, "x1": 0.8},    # in region
+        {"x0": 0.79, "x1": 0.81},  # in region
+        {"x0": 0.1, "x1": 0.1},    # safe
+        {"x0": 0.2, "x1": 0.2},    # safe
+    ]
+    out = avoid_failure_region(cands, space, 4, failed, seed=1)
+    assert len(out) == 4  # filtered + topped up back to n
+    model = FailureRegionModel.fit(failed=failed, space=space)
+    for p in out:
+        assert model.predicted_feasible(p)
+
+
+def test_avoid_failure_region_noop_without_failures():
+    from app.optimization.failure_region import avoid_failure_region
+
+    space = _unit_square()
+    cands = [{"x0": 0.8, "x1": 0.8}, {"x0": 0.1, "x1": 0.1}]
+    out = avoid_failure_region(cands, space, 2, [], seed=1)
+    assert out == cands
+
+
+def test_design_input_carries_failed_params():
+    from app.agents.design_agent import DesignInput
+
+    di = DesignInput(
+        dimensions=[{"param_name": "x", "param_type": "number", "min_value": 0, "max_value": 1}],
+        protocol_template={},
+        failed_params=[{"x": 0.9}],
+    )
+    assert di.failed_params == [{"x": 0.9}]
+    # Defaults to empty so existing callers are unaffected.
+    di2 = DesignInput(dimensions=di.dimensions, protocol_template={})
+    assert di2.failed_params == []
