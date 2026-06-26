@@ -1,0 +1,117 @@
+"""Dim 9 — failure-region modeling in parameter space.
+
+HELIOS already learns failures at the *method* level (per-backend penalty/veto).
+This pushes failure learning down to the *coordinate* level: a region where
+experiments keep failing becomes a learned infeasible region that future
+suggestions avoid -- expressed as a bomcp OutcomeConstraint on a synthetic
+"feasibility" response, and enforced for any backend via candidate filtering.
+"""
+from __future__ import annotations
+
+from app.optimization.failure_region import (
+    FailureRegionModel,
+    build_feasibility_observations,
+    failure_outcome_constraint,
+    filter_failure_prone,
+)
+from app.services.candidate_gen import OutcomeConstraint, ParameterSpace, SearchDimension
+from app.services.optimization_backends import Observation
+
+
+def _unit_square() -> ParameterSpace:
+    return ParameterSpace(
+        dimensions=(
+            SearchDimension("x0", "number", min_value=0.0, max_value=1.0),
+            SearchDimension("x1", "number", min_value=0.0, max_value=1.0),
+        ),
+        protocol_template={},
+    )
+
+
+def _failures_near(cx, cy, n=6):
+    import random
+
+    rng = random.Random(0)
+    return [
+        {"x0": cx + rng.uniform(-0.03, 0.03), "x1": cy + rng.uniform(-0.03, 0.03)}
+        for _ in range(n)
+    ]
+
+
+# --- failure score / feasibility prediction ---------------------------------
+
+
+def test_failure_score_high_near_failures_low_far_away():
+    space = _unit_square()
+    model = FailureRegionModel.fit(failed=_failures_near(0.8, 0.8), space=space)
+    assert model.failure_score({"x0": 0.8, "x1": 0.8}) > 0.5
+    assert model.failure_score({"x0": 0.1, "x1": 0.1}) < 0.1
+
+
+def test_predicted_feasible_avoids_failure_cluster():
+    space = _unit_square()
+    model = FailureRegionModel.fit(failed=_failures_near(0.8, 0.8), space=space)
+    assert model.predicted_feasible({"x0": 0.1, "x1": 0.1}) is True
+    assert model.predicted_feasible({"x0": 0.8, "x1": 0.8}) is False
+
+
+def test_no_failures_means_everything_feasible():
+    space = _unit_square()
+    model = FailureRegionModel.fit(failed=[], space=space)
+    assert model.failure_score({"x0": 0.8, "x1": 0.8}) == 0.0
+    assert model.predicted_feasible({"x0": 0.8, "x1": 0.8}) is True
+
+
+def test_categorical_failures_match_by_category():
+    space = ParameterSpace(
+        dimensions=(
+            SearchDimension("solvent", "categorical", choices=("water", "ethanol", "dmso")),
+            SearchDimension("temp", "number", min_value=20.0, max_value=100.0),
+        ),
+        protocol_template={},
+    )
+    model = FailureRegionModel.fit(
+        failed=[{"solvent": "dmso", "temp": 90.0}, {"solvent": "dmso", "temp": 95.0}],
+        space=space,
+    )
+    # Same category + nearby temp -> failure-prone; different category -> safe.
+    assert model.failure_score({"solvent": "dmso", "temp": 92.0}) > 0.5
+    assert model.failure_score({"solvent": "water", "temp": 92.0}) < 0.5
+
+
+# --- candidate filtering (universal enforcement) ----------------------------
+
+
+def test_filter_failure_prone_removes_points_in_region():
+    space = _unit_square()
+    model = FailureRegionModel.fit(failed=_failures_near(0.8, 0.8), space=space)
+    cands = [
+        {"x0": 0.1, "x1": 0.1},   # safe
+        {"x0": 0.8, "x1": 0.8},   # in failure region
+        {"x0": 0.2, "x1": 0.15},  # safe
+    ]
+    kept = filter_failure_prone(cands, model)
+    assert {"x0": 0.8, "x1": 0.8} not in kept
+    assert {"x0": 0.1, "x1": 0.1} in kept
+    assert len(kept) == 2
+
+
+# --- bomcp expression (learned outcome constraint) --------------------------
+
+
+def test_feasibility_observations_label_success_and_failure():
+    succeeded = [Observation(params={"x0": 0.1, "x1": 0.1}, objective=5.0)]
+    failed = [{"x0": 0.8, "x1": 0.8}]
+    obs = build_feasibility_observations(succeeded, failed)
+    feas = {tuple(sorted(o.parameter_values.items())): o.objective_values["feasibility"]
+            for o in obs}
+    assert feas[(("x0", 0.1), ("x1", 0.1))] == 1.0
+    assert feas[(("x0", 0.8), ("x1", 0.8))] == 0.0
+
+
+def test_failure_outcome_constraint_shape():
+    oc = failure_outcome_constraint()
+    assert isinstance(oc, OutcomeConstraint)
+    assert oc.objective_name == "feasibility"
+    assert oc.greater_than is True
+    assert 0.0 < oc.threshold < 1.0
