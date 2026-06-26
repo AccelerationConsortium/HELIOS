@@ -44,6 +44,11 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_SEED = 42
 _OBJECTIVE_NAME = "objective"
+# At/above this dimensionality, enable TuRBO (trust-region BO) for an
+# all-continuous space.  TuRBO is single-objective + continuous only, which the
+# bomcp bridge always is (single maximization objective; categorical dims
+# disable it).  Below this, the standard qLogNEI path is used (no state).
+_TURBO_MIN_DIMS = 5
 
 
 def _bomcp_available() -> bool:
@@ -110,6 +115,7 @@ def to_bomcp_spec(space: ParameterSpace, batch_size: int, seed: int | None) -> A
         OutcomeConstraintSpec,
         ParameterSpec,
         ParameterType,
+        TurboConfig,
     )
 
     params: list[Any] = []
@@ -193,6 +199,15 @@ def to_bomcp_spec(space: ParameterSpace, batch_size: int, seed: int | None) -> A
         for oc in space.outcome_constraints
     ]
 
+    # High-dimensional, all-continuous spaces use TuRBO (trust-region BO), whose
+    # trust region is threaded across rounds as backend_state (see suggest()).
+    has_categorical = any(d.param_type in ("categorical", "boolean") for d in space.dimensions)
+    turbo_config = (
+        TurboConfig()
+        if len(space.dimensions) >= _TURBO_MIN_DIMS and not has_categorical
+        else None
+    )
+
     return OptimizationSpec(
         parameters=params,
         objectives=objectives,
@@ -200,6 +215,7 @@ def to_bomcp_spec(space: ParameterSpace, batch_size: int, seed: int | None) -> A
         outcome_constraints=outcome_constraints,
         batch_size=batch_size,
         random_seed=_DEFAULT_SEED if seed is None else int(seed),
+        turbo_config=turbo_config,
     )
 
 
@@ -239,6 +255,24 @@ def from_bomcp_suggestion(suggestion: Any, space: ParameterSpace) -> dict[str, A
     }
 
 
+def _state_to_dict(turbo_state: Any) -> dict[str, Any] | None:
+    """Serialize a bo-engine ``TurboState`` to a JSON-safe dict (None passes through)."""
+    if turbo_state is None:
+        return None
+    import dataclasses
+
+    return dataclasses.asdict(turbo_state)
+
+
+def _state_from_dict(state: dict[str, Any] | None) -> Any:
+    """Reconstruct a ``TurboState`` from a persisted dict (None passes through)."""
+    if not state:
+        return None
+    from bo_engine.turbo import TurboState
+
+    return TurboState(**state)
+
+
 def _suggestion_info(suggestion: Any) -> dict[str, Any]:
     """Extract per-point explanation/provenance from a ``SuggestionResult``."""
     return {
@@ -268,6 +302,10 @@ class BoMcpBackend:
         # Populated after each suggest() so callers can surface per-point
         # explanations into StrategyDecision / provenance (dimensions 5 & 7).
         self.last_method_info: list[dict[str, Any]] = []
+        # JSON-safe TuRBO trust-region state for high-dim runs; None on the
+        # standard qLogNEI path.  The caller persists it and passes it back via
+        # the ``backend_state`` kwarg next round to keep the trust region warm.
+        self.last_backend_state: dict[str, Any] | None = None
 
     def suggest(
         self,
@@ -284,6 +322,7 @@ class BoMcpBackend:
             from app.services.candidate_gen import sample_random
 
             self.last_method_info = []
+            self.last_backend_state = None
             return sample_random(space, n, seed=seed)
 
         from bo_engine import generate_next_batch
@@ -291,11 +330,13 @@ class BoMcpBackend:
         spec = to_bomcp_spec(space, n, seed)
         obs = to_bomcp_observations(observations, space)
         iteration = int(kwargs.get("round_number", len(observations)))
+        turbo_state = _state_from_dict(kwargs.get("backend_state"))
 
-        suggestions, _state = generate_next_batch(
-            spec, obs, batch_size=n, iteration=iteration
+        suggestions, new_state = generate_next_batch(
+            spec, obs, batch_size=n, iteration=iteration, turbo_state=turbo_state
         )
         self.last_method_info = [_suggestion_info(s) for s in suggestions]
+        self.last_backend_state = _state_to_dict(new_state)
         return [from_bomcp_suggestion(s, space) for s in suggestions]
 
     @staticmethod
