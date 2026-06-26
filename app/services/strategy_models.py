@@ -198,6 +198,10 @@ class StrategyDecision:
     drift_score: float | None = None
     evidence: tuple[EvidenceItem, ...] = ()
     stabilize_spec: StabilizeSpec | None = None
+    # Δ2 backend-selection trace: fingerprint-soft-biased backend ranking the
+    # authority surfaced this round (advisory; the archetype is still chosen by
+    # the action utilities, not by this list). Audit/provenance only.
+    recommended_backends: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------

@@ -174,6 +174,7 @@ def select_strategy(
     # ----- Optional optimization intelligence enrichment (v5) -----
     intelligence_evidence: list[EvidenceItem] = []
     intelligence_weight_adj: dict[str, float] = {}
+    intelligence_recommended_backends: tuple[str, ...] = ()
     if config.enable_nexus or config.enable_optimization_intelligence:
         try:
             from app.services.optimization_intelligence import OptimizationIntelligenceAdvisor
@@ -181,6 +182,7 @@ def select_strategy(
             intelligence = OptimizationIntelligenceAdvisor().advise(snapshot)
             intelligence_evidence = list(intelligence.evidence)
             intelligence_weight_adj = intelligence.weight_adjustments
+            intelligence_recommended_backends = tuple(intelligence.recommended_backends)
             if intelligence.has_signal:
                 logger.info(
                     "Optimization intelligence advice: sources=%s weights=%s phase=%s",
@@ -326,6 +328,7 @@ def select_strategy(
         drift_score=diag.drift_score,
         evidence=evidence,
         stabilize_spec=stabilize_spec,
+        recommended_backends=intelligence_recommended_backends,
     )
 
 

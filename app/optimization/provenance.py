@@ -7,7 +7,7 @@ explainable scientific agent loop (not merely a connector around an optimizer).
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.optimization.schemas import (
     CandidateSuggestion,
@@ -15,7 +15,28 @@ from app.optimization.schemas import (
     OptimizationRequest,
 )
 
+if TYPE_CHECKING:  # pragma: no cover
+    from app.services.strategy_models import StrategyDecision
+
 ProvenanceSink = Callable[[dict[str, Any]], None]
+
+
+def _serialize_backend_selection(
+    strategy_decision: StrategyDecision | None,
+) -> dict[str, Any]:
+    """Serialise the Δ2 backend-selection trace from the authority decision.
+
+    Empty when no ``StrategyDecision`` is supplied (legacy ``suggest_next`` /
+    ``evaluate`` callers), so their records are unchanged.
+    """
+    if strategy_decision is None:
+        return {}
+    return {
+        "chosen_backend": strategy_decision.backend_name,
+        "phase": strategy_decision.phase,
+        "recommended_backends": list(strategy_decision.recommended_backends),
+        "confidence": strategy_decision.confidence,
+    }
 
 
 def _serialize_scored_pool(
@@ -55,6 +76,8 @@ class ProvenanceLogger:
         request: OptimizationRequest,
         suggestion: CandidateSuggestion,
         decision: DecisionResult,
+        *,
+        strategy_decision: StrategyDecision | None = None,
     ) -> dict[str, Any]:
         selected = [dict(c) for c in decision.final_candidates]
         return {
@@ -74,6 +97,8 @@ class ProvenanceLogger:
             "accepted": decision.accepted,
             "requires_human_review": decision.requires_human_review,
             "decision_trace": list(decision.decision_trace),
+            # Δ2: backend-selection trace (empty for legacy callers).
+            "backend_selection": _serialize_backend_selection(strategy_decision),
             # Δ1: full scored portfolio -- "why this, why not the alternatives".
             "candidate_pool": _serialize_scored_pool(decision, selected),
         }
@@ -83,8 +108,10 @@ class ProvenanceLogger:
         request: OptimizationRequest,
         suggestion: CandidateSuggestion,
         decision: DecisionResult,
+        *,
+        strategy_decision: StrategyDecision | None = None,
     ) -> dict[str, Any]:
-        rec = self.build(request, suggestion, decision)
+        rec = self.build(request, suggestion, decision, strategy_decision=strategy_decision)
         self.records.append(rec)
         if self._sink is not None:
             self._sink(rec)

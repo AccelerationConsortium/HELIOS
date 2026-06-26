@@ -144,8 +144,9 @@ def arbitrate_next(
     )
     result = policy.arbitrate(pool, request, decision, config=config)
 
-    # Provenance source-of-record: the primary generator this round.
+    # Provenance source-of-record: the primary generator this round, plus the
+    # authority's Δ2 backend-selection trace (so one record holds both axes).
     primary = nexus_suggestion if nexus_suggestion is not None else local_suggestion
-    record = provenance.record(request, primary, result)
+    record = provenance.record(request, primary, result, strategy_decision=decision)
 
     return OptimizationOutcome(suggestion=primary, decision=result, provenance=record)
