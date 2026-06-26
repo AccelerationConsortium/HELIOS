@@ -115,3 +115,49 @@ def test_failure_outcome_constraint_shape():
     assert oc.objective_name == "feasibility"
     assert oc.greater_than is True
     assert 0.0 < oc.threshold < 1.0
+
+
+# --- P3b: failure avoidance wired into candidate generation -----------------
+
+
+def test_snapshot_carries_failed_params():
+    from app.services.strategy_models import CampaignSnapshot
+
+    snap = CampaignSnapshot(
+        round_number=1, max_rounds=5, n_observations=0, n_dimensions=2,
+        has_categorical=False, has_log_scale=False,
+        failed_params=({"x0": 0.8, "x1": 0.8},),
+    )
+    assert snap.failed_params == ({"x0": 0.8, "x1": 0.8},)
+
+
+def test_generate_adaptive_candidates_avoids_failure_region():
+    from app.services.strategy_models import CampaignSnapshot
+    from app.services.strategy_selector import generate_adaptive_candidates
+
+    space = _unit_square()
+    snap = CampaignSnapshot(
+        round_number=2, max_rounds=5, n_observations=5, n_dimensions=2,
+        has_categorical=False, has_log_scale=False,
+        user_strategy_hint="random",  # deterministic, fast backend
+        failed_params=tuple(_failures_near(0.8, 0.8, n=8)),
+    )
+    cands, _decision = generate_adaptive_candidates(space, 10, [], snap, seed=1)
+    assert len(cands) == 10
+    model = FailureRegionModel.fit(failed=list(snap.failed_params), space=space)
+    for c in cands:
+        assert model.predicted_feasible(c), f"{c} fell in the learned failure region"
+
+
+def test_generation_unchanged_without_failures():
+    from app.services.strategy_models import CampaignSnapshot
+    from app.services.strategy_selector import generate_adaptive_candidates
+
+    space = _unit_square()
+    snap = CampaignSnapshot(
+        round_number=2, max_rounds=5, n_observations=5, n_dimensions=2,
+        has_categorical=False, has_log_scale=False,
+        user_strategy_hint="random",
+    )
+    cands, _ = generate_adaptive_candidates(space, 10, [], snap, seed=1)
+    assert len(cands) == 10

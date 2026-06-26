@@ -60,6 +60,11 @@ class CampaignSnapshot:
     # --- Per-backend recent failure history (Δ2: penalize/veto in ranking) ---
     backend_failure_counts: dict[str, int] = field(default_factory=dict)
 
+    # --- Failed experiment coordinates (Dim 9 / P3b: avoid in generation) ---
+    # Param dicts of experiments that errored or failed QC; used to learn a
+    # parameter-space failure region future candidates steer around.
+    failed_params: tuple[dict[str, Any], ...] = ()
+
 
 # ---------------------------------------------------------------------------
 # Diagnostic signals — v3: three failure modes
