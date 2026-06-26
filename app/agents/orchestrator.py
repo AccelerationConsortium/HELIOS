@@ -679,6 +679,14 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             backend_failure_counts: dict[str, int] = dict(
                 restored_state.get("backend_failure_counts", {})
             )
+            # Failed experiment coordinates (Dim 9 / P3b: avoid in generation).
+            all_failed_params: list[dict[str, Any]] = list(
+                restored_state.get("all_failed_params", [])
+            )
+            # (c) bomcp TuRBO trust-region state, threaded across rounds.
+            bomcp_backend_state: dict[str, Any] | None = restored_state.get(
+                "bomcp_backend_state"
+            )
         else:
             kpi_history: list[float] = []
             all_kpis: list[float] = []
@@ -687,6 +695,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             best_kpi: float | None = None
             total_runs = 0
             backend_failure_counts = {}
+            all_failed_params = []
+            bomcp_backend_state = None
 
         step_history: list[dict[str, Any]] = []
 
@@ -790,6 +800,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         qc_fail_rate=qc_fail_rate,
                         # Δ2: recent per-backend failures bias backend ranking.
                         backend_failure_counts=dict(backend_failure_counts),
+                        # Dim 9 / P3b: failed coordinates -> failure-region avoidance.
+                        failed_params=tuple(all_failed_params),
                     )
                     # Route through RL or rule-based strategy router
                     if self._strategy_router is not None:
@@ -982,6 +994,10 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     campaign_id=campaign_id,
                     kpi_name=input_data.objective_kpi,
                     store=not input_data.dry_run,  # skip DB in dry_run mode
+                    # Dim 9 / P3b: steer candidates away from failed coordinates.
+                    failed_params=list(all_failed_params),
+                    # (c) thread the bomcp TuRBO trust region into this round.
+                    backend_state=bomcp_backend_state,
                 )
 
                 self._emit(campaign_id, {
@@ -1020,6 +1036,9 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     )
                     continue
                 design_candidates = list(design_result.output.candidates)
+                # (c) carry the bomcp TuRBO trust region into the next round.
+                if design_result.output.backend_state is not None:
+                    bomcp_backend_state = design_result.output.backend_state
 
             # 2b. For each candidate, compile protocol
             for i, candidate_params in enumerate(design_candidates):
@@ -1432,6 +1451,10 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     and monitor_result.output.recommendation == "abort"
                 ):
                     total_qc_fails += 1
+                    # Dim 9 / P3b: this coordinate produced a failed experiment;
+                    # feed it to the failure-region model so future candidates
+                    # steer around it.
+                    all_failed_params.append(candidate_params)
                     logger.warning(
                         "Round %d candidate %d: QC failed, skipping",
                         round_num, i,
@@ -2163,6 +2186,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         max_retries = 3
         retry_count = 0
         retry_history: list[dict[str, Any]] = []
+        recovery_episode: dict[str, Any] | None = None
+        last_attempt_result: dict[str, Any] | None = None
 
         while retry_count <= max_retries:
             try:
@@ -2203,6 +2228,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         history=retry_history,
                         retry_count=retry_count,
                         stage=f"round_{round_num}_candidate_{candidate_idx}",
+                        episode=recovery_episode,
+                        last_attempt_result=last_attempt_result,
                     )
 
                     # Get recovery decision
@@ -2217,6 +2244,15 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
 
                     decision = recovery_result.output.decision
                     rationale = recovery_result.output.rationale
+                    recovery_episode = recovery_result.output.episode.model_dump()
+                    self._emit_recovery_phase(
+                        campaign_id=campaign_id,
+                        round_num=round_num,
+                        candidate_idx=candidate_idx,
+                        error_type=error_type,
+                        error_severity=error_severity,
+                        recovery_output=recovery_result.output,
+                    )
 
                     # Emit recovery event
                     self._emit(campaign_id, {
@@ -2230,6 +2266,9 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         "rationale": rationale,
                         "retry_count": retry_count,
                         "chemical_safety_event": recovery_result.output.chemical_safety_event,
+                        "episode_id": recovery_result.output.episode.episode_id,
+                        "phase": recovery_result.output.phase,
+                        "next_action": recovery_result.output.next_action,
                     })
 
                     # Check for chemical safety escalation
@@ -2269,6 +2308,12 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                                 "retry_count": retry_count - 1,
                             },
                         })
+                        last_attempt_result = {
+                            "result": "failed",
+                            "error_type": error_type,
+                            "error_message": error_msg,
+                            "retry_count": retry_count - 1,
+                        }
 
                         if retry_delay > 0:
                             await asyncio.sleep(retry_delay)
@@ -2315,6 +2360,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         "round": round_num,
                         "candidate": candidate_idx,
                         "retries": retry_count,
+                        "episode_id": recovery_episode.get("episode_id") if recovery_episode else None,
                         "message": f"Execution succeeded after {retry_count} retries",
                     })
 
@@ -2350,6 +2396,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     history=retry_history,
                     retry_count=retry_count,
                     stage=f"round_{round_num}_candidate_{candidate_idx}",
+                    episode=recovery_episode,
+                    last_attempt_result=last_attempt_result,
                 )
 
                 # Get recovery decision
@@ -2364,6 +2412,15 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
 
                 decision = recovery_result.output.decision
                 rationale = recovery_result.output.rationale
+                recovery_episode = recovery_result.output.episode.model_dump()
+                self._emit_recovery_phase(
+                    campaign_id=campaign_id,
+                    round_num=round_num,
+                    candidate_idx=candidate_idx,
+                    error_type=error_type,
+                    error_severity=error_severity,
+                    recovery_output=recovery_result.output,
+                )
 
                 # Emit recovery event
                 self._emit(campaign_id, {
@@ -2377,6 +2434,9 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "rationale": rationale,
                     "retry_count": retry_count,
                     "chemical_safety_event": recovery_result.output.chemical_safety_event,
+                    "episode_id": recovery_result.output.episode.episode_id,
+                    "phase": recovery_result.output.phase,
+                    "next_action": recovery_result.output.next_action,
                 })
 
                 # Check for chemical safety escalation
@@ -2416,6 +2476,12 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                             "retry_count": retry_count - 1,
                         },
                     })
+                    last_attempt_result = {
+                        "result": "failed",
+                        "error_type": error_type,
+                        "error_message": str(exc),
+                        "retry_count": retry_count - 1,
+                    }
 
                     if retry_delay > 0:
                         await asyncio.sleep(retry_delay)
@@ -2465,6 +2531,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             "round": round_num,
             "candidate": candidate_idx,
             "retries": retry_count,
+            "episode_id": recovery_episode.get("episode_id") if recovery_episode else None,
             "message": f"Max retries ({max_retries}) exceeded",
         })
 
@@ -2472,7 +2539,39 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             "status": "failed",
             "reason": "max_retries_exceeded",
             "retries": retry_count,
+            "recovery_episode": recovery_episode,
         }
+
+    def _emit_recovery_phase(
+        self,
+        *,
+        campaign_id: str,
+        round_num: int,
+        candidate_idx: int,
+        error_type: str,
+        error_severity: str,
+        recovery_output: Any,
+    ) -> None:
+        """Emit the current recovery episode phase for UI/audit visibility."""
+        episode = recovery_output.episode
+        latest_attempt = episode.attempts[-1].model_dump() if episode.attempts else None
+        latest_observation = episode.observations[-1] if episode.observations else None
+        self._emit(campaign_id, {
+            "type": "recovery_phase",
+            "agent": "recovery",
+            "round": round_num,
+            "candidate": candidate_idx,
+            "episode_id": episode.episode_id,
+            "phase": recovery_output.phase,
+            "decision": recovery_output.decision,
+            "error_type": error_type,
+            "error_severity": error_severity,
+            "latest_observation": latest_observation,
+            "latest_attempt": latest_attempt,
+            "rejected_hypotheses": episode.rejected_hypotheses,
+            "next_action": recovery_output.next_action,
+            "terminal": recovery_output.terminal,
+        })
 
     async def _call_recovery_agent(self, recovery_input: BaseModel) -> AgentResult:
         """Route recovery decisions through the ControlPlane."""

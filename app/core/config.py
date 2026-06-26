@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -29,6 +30,31 @@ class Settings:
         # ---- Hardware adapter settings ----
         self.adapter_mode: str = os.getenv("ADAPTER_MODE", "simulated")  # simulated | battery_lab
         self.adapter_dry_run: bool = os.getenv("ADAPTER_DRY_RUN", "true").lower() in ("true", "1", "yes")
+        self.execution_backend: str = os.getenv("EXECUTION_BACKEND", "local").lower()  # local | puda
+
+        # ---- PUDA execution backend settings ----
+        self.puda_nats_servers: list[str] = [
+            s.strip()
+            for s in os.getenv("PUDA_NATS_SERVERS", "nats://localhost:4222").split(",")
+            if s.strip()
+        ]
+        self.puda_user_id: str = os.getenv("PUDA_USER_ID", "helios")
+        self.puda_username: str = os.getenv("PUDA_USERNAME", "HELIOS")
+        self.puda_default_machine_id: str = os.getenv("PUDA_DEFAULT_MACHINE_ID", "default")
+        self.puda_command_timeout_seconds: int = int(os.getenv("PUDA_COMMAND_TIMEOUT_SECONDS", "120"))
+        self.puda_machine_map: dict[str, str] = self._load_puda_machine_map(
+            os.getenv("PUDA_MACHINE_MAP", "{}")
+        )
+
+        # ---- Telegram control-plane settings ----
+        self.telegram_bot_token: str = os.getenv("TELEGRAM_BOT_TOKEN", "")
+        self.telegram_allowed_chat_ids: set[int] = self._load_int_set(
+            os.getenv("TELEGRAM_ALLOWED_CHAT_IDS", "")
+        )
+        self.telegram_poll_timeout_seconds: int = int(os.getenv("TELEGRAM_POLL_TIMEOUT_SECONDS", "25"))
+        self.telegram_default_instrument_id: str = os.getenv(
+            "TELEGRAM_DEFAULT_INSTRUMENT_ID", "sim-instrument-1"
+        )
 
         # Robot type: "ot2" | "flex"
         self.robot_type: str = os.getenv("ROBOT_TYPE", "ot2")
@@ -51,6 +77,26 @@ class Settings:
         self.llm_model: str = os.getenv("LLM_MODEL", "claude-sonnet-4-20250514")
         self.llm_base_url: str = os.getenv("LLM_BASE_URL", "https://api.anthropic.com")
         self.llm_max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "4096"))
+
+    @staticmethod
+    def _load_puda_machine_map(raw: str) -> dict[str, str]:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("PUDA_MACHINE_MAP must be a JSON object") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("PUDA_MACHINE_MAP must be a JSON object")
+        return {str(k): str(v) for k, v in parsed.items()}
+
+    @staticmethod
+    def _load_int_set(raw: str) -> set[int]:
+        values: set[int] = set()
+        for item in raw.split(","):
+            value = item.strip()
+            if not value:
+                continue
+            values.add(int(value))
+        return values
 
 
 @lru_cache(maxsize=1)
