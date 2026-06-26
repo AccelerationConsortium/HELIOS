@@ -75,3 +75,57 @@ def test_turbo_state_round_trips():
     assert len(cands2) == 4
     assert backend.last_backend_state is not None
     json.dumps(backend.last_backend_state)
+
+
+# --- live thread: generate_adaptive_candidates surfaces state on the decision --
+
+
+def test_generate_adaptive_candidates_exposes_backend_state_on_decision():
+    from app.services.strategy_models import CampaignSnapshot
+    from app.services.strategy_selector import generate_adaptive_candidates
+
+    space = _space(2)
+    snap = CampaignSnapshot(
+        round_number=2, max_rounds=5, n_observations=5, n_dimensions=2,
+        has_categorical=False, has_log_scale=False,
+        user_strategy_hint="random",  # deterministic backend with no state
+    )
+    cands, decision = generate_adaptive_candidates(space, 3, [], snap, seed=1)
+    assert len(cands) == 3
+    assert hasattr(decision, "backend_state")
+    assert decision.backend_state is None  # random backend emits no state
+
+    # Accepts an incoming backend_state without breaking the 2-tuple contract.
+    cands2, _ = generate_adaptive_candidates(space, 3, [], snap, seed=1, backend_state=None)
+    assert len(cands2) == 3
+
+
+def test_generate_batch_threads_backend_state():
+    from app.services.candidate_gen import generate_batch
+
+    space = _space(2)
+    # Adaptive path, no DB campaign -> empty obs -> still produces a batch and
+    # carries a backend_state field (None for this low-dim/no-data case).
+    result = generate_batch(space, strategy="adaptive", n_candidates=3, store=False)
+    assert hasattr(result, "backend_state")
+    assert len(result.candidates) == 3
+
+    # Accepts an incoming backend_state without error.
+    result2 = generate_batch(
+        space, strategy="lhs", n_candidates=3, store=False, backend_state=None
+    )
+    assert result2.backend_state is None
+
+
+def test_design_contract_threads_backend_state():
+    from app.agents.design_agent import DesignInput, DesignOutput
+
+    di = DesignInput(
+        dimensions=[{"param_name": "x", "param_type": "number", "min_value": 0, "max_value": 1}],
+        protocol_template={},
+        backend_state={"length": 0.8},
+    )
+    assert di.backend_state == {"length": 0.8}
+    # Default None keeps existing callers unaffected.
+    assert DesignInput(dimensions=di.dimensions, protocol_template={}).backend_state is None
+    assert "backend_state" in DesignOutput.model_fields

@@ -125,6 +125,9 @@ class BatchResult:
     candidates: tuple[Candidate, ...]
     strategy: str
     space: ParameterSpace
+    # (c) Opaque backend state (e.g. bomcp TuRBO trust region) from the adaptive
+    # path, for the caller to persist and pass back next round.
+    backend_state: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -643,6 +646,8 @@ def generate_batch(
     acquisition: str = "ei",
     kpi_name: str = "run_success_rate",
     store: bool = True,
+    failed_params: list[dict[str, Any]] | None = None,
+    backend_state: dict[str, Any] | None = None,
 ) -> BatchResult:
     """Generate a batch of candidate parameter sets and store them.
 
@@ -663,6 +668,7 @@ def generate_batch(
         raise ValueError("n_candidates must be >= 1")
 
     # Generate raw parameter dicts
+    _result_backend_state: dict[str, Any] | None = None
     if strategy == "lhs":
         raw_params = sample_lhs(space, n_candidates, seed=seed)
     elif strategy == "grid":
@@ -687,7 +693,7 @@ def generate_batch(
         raw_params = sample_dirichlet(space, n_candidates, seed=seed)
     elif strategy == "adaptive":
         # Delegate to the adaptive strategy selector
-        from app.services.bayesian_opt import load_observations_from_db
+        from app.services.bayesian_opt import denormalize_point, load_observations_from_db
         from app.services.optimization_backends import Observation as OptObs
         from app.services.strategy_selector import (
             CampaignSnapshot,
@@ -697,11 +703,13 @@ def generate_batch(
         bo_obs = load_observations_from_db(
             space, campaign_id=campaign_id, kpi_name=kpi_name,
         )
+        # Reconstruct real named parameters from the stored [0,1] vectors so the
+        # surrogate (e.g. bomcp's GP) fits on actual coordinates, not {}.
         opt_obs = [
-            OptObs(params={}, objective=obs.objective)
+            OptObs(params=denormalize_point(obs.params, space), objective=obs.objective)
             for obs in bo_obs
         ]
-        # Build snapshot from available context
+        # Build snapshot from available context (incl. learned failure region).
         snapshot = CampaignSnapshot(
             round_number=max(1, len(bo_obs) // max(n_candidates, 1) + 1),
             max_rounds=20,  # sensible default; orchestrator passes real value
@@ -711,10 +719,13 @@ def generate_batch(
             has_log_scale=any(d.log_scale for d in space.dimensions),
             kpi_history=tuple(obs.objective for obs in bo_obs),
             direction="maximize",
+            failed_params=tuple(failed_params or ()),
         )
         raw_params, _decision = generate_adaptive_candidates(
             space, n_candidates, opt_obs, snapshot, seed=seed,
+            backend_state=backend_state,
         )
+        _result_backend_state = _decision.backend_state
     else:
         raise ValueError(f"Unknown strategy: {strategy}")
 
@@ -749,6 +760,7 @@ def generate_batch(
         candidates=tuple(candidates),
         strategy=strategy,
         space=space,
+        backend_state=_result_backend_state,
     )
 
     if store:

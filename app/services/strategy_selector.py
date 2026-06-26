@@ -522,16 +522,25 @@ def generate_adaptive_candidates(
     *,
     seed: int | None = None,
     phase_config: PhaseConfig | None = None,
+    backend_state: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], StrategyDecision]:
     """One-call convenience: select strategy + generate candidates.
 
-    Returns (candidates, decision) so the caller can log the strategy choice.
+    Returns (candidates, decision); ``decision.backend_state`` carries any opaque
+    state the chosen backend emitted (e.g. bomcp TuRBO trust region) so the
+    caller can persist it and pass it back next round via ``backend_state``.
     """
+    import dataclasses
+
     decision = select_strategy(snapshot, config=phase_config)
 
+    new_state: dict[str, Any] | None = None
     try:
         backend = get_backend(decision.backend_name)
-        candidates = backend.suggest(space, n, observations, seed=seed)
+        candidates = backend.suggest(
+            space, n, observations, seed=seed, backend_state=backend_state
+        )
+        new_state = getattr(backend, "last_backend_state", None)
     except Exception:
         logger.warning(
             "Backend '%s' failed, trying fallback '%s'",
@@ -542,10 +551,13 @@ def generate_adaptive_candidates(
         try:
             fallback = get_backend(decision.fallback_backend)
             candidates = fallback.suggest(space, n, observations, seed=seed)
+            new_state = getattr(fallback, "last_backend_state", None)
         except Exception:
             logger.error("Fallback backend also failed, using LHS", exc_info=True)
             from app.services.candidate_gen import sample_lhs
             candidates = sample_lhs(space, n, seed=seed)
+
+    decision = dataclasses.replace(decision, backend_state=new_state)
 
     # ----- Failure-region avoidance (Dim 9 / P3b) -----
     # Drop any candidate that falls in the learned failure region and top up

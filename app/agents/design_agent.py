@@ -56,6 +56,10 @@ class DesignInput(BaseModel):
         default_factory=list,
         description="Coordinates of past failed experiments to steer around (Dim 9)",
     )
+    backend_state: dict[str, Any] | None = Field(
+        default=None,
+        description="Opaque backend state from the prior round (e.g. bomcp TuRBO trust region)",
+    )
 
 
 class DesignOutput(BaseModel):
@@ -70,6 +74,10 @@ class DesignOutput(BaseModel):
         description="Per-candidate confidence hints from similar experiment retrieval",
     )
     decision_nodes: list[dict[str, Any]] = Field(default_factory=list)
+    backend_state: dict[str, Any] | None = Field(
+        default=None,
+        description="Opaque backend state to persist for the next round (Dim c)",
+    )
 
 
 class DesignAgent(BaseAgent[DesignInput, DesignOutput]):
@@ -151,6 +159,8 @@ class DesignAgent(BaseAgent[DesignInput, DesignOutput]):
             campaign_id=input_data.campaign_id,
             kpi_name=input_data.kpi_name,
             store=input_data.store,
+            failed_params=input_data.failed_params,
+            backend_state=input_data.backend_state,
         )
 
         candidates = [c.params for c in batch.candidates]
@@ -250,4 +260,5 @@ class DesignAgent(BaseAgent[DesignInput, DesignOutput]):
             n_candidates=len(batch.candidates),
             candidate_confidence=candidate_confidence,
             decision_nodes=decision_nodes,
+            backend_state=batch.backend_state,
         )

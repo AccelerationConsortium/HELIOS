@@ -211,6 +211,9 @@ class StrategyDecision:
     stabilize_spec: StabilizeSpec | None = None
     # Δ2: provenance for backend ranking (phase pool, fingerprint bias, scores)
     backend_selection: BackendSelection | None = None
+    # (c) Opaque, JSON-safe backend state (e.g. bomcp TuRBO trust region) emitted
+    # by the chosen backend; the caller persists it and passes it back next round.
+    backend_state: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
