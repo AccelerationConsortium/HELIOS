@@ -980,7 +980,77 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "n_replicates": spec.n_replicates,
                 })
 
-            if stabilize_candidates is not None:
+            # --- Candidate-pool arbitration (flag-gated; fail-safe) ---
+            # When ENABLE_CANDIDATE_ARBITRATION is set and the authority did not
+            # request a concrete stabilize spec, route generation through deep
+            # candidate-pool arbitration. The seam degrades a Nexus outage to the
+            # local baseline and swallows pool failures (returning None), so this
+            # can neither downgrade the round nor break the campaign. With the
+            # flag off, none of this runs and behavior is unchanged.
+            arbitration_candidates: list[dict[str, Any]] | None = None
+            if stabilize_candidates is None and strategy_decision is not None:
+                try:
+                    from app.core.config import get_settings
+
+                    if get_settings().enable_candidate_arbitration:
+                        from app.optimization.loop_integration import (
+                            arbitrate_round_if_enabled,
+                            build_optimization_request,
+                        )
+
+                        arb_request = build_optimization_request(
+                            campaign_id=campaign_id,
+                            dimensions=input_data.dimensions,
+                            protocol_template=input_data.protocol_template,
+                            all_params=list(all_params),
+                            all_kpis=list(all_kpis),
+                            objective_name=input_data.objective_kpi,
+                            direction=input_data.direction,
+                            n=planned_round.batch_size,
+                            seed=round_num,
+                            round_index=round_num,
+                        )
+                        arb_outcome = arbitrate_round_if_enabled(
+                            arb_request, strategy_decision, enabled=True,
+                        )
+                        if (
+                            arb_outcome is not None
+                            and arb_outcome.decision.accepted
+                            and arb_outcome.decision.final_candidates
+                        ):
+                            arbitration_candidates = [
+                                dict(c) for c in arb_outcome.decision.final_candidates
+                            ]
+                            self._emit(campaign_id, {
+                                "type": "candidate_arbitration",
+                                "round": round_num,
+                                "n_candidates": len(arbitration_candidates),
+                                "backend_selection": arb_outcome.provenance.get(
+                                    "backend_selection", {}
+                                ),
+                                "candidate_pool": arb_outcome.provenance.get(
+                                    "candidate_pool", []
+                                ),
+                                "message": (
+                                    f"Arbitrated {len(arbitration_candidates)} candidate(s) "
+                                    f"from pool [backend={strategy_decision.backend_name}]"
+                                ),
+                            })
+                            agent_trace.append({
+                                "agent": "candidate_arbitration",
+                                "round": round_num,
+                                "n_candidates": len(arbitration_candidates),
+                            })
+                except Exception:
+                    logger.debug(
+                        "Candidate-pool arbitration wiring failed; using legacy path",
+                        exc_info=True,
+                    )
+
+            if arbitration_candidates is not None:
+                # Flag-gated deep arbitration produced the round's candidates.
+                design_candidates = arbitration_candidates
+            elif stabilize_candidates is not None:
                 # Use stabilize-generated candidates directly
                 design_candidates = stabilize_candidates
             else:

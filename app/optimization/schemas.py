@@ -42,6 +42,54 @@ class CandidateSuggestion:
     diagnostics: dict[str, Any] = field(default_factory=dict)
     fingerprint: dict[str, Any] = field(default_factory=dict)
     seed: int = 42
+    # Δ1: per-candidate diagnostics, aligned 1:1 with ``candidates`` when present.
+    # Empty in Nexus suggest_top_k Phase 1 (shared diagnostics only).
+    per_candidate: tuple[dict[str, Any], ...] = ()
+
+
+@dataclass(frozen=True)
+class PooledCandidate:
+    """A concrete candidate in the arbitration pool, tagged with its origin.
+
+    ``source_action`` is the campaign **archetype** the candidate is scored
+    against -- decided by HELIOS authority, *not* by the generating backend.
+    ``generator_backend`` records *how* it was produced (audit only); it never
+    overrides the archetype.  Per-candidate diagnostics are all optional; when
+    absent, the candidate inherits its archetype's utility verbatim (delta 0).
+    """
+
+    params: dict[str, Any]
+    source: str  # "nexus" | "local" | "replicate" | "recovery" | "sobol"
+    source_action: str  # "explore" | "exploit" | "refine" | "stabilize"
+    generator_backend: str = ""  # audit: which backend produced it
+    expected_improvement: float | None = None
+    uncertainty: float | None = None
+    novelty: float | None = None
+    constraint_margin: float | None = None
+    info_gain: float | None = None
+    rationale: str = ""
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ScoredCandidate:
+    """A pooled candidate plus its decomposed utility (for audit + selection)."""
+
+    candidate: PooledCandidate
+    utility: float
+    base_utility: float  # inherited from the archetype's authority utility
+    delta: float  # per-candidate adjustment under the same weight vector
+    redundancy: float  # diversity penalty vs higher-ranked candidates
+
+
+@dataclass(frozen=True)
+class CandidatePool:
+    """The concrete portfolio assembled by the boundary layer for one round."""
+
+    candidates: tuple[PooledCandidate, ...]
+    sources_used: tuple[str, ...] = ()
+    sources_dropped: tuple[str, ...] = ()
+    construction_trace: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -54,6 +102,8 @@ class DecisionResult:
     rejection_reasons: tuple[str, ...] = ()
     requires_human_review: bool = False
     decision_trace: tuple[str, ...] = ()
+    # Δ1: full scored portfolio behind the verdict (for provenance + audit).
+    scored_pool: tuple[ScoredCandidate, ...] = ()
 
 
 @runtime_checkable

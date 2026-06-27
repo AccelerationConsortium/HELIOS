@@ -214,6 +214,10 @@ class StrategyDecision:
     # (c) Opaque, JSON-safe backend state (e.g. bomcp TuRBO trust region) emitted
     # by the chosen backend; the caller persists it and passes it back next round.
     backend_state: dict[str, Any] | None = None
+    # Δ2 backend-selection trace (audit/provenance): the fingerprint-soft-biased
+    # backend ranking surfaced this round.  Consumed by the arbitration
+    # provenance serializer; advisory only.
+    recommended_backends: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------

@@ -387,6 +387,8 @@ def select_strategy(
         evidence=evidence,
         stabilize_spec=stabilize_spec,
         backend_selection=backend_selection,
+        # Δ2 audit trace: surface the intelligence/fingerprint recommendation.
+        recommended_backends=tuple(intelligence_recommended_backends),
     )
 
 
