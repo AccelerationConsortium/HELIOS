@@ -19,6 +19,8 @@ from app.services.policy_evolution import (
     PolicyAutoTrainer,
     PolicyVersionRegistry,
     PolicyVersionRegistryEntry,
+    ShadowPromotionGuard,
+    ShadowPromotionProposal,
     TrainingGuard,
 )
 from app.services.learned_policy import (
@@ -77,6 +79,8 @@ def _registry():
 
 def _safe_plan(**kwargs):
     reward_version = kwargs.pop("reward_version", "strategy_reward_v1")
+    rollback_policy_id = kwargs.pop("rollback_policy_id", "policy-a")
+    rollback_policy_version = kwargs.pop("rollback_policy_version", "v1")
     return PolicyEvolutionPlan(
         plan_id="plan-a",
         source_policy_id="policy-a",
@@ -87,6 +91,8 @@ def _safe_plan(**kwargs):
         dataset_version="policy_dataset_v2",
         feature_schema_version="policy_feature_schema_v1",
         reward_version=reward_version,
+        rollback_policy_id=rollback_policy_id,
+        rollback_policy_version=rollback_policy_version,
         **kwargs,
     )
 
@@ -465,3 +471,162 @@ def test_live_rank_backends_behavior_remains_unchanged_after_auto_training():
     )
 
     assert after == before
+
+
+def _trained_candidate():
+    manager = PolicyEvolutionManager()
+    plan = _safe_plan()
+    job, artifact, registry = PolicyAutoTrainer().train_candidate(
+        plan,
+        dataset=_training_dataset(),
+        training_mode=CandidatePolicyTrainingMode.IMITATION,
+        registry=_registry(),
+    )
+    return manager, plan, job, artifact, registry
+
+
+def test_shadow_promotion_proposal_round_trip_serialization():
+    manager, plan, job, artifact, _registry = _trained_candidate()
+
+    proposal = manager.create_shadow_promotion_proposal(plan, job, artifact)
+    restored = ShadowPromotionProposal.from_dict(proposal.to_dict())
+
+    assert proposal.status == "eligible"
+    assert restored.proposal_id == proposal.proposal_id
+    assert restored.candidate_policy_id == artifact.policy_id
+    assert restored.required_approvals == ("human_shadow_approval",)
+    assert restored.eligible is True
+
+
+def test_shadow_guard_blocks_missing_offline_evaluation():
+    manager, plan, job, artifact, _registry = _trained_candidate()
+    incomplete = dataclasses.replace(artifact, offline_evaluation_summary={})
+    proposal = manager.create_shadow_promotion_proposal(plan, job, incomplete)
+
+    result = ShadowPromotionGuard().evaluate(proposal)
+
+    assert result.allowed is False
+    assert "missing_offline_evaluation" in {violation["check"] for violation in result.violations}
+
+
+def test_shadow_guard_blocks_failed_dataset_audit():
+    manager, plan, job, artifact, _registry = _trained_candidate()
+    offline = dict(artifact.offline_evaluation_summary)
+    offline["dataset_audit"] = {"passed": False}
+    artifact = dataclasses.replace(artifact, offline_evaluation_summary=offline)
+    proposal = manager.create_shadow_promotion_proposal(plan, job, artifact)
+
+    result = ShadowPromotionGuard().evaluate(proposal)
+
+    assert result.allowed is False
+    assert "dataset_audit_failed" in {violation["check"] for violation in result.violations}
+
+
+def test_shadow_guard_blocks_failed_reward_sanity():
+    manager, plan, job, artifact, _registry = _trained_candidate()
+    offline = dict(artifact.offline_evaluation_summary)
+    offline["reward_sanity"] = {"passed": False}
+    artifact = dataclasses.replace(artifact, offline_evaluation_summary=offline)
+    proposal = manager.create_shadow_promotion_proposal(plan, job, artifact)
+
+    result = ShadowPromotionGuard().evaluate(proposal)
+
+    assert result.allowed is False
+    assert "reward_sanity_failed" in {violation["check"] for violation in result.violations}
+
+
+def test_shadow_guard_blocks_safety_violations():
+    manager, plan, job, artifact, _registry = _trained_candidate()
+    artifact = dataclasses.replace(
+        artifact,
+        safety_summary={"passed": False, "failure_count": 1},
+    )
+    proposal = manager.create_shadow_promotion_proposal(plan, job, artifact)
+
+    result = ShadowPromotionGuard().evaluate(proposal)
+
+    assert result.allowed is False
+    assert "safety_violations_present" in {violation["check"] for violation in result.violations}
+
+
+def test_shadow_guard_blocks_unknown_counterfactual_primary_evidence():
+    manager, plan, job, artifact, _registry = _trained_candidate()
+    offline = dict(artifact.offline_evaluation_summary)
+    offline["counterfactual_uncertainty_summary"] = {
+        "primary_improvement_evidence": "unknown_counterfactual",
+    }
+    artifact = dataclasses.replace(artifact, offline_evaluation_summary=offline)
+    proposal = manager.create_shadow_promotion_proposal(plan, job, artifact)
+
+    result = ShadowPromotionGuard().evaluate(proposal)
+
+    assert result.allowed is False
+    assert "unknown_counterfactual_primary_evidence" in {
+        violation["check"] for violation in result.violations
+    }
+
+
+def test_shadow_guard_blocks_missing_rollback_target():
+    manager, plan, job, artifact, _registry = _trained_candidate()
+    plan = dataclasses.replace(
+        plan,
+        rollback_policy_id=None,
+        rollback_policy_version=None,
+    )
+    proposal = manager.create_shadow_promotion_proposal(plan, job, artifact)
+
+    result = ShadowPromotionGuard().evaluate(proposal)
+
+    assert result.allowed is False
+    assert "missing_rollback_target" in {violation["check"] for violation in result.violations}
+
+
+def test_eligible_shadow_proposal_does_not_auto_approve_shadow():
+    manager, plan, job, artifact, _registry = _trained_candidate()
+
+    proposal = manager.create_shadow_promotion_proposal(plan, job, artifact)
+
+    assert proposal.status == "eligible"
+    assert artifact.registry_entry_preview["approved_for_shadow"] is False
+    assert proposal.required_approvals == ("human_shadow_approval",)
+
+
+def test_registry_stores_shadow_proposal_metadata_without_shadow_approval():
+    manager, plan, job, artifact, registry = _trained_candidate()
+    proposal = manager.create_shadow_promotion_proposal(plan, job, artifact)
+
+    updated = registry.register_shadow_proposal(
+        artifact.policy_id,
+        artifact.policy_version,
+        proposal,
+    )
+    entry = updated.get(artifact.policy_id, artifact.policy_version)
+
+    assert entry.shadow_proposed is True
+    assert entry.shadow_proposal_id == proposal.proposal_id
+    assert entry.shadow_proposal_status == "eligible"
+    assert entry.shadow_eligibility_summary["eligible"] is True
+    assert entry.approved_for_shadow is False
+
+
+def test_manager_recommends_approve_shadow_without_auto_approval():
+    manager, plan, job, artifact, _registry = _trained_candidate()
+    proposal = manager.create_shadow_promotion_proposal(plan, job, artifact)
+
+    updated_plan = manager.attach_shadow_proposal(plan, proposal)
+
+    assert updated_plan.status == "shadow_eligible"
+    assert manager.recommend_next_step(updated_plan) == PolicyEvolutionRecommendation.APPROVE_CANARY
+    assert artifact.registry_entry_preview["approved_for_shadow"] is False
+
+
+def test_default_backend_behavior_remains_unchanged_after_shadow_proposal():
+    snapshot = all_replay_scenarios()[2]
+    before = select_strategy(snapshot, config=PhaseConfig())
+    manager, plan, job, artifact, _registry = _trained_candidate()
+
+    _ = manager.create_shadow_promotion_proposal(plan, job, artifact)
+    after = select_strategy(snapshot, config=PhaseConfig())
+
+    assert after.backend_name == before.backend_name
+    assert after.strategy_trace.selected_backend == before.strategy_trace.selected_backend

@@ -72,6 +72,17 @@ class CandidatePolicyTrainingJobStatus(StrEnum):
     FAILED = "failed"
 
 
+class ShadowPromotionProposalStatus(StrEnum):
+    """Lifecycle state for a shadow deployment proposal."""
+
+    PROPOSED = "proposed"
+    ELIGIBLE = "eligible"
+    BLOCKED = "blocked"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+
+
 @dataclass(frozen=True)
 class PolicyEvolutionTrigger:
     """Structured reason to start a policy-evolution review."""
@@ -203,10 +214,72 @@ class CandidatePolicyArtifact:
     safety_summary: dict[str, Any]
     eligible_for_shadow_proposal: bool
     eligible_for_canary_proposal: bool = False
+    shadow_promotion_eligible: bool = False
+    shadow_promotion_reason: str = ""
     registry_entry_preview: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return _plain_dict(self)
+
+
+@dataclass(frozen=True)
+class ShadowPromotionProposal:
+    """Proposal to run an offline-evaluated candidate in shadow mode."""
+
+    proposal_id: str
+    plan_id: str
+    training_job_id: str
+    candidate_policy_id: str
+    candidate_policy_version: str
+    source_policy_id: str
+    source_policy_version: str
+    dataset_version: str | None
+    feature_schema_version: str
+    reward_version: str
+    offline_evaluation_summary: dict[str, Any]
+    dataset_audit_summary: dict[str, Any]
+    reward_sanity_summary: dict[str, Any]
+    safety_summary: dict[str, Any]
+    counterfactual_uncertainty_summary: dict[str, Any]
+    rollback_policy_id: str | None
+    rollback_policy_version: str | None
+    eligible: bool
+    eligibility_reasons: tuple[str, ...]
+    required_approvals: tuple[str, ...]
+    status: ShadowPromotionProposalStatus | str = ShadowPromotionProposalStatus.PROPOSED
+    created_at: str = field(default_factory=lambda: _now_iso())
+    updated_at: str = field(default_factory=lambda: _now_iso())
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> ShadowPromotionProposal:
+        return cls(
+            proposal_id=str(raw.get("proposal_id", "")),
+            plan_id=str(raw.get("plan_id", "")),
+            training_job_id=str(raw.get("training_job_id", "")),
+            candidate_policy_id=str(raw.get("candidate_policy_id", "")),
+            candidate_policy_version=str(raw.get("candidate_policy_version", "")),
+            source_policy_id=str(raw.get("source_policy_id", "")),
+            source_policy_version=str(raw.get("source_policy_version", "")),
+            dataset_version=raw.get("dataset_version"),
+            feature_schema_version=str(raw.get("feature_schema_version", "")),
+            reward_version=str(raw.get("reward_version", "")),
+            offline_evaluation_summary=dict(raw.get("offline_evaluation_summary") or {}),
+            dataset_audit_summary=dict(raw.get("dataset_audit_summary") or {}),
+            reward_sanity_summary=dict(raw.get("reward_sanity_summary") or {}),
+            safety_summary=dict(raw.get("safety_summary") or {}),
+            counterfactual_uncertainty_summary=dict(raw.get("counterfactual_uncertainty_summary") or {}),
+            rollback_policy_id=raw.get("rollback_policy_id"),
+            rollback_policy_version=raw.get("rollback_policy_version"),
+            eligible=bool(raw.get("eligible", False)),
+            eligibility_reasons=tuple(raw.get("eligibility_reasons") or ()),
+            required_approvals=tuple(raw.get("required_approvals") or ()),
+            status=raw.get("status", ShadowPromotionProposalStatus.PROPOSED),
+            created_at=str(raw.get("created_at") or _now_iso()),
+            updated_at=str(raw.get("updated_at") or _now_iso()),
+        )
 
 
 @dataclass(frozen=True)
@@ -228,6 +301,10 @@ class PolicyVersionRegistryEntry:
     approved_for_safe_soft: bool = False
     approved_for_live_canary: bool = False
     rollback_target: tuple[str, str] | None = None
+    shadow_proposed: bool = False
+    shadow_proposal_id: str | None = None
+    shadow_proposal_status: str | None = None
+    shadow_eligibility_summary: dict[str, Any] = field(default_factory=dict)
     registered_at: str = field(default_factory=lambda: _now_iso())
 
 
@@ -289,6 +366,36 @@ class PolicyVersionRegistry:
             return None
         target_id, target_version = entry.rollback_target
         return self.get(target_id, target_version)
+
+    def register_shadow_proposal(
+        self,
+        policy_id: str,
+        policy_version: str,
+        proposal: ShadowPromotionProposal,
+    ) -> PolicyVersionRegistry:
+        entry = self.get(policy_id, policy_version)
+        if entry is None:
+            return self
+        updated = replace(
+            entry,
+            shadow_proposed=True,
+            shadow_proposal_id=proposal.proposal_id,
+            shadow_proposal_status=str(getattr(proposal.status, "value", proposal.status)),
+            shadow_eligibility_summary={
+                "eligible": proposal.eligible,
+                "eligibility_reasons": proposal.eligibility_reasons,
+                "required_approvals": proposal.required_approvals,
+            },
+            approved_for_shadow=False,
+        )
+        entries = tuple(
+            updated if (
+                item.policy_id == policy_id
+                and item.policy_version == policy_version
+            ) else item
+            for item in self.entries
+        )
+        return replace(self, entries=entries)
 
 
 @dataclass(frozen=True)
@@ -477,6 +584,72 @@ class TrainingGuard:
 
 
 @dataclass(frozen=True)
+class ShadowPromotionGuardResult:
+    """Guardrail result for shadow-promotion proposals."""
+
+    allowed: bool
+    violations: tuple[dict[str, Any], ...] = ()
+    warnings: tuple[dict[str, Any], ...] = ()
+    required_human_approval: bool = True
+
+
+class ShadowPromotionGuard:
+    """Validate a candidate before proposing shadow deployment."""
+
+    def evaluate(self, proposal: ShadowPromotionProposal) -> ShadowPromotionGuardResult:
+        violations: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+
+        if not proposal.offline_evaluation_summary:
+            violations.append(_violation("missing_offline_evaluation", "Candidate artifact has no offline evaluation"))
+        audit = proposal.dataset_audit_summary
+        if audit and audit.get("passed") is False:
+            violations.append(_violation("dataset_audit_failed", "Dataset audit failed"))
+        if not audit:
+            violations.append(_violation("missing_dataset_audit", "Dataset audit summary is required"))
+        reward = proposal.reward_sanity_summary
+        if reward and reward.get("passed") is False:
+            violations.append(_violation("reward_sanity_failed", "Reward sanity failed"))
+        if not reward:
+            violations.append(_violation("missing_reward_sanity", "Reward sanity summary is required"))
+        safety = proposal.safety_summary
+        if safety and not bool(safety.get("passed", False)):
+            violations.append(_violation("safety_violations_present", "Offline safety violations are present"))
+        if not safety:
+            violations.append(_violation("missing_safety_summary", "Safety summary is required"))
+        if _unknown_counterfactual_primary_evidence(proposal):
+            violations.append(_violation(
+                "unknown_counterfactual_primary_evidence",
+                "Unknown counterfactual cannot be primary improvement evidence",
+            ))
+        if (
+            proposal.offline_evaluation_summary.get("feature_schema_version")
+            and proposal.offline_evaluation_summary.get("feature_schema_version") != proposal.feature_schema_version
+        ):
+            violations.append(_violation("feature_schema_version_mismatch", "Feature schema version mismatch"))
+        if (
+            proposal.offline_evaluation_summary.get("reward_version")
+            and proposal.offline_evaluation_summary.get("reward_version") != proposal.reward_version
+        ):
+            violations.append(_violation("reward_version_mismatch", "Reward version mismatch"))
+        if not proposal.rollback_policy_id or not proposal.rollback_policy_version:
+            violations.append(_violation("missing_rollback_target", "Rollback target is required"))
+        if not proposal.candidate_policy_id or not proposal.candidate_policy_version:
+            violations.append(_violation("incomplete_candidate_artifact", "Candidate policy identity is incomplete"))
+        if not proposal.dataset_version or not proposal.feature_schema_version or not proposal.reward_version:
+            violations.append(_violation("incomplete_candidate_artifact", "Candidate artifact version metadata is incomplete"))
+        if not proposal.eligible:
+            warnings.append(_warning("proposal_not_marked_eligible", "Proposal is not marked eligible by artifact metadata"))
+
+        return ShadowPromotionGuardResult(
+            allowed=not violations,
+            violations=tuple(violations),
+            warnings=tuple(warnings),
+            required_human_approval=True,
+        )
+
+
+@dataclass(frozen=True)
 class PolicyEvolutionReport:
     """Review report for one policy-evolution plan."""
 
@@ -506,8 +679,14 @@ class PolicyEvolutionManager:
         "evolution_guard",
     )
 
-    def __init__(self, *, guard: EvolutionGuard | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        guard: EvolutionGuard | None = None,
+        shadow_promotion_guard: ShadowPromotionGuard | None = None,
+    ) -> None:
         self.guard = guard or EvolutionGuard()
+        self.shadow_promotion_guard = shadow_promotion_guard or ShadowPromotionGuard()
 
     def create_evolution_plan(
         self,
@@ -619,6 +798,85 @@ class PolicyEvolutionManager:
             plan,
             PolicyEvolutionPlanStatus.OFFLINE_EVALUATED,
             f"candidate artifact ready:{artifact.policy_id}:{artifact.policy_version}",
+        )
+
+    def create_shadow_promotion_proposal(
+        self,
+        plan: PolicyEvolutionPlan,
+        training_job: CandidatePolicyTrainingJob,
+        artifact: CandidatePolicyArtifact | None,
+    ) -> ShadowPromotionProposal:
+        artifact_dict = artifact.to_dict() if artifact is not None else {}
+        offline = dict(artifact_dict.get("offline_evaluation_summary") or {})
+        safety = dict(artifact_dict.get("safety_summary") or {})
+        proposal = ShadowPromotionProposal(
+            proposal_id=f"shadow-{_compact_timestamp()}-{plan.candidate_policy_id}-{plan.candidate_policy_version}",
+            plan_id=plan.plan_id,
+            training_job_id=training_job.job_id,
+            candidate_policy_id=artifact_dict.get("policy_id", plan.candidate_policy_id),
+            candidate_policy_version=artifact_dict.get("policy_version", plan.candidate_policy_version),
+            source_policy_id=artifact_dict.get("parent_policy_id", plan.source_policy_id),
+            source_policy_version=artifact_dict.get("parent_policy_version", plan.source_policy_version),
+            dataset_version=artifact_dict.get("dataset_version", plan.dataset_version),
+            feature_schema_version=artifact_dict.get("feature_schema_version", plan.feature_schema_version),
+            reward_version=artifact_dict.get("reward_version", plan.reward_version),
+            offline_evaluation_summary=offline,
+            dataset_audit_summary=dict(offline.get("dataset_audit") or artifact_dict.get("dataset_audit_summary") or {}),
+            reward_sanity_summary=dict(offline.get("reward_sanity") or artifact_dict.get("reward_sanity_summary") or {}),
+            safety_summary=safety,
+            counterfactual_uncertainty_summary=dict(
+                offline.get("counterfactual_uncertainty_summary")
+                or offline.get("counterfactual_uncertainty_breakdown")
+                or artifact_dict.get("counterfactual_uncertainty_summary")
+                or {}
+            ),
+            rollback_policy_id=plan.rollback_policy_id,
+            rollback_policy_version=plan.rollback_policy_version,
+            eligible=bool(artifact_dict.get("shadow_promotion_eligible", False)),
+            eligibility_reasons=(
+                (artifact_dict.get("shadow_promotion_reason"),)
+                if artifact_dict.get("shadow_promotion_reason") else ()
+            ),
+            required_approvals=("human_shadow_approval",),
+            status=ShadowPromotionProposalStatus.PROPOSED,
+        )
+        guard = self.evaluate_shadow_promotion_guard(proposal)
+        return replace(
+            proposal,
+            status=(
+                ShadowPromotionProposalStatus.ELIGIBLE.value
+                if guard.allowed else ShadowPromotionProposalStatus.BLOCKED.value
+            ),
+            eligible=guard.allowed and proposal.eligible,
+            eligibility_reasons=tuple((
+                *proposal.eligibility_reasons,
+                *tuple(v["check"] for v in guard.violations),
+            )),
+            updated_at=_now_iso(),
+        )
+
+    def evaluate_shadow_promotion_guard(
+        self,
+        proposal: ShadowPromotionProposal,
+    ) -> ShadowPromotionGuardResult:
+        return self.shadow_promotion_guard.evaluate(proposal)
+
+    def attach_shadow_proposal(
+        self,
+        plan: PolicyEvolutionPlan,
+        proposal: ShadowPromotionProposal,
+    ) -> PolicyEvolutionPlan:
+        guard = self.evaluate_shadow_promotion_guard(proposal)
+        if guard.allowed and proposal.eligible:
+            return self.update_plan_status(
+                plan,
+                PolicyEvolutionPlanStatus.SHADOW_ELIGIBLE,
+                f"shadow proposal eligible:{proposal.proposal_id}",
+            )
+        return self.update_plan_status(
+            plan,
+            plan.status,
+            f"shadow proposal blocked:{proposal.proposal_id}",
         )
 
     def update_plan_status(
@@ -814,6 +1072,14 @@ class PolicyAutoTrainer:
             )
 
         safety_summary = dict(offline_evaluation.get("learned_policy_safety") or {})
+        offline_summary = {
+            **_compact_offline_summary(offline_evaluation),
+            "dataset_audit": _audit_shadow_summary(audit),
+            "reward_sanity": _reward_shadow_summary(reward_sanity),
+            "feature_schema_version": dataset.feature_schema_version,
+            "reward_version": dataset.reward_version,
+            "counterfactual_uncertainty_summary": _counterfactual_summary(dataset),
+        }
         registry_preview = PolicyVersionRegistryEntry(
             policy_id=plan.candidate_policy_id,
             policy_version=plan.candidate_policy_version,
@@ -823,7 +1089,7 @@ class PolicyAutoTrainer:
             feature_schema_version=dataset.feature_schema_version,
             reward_version=dataset.reward_version,
             training_config_summary=config,
-            offline_evaluation_summary=_compact_offline_summary(offline_evaluation),
+            offline_evaluation_summary=offline_summary,
             approved_for_shadow=False,
             approved_for_safe_soft=False,
             approved_for_live_canary=False,
@@ -840,12 +1106,16 @@ class PolicyAutoTrainer:
             feature_schema_version=dataset.feature_schema_version,
             reward_version=dataset.reward_version,
             training_summary=training_summary,
-            offline_evaluation_summary=_compact_offline_summary(offline_evaluation),
+            offline_evaluation_summary=offline_summary,
             safety_summary=safety_summary,
             eligible_for_shadow_proposal=bool(
                 offline_evaluation.get("learned_policy_safety", {}).get("passed", False)
             ),
             eligible_for_canary_proposal=False,
+            shadow_promotion_eligible=bool(
+                offline_evaluation.get("learned_policy_safety", {}).get("passed", False)
+            ),
+            shadow_promotion_reason="offline evaluation passed; human shadow approval still required",
             registry_entry_preview=_plain_dict(registry_preview),
         )
         if registry is not None:
@@ -914,6 +1184,53 @@ def _compact_offline_summary(report: dict[str, Any]) -> dict[str, Any]:
         "learned_policy_safety": dict(report.get("learned_policy_safety") or {}),
         "n_learned_policy_traces": len(report.get("learned_policy_traces") or ()),
     }
+
+
+def _audit_shadow_summary(audit: Any) -> dict[str, Any]:
+    missing = dict(getattr(audit, "missing_feature_rates", {}) or {})
+    return {
+        "passed": (
+            int(getattr(audit, "record_count", 0) or 0) > 0
+            and all(float(missing.get(key, 0.0) or 0.0) == 0.0 for key in (
+                "state_features",
+                "context_features",
+                "available_actions",
+                "candidate_backends",
+            ))
+            and float(getattr(audit, "candidate_score_coverage", 0.0) or 0.0) == 1.0
+            and float(getattr(audit, "candidate_rank_coverage", 0.0) or 0.0) == 1.0
+        ),
+        "record_count": int(getattr(audit, "record_count", 0) or 0),
+        "missing_feature_rates": missing,
+        "candidate_score_coverage": float(getattr(audit, "candidate_score_coverage", 0.0) or 0.0),
+        "candidate_rank_coverage": float(getattr(audit, "candidate_rank_coverage", 0.0) or 0.0),
+    }
+
+
+def _reward_shadow_summary(reward_sanity: Any) -> dict[str, Any]:
+    return {
+        "passed": bool(getattr(reward_sanity, "passed", False)),
+        "failures": tuple(getattr(reward_sanity, "failures", ()) or ()),
+        "warnings": tuple(getattr(reward_sanity, "warnings", ()) or ()),
+        "reward_version_distribution": dict(getattr(reward_sanity, "reward_version_distribution", {}) or {}),
+    }
+
+
+def _counterfactual_summary(dataset: Any) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    for row in getattr(dataset, "records", ()) or ():
+        label = str((row.get("outcome") or {}).get("counterfactual_label") or "unknown_counterfactual")
+        counts[label] = counts.get(label, 0) + 1
+    return {
+        "label_distribution": counts,
+        "primary_improvement_evidence": "observed_or_replay_reward",
+    }
+
+
+def _unknown_counterfactual_primary_evidence(proposal: ShadowPromotionProposal) -> bool:
+    summary = proposal.counterfactual_uncertainty_summary or {}
+    primary = str(summary.get("primary_improvement_evidence") or "")
+    return primary == "unknown_counterfactual"
 
 
 def _plain_dict(value: Any) -> dict[str, Any]:
