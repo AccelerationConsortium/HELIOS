@@ -11,7 +11,7 @@ Rules:
 """
 from __future__ import annotations
 
-from app.optimization.backend_selection import BackendSelection, rank_backends
+from app.services.backend_selection import BackendSelection, rank_backends
 from app.services.strategy_actions import _pick_first_available
 
 POOL = ("optuna_tpe", "nexus_tpe", "nexus_gp_bo", "built_in")

@@ -167,7 +167,7 @@ class DesignAgent(BaseAgent[DesignInput, DesignOutput]):
 
         # Dim 9 / P3b: steer candidates away from learned failure coordinates.
         if input_data.failed_params:
-            from app.optimization.failure_region import avoid_failure_region
+            from app.services.failure_region import avoid_failure_region
 
             candidates = avoid_failure_region(
                 candidates, space, input_data.batch_size,

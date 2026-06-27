@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.optimization.method_advisor import problem_profile, recommend_backends
+from app.services.method_advisor import problem_profile, recommend_backends
 from app.services.strategy_models import CampaignSnapshot, DiagnosticSignals
 
 
@@ -21,7 +21,7 @@ def _expert_prior_table(monkeypatch):
     Keeps prior-behavior assertions deterministic and independent of the
     committed benchmark artifact; artifact-loading tests override this path.
     """
-    import app.optimization.method_advisor as ma
+    import app.services.method_advisor as ma
 
     monkeypatch.setattr(ma, "DECISION_TABLE_PATH", "/nonexistent/decision_table.json")
 
@@ -130,7 +130,7 @@ def test_selector_merges_method_advice_into_recommendation():
 
 
 def test_load_decision_table_falls_back_to_default_when_absent():
-    from app.optimization.method_advisor import DEFAULT_DECISION_TABLE, load_decision_table
+    from app.services.method_advisor import DEFAULT_DECISION_TABLE, load_decision_table
 
     table = load_decision_table("/nonexistent/decision_table.json")
     assert table == DEFAULT_DECISION_TABLE
@@ -139,7 +139,7 @@ def test_load_decision_table_falls_back_to_default_when_absent():
 def test_load_decision_table_overrides_per_bucket_from_artifact(tmp_path):
     import json
 
-    from app.optimization.method_advisor import DEFAULT_DECISION_TABLE, load_decision_table
+    from app.services.method_advisor import DEFAULT_DECISION_TABLE, load_decision_table
 
     artifact = tmp_path / "table.json"
     artifact.write_text(json.dumps([
@@ -157,7 +157,7 @@ def test_load_decision_table_overrides_per_bucket_from_artifact(tmp_path):
 def test_recommend_uses_loaded_artifact(tmp_path, monkeypatch):
     import json
 
-    import app.optimization.method_advisor as ma
+    import app.services.method_advisor as ma
 
     artifact = tmp_path / "table.json"
     artifact.write_text(json.dumps([

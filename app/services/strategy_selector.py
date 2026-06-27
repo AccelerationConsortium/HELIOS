@@ -197,7 +197,7 @@ def select_strategy(
     method_advice: tuple[str, ...] = ()
     if config.enable_method_advisor:
         try:
-            from app.optimization.method_advisor import recommend_backends
+            from app.services.method_advisor import recommend_backends
 
             method_advice = recommend_backends(snapshot, diag)
         except Exception:
@@ -277,7 +277,7 @@ def select_strategy(
     # *available, phase-compatible* alternative; it can never select an
     # unavailable or out-of-pool backend, nor change the campaign phase.  With no
     # recommendation and no recent failures this is a no-op.
-    from app.optimization.backend_selection import rank_backends
+    from app.services.backend_selection import rank_backends
 
     base_pool = _action_backend_pool(best_action.name, snapshot, config)
     if best_action.backend_name == "built_in":
@@ -566,7 +566,7 @@ def generate_adaptive_candidates(
     # with feasible points, so *every* backend's output steers around coordinates
     # where past experiments failed.  No-op when no failures are recorded.
     if snapshot.failed_params:
-        from app.optimization.failure_region import avoid_failure_region
+        from app.services.failure_region import avoid_failure_region
 
         candidates = avoid_failure_region(
             candidates, space, n, list(snapshot.failed_params), seed

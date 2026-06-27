@@ -35,18 +35,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import pytest
-
-# Phase A (nexus×main union) intentionally lands nexus's Δ2/P3a/P3b *pull-based*
-# imports (strategy_selector/strategy_models → app.optimization.{backend_selection,
-# method_advisor,failure_region}).  Inverting these to the push-based, AC5-compliant
-# direction is Phase B (CandidatePoolService layering) — mirroring how this file's
-# docstring already defers optimization_intelligence's pull→push inversion.
-_AC5_INVERSION_PENDING_PHASE_B = pytest.mark.xfail(
-    reason="AC5 dependency inversion deferred to Phase B (CandidatePoolService layering)",
-    strict=False,
-)
-
 _ROOT = Path(__file__).resolve().parents[1]
 _OPT_DIR = _ROOT / "app" / "optimization"
 _SERVICES_DIR = _ROOT / "app" / "services"
@@ -96,7 +84,6 @@ def test_ac1_boundary_recomputes_no_phase_posterior():
 # --- AC5: one direction, with named & constrained bridge exceptions ---------
 
 
-@_AC5_INVERSION_PENDING_PHASE_B
 def test_ac5_core_authority_never_imports_boundary():
     offenders = []
     for path in _py_files(_SERVICES_DIR):
@@ -105,7 +92,6 @@ def test_ac5_core_authority_never_imports_boundary():
     assert not offenders, f"core authority imports app.optimization: {offenders}"
 
 
-@_AC5_INVERSION_PENDING_PHASE_B
 def test_ac5_only_named_bridges_import_boundary():
     offenders = []
     for path in _py_files(_SERVICES_DIR):

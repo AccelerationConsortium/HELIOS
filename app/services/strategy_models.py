@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from app.optimization.backend_selection import BackendSelection
+    from app.services.backend_selection import BackendSelection
 
 # ---------------------------------------------------------------------------
 # Campaign snapshot — enriched with batch-level data

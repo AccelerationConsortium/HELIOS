@@ -8,7 +8,7 @@ suggestions avoid -- expressed as a bomcp OutcomeConstraint on a synthetic
 """
 from __future__ import annotations
 
-from app.optimization.failure_region import (
+from app.services.failure_region import (
     FailureRegionModel,
     build_feasibility_observations,
     failure_outcome_constraint,
@@ -164,7 +164,7 @@ def test_generation_unchanged_without_failures():
 
 
 def test_avoid_failure_region_filters_and_tops_up():
-    from app.optimization.failure_region import avoid_failure_region
+    from app.services.failure_region import avoid_failure_region
 
     space = _unit_square()
     failed = _failures_near(0.8, 0.8, n=8)
@@ -182,7 +182,7 @@ def test_avoid_failure_region_filters_and_tops_up():
 
 
 def test_avoid_failure_region_noop_without_failures():
-    from app.optimization.failure_region import avoid_failure_region
+    from app.services.failure_region import avoid_failure_region
 
     space = _unit_square()
     cands = [{"x0": 0.8, "x1": 0.8}, {"x0": 0.1, "x1": 0.1}]
