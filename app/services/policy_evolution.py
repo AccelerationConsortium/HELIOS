@@ -110,6 +110,17 @@ class ShadowRunRecommendation(StrEnum):
     REJECT_POLICY = "reject_policy"
 
 
+class CanaryPromotionProposalStatus(StrEnum):
+    """Lifecycle state for a canary deployment proposal."""
+
+    PROPOSED = "proposed"
+    ELIGIBLE = "eligible"
+    BLOCKED = "blocked"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+
+
 @dataclass(frozen=True)
 class PolicyEvolutionTrigger:
     """Structured reason to start a policy-evolution review."""
@@ -398,6 +409,74 @@ class ShadowRunResult:
 
 
 @dataclass(frozen=True)
+class CanaryPromotionProposal:
+    """Proposal-only request to move a shadow policy toward canary review."""
+
+    proposal_id: str
+    plan_id: str
+    shadow_run_id: str | None
+    shadow_approval_id: str | None
+    policy_id: str
+    policy_version: str
+    source_policy_id: str
+    source_policy_version: str
+    shadow_result_summary: dict[str, Any]
+    confidence_calibration_summary: dict[str, Any]
+    counterfactual_breakdown: dict[str, int]
+    safety_summary: dict[str, Any]
+    failure_summary: dict[str, Any]
+    recommended_canary_scope: dict[str, Any]
+    allowed_campaign_ids: tuple[str, ...] = ()
+    allowed_objective_levels: tuple[str, ...] = ()
+    max_canary_rounds: int = 0
+    max_learned_policy_weight: float = 0.0
+    max_top1_change_rate: float = 0.0
+    rollback_policy_id: str | None = None
+    rollback_policy_version: str | None = None
+    eligible: bool = False
+    eligibility_reasons: tuple[str, ...] = ()
+    required_approvals: tuple[str, ...] = ("human_canary_approval",)
+    status: CanaryPromotionProposalStatus | str = CanaryPromotionProposalStatus.PROPOSED
+    created_at: str = field(default_factory=lambda: _now_iso())
+    updated_at: str = field(default_factory=lambda: _now_iso())
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> CanaryPromotionProposal:
+        return cls(
+            proposal_id=str(raw.get("proposal_id", "")),
+            plan_id=str(raw.get("plan_id", "")),
+            shadow_run_id=raw.get("shadow_run_id"),
+            shadow_approval_id=raw.get("shadow_approval_id"),
+            policy_id=str(raw.get("policy_id", "")),
+            policy_version=str(raw.get("policy_version", "")),
+            source_policy_id=str(raw.get("source_policy_id", "")),
+            source_policy_version=str(raw.get("source_policy_version", "")),
+            shadow_result_summary=dict(raw.get("shadow_result_summary") or {}),
+            confidence_calibration_summary=dict(raw.get("confidence_calibration_summary") or {}),
+            counterfactual_breakdown=dict(raw.get("counterfactual_breakdown") or {}),
+            safety_summary=dict(raw.get("safety_summary") or {}),
+            failure_summary=dict(raw.get("failure_summary") or {}),
+            recommended_canary_scope=dict(raw.get("recommended_canary_scope") or {}),
+            allowed_campaign_ids=tuple(raw.get("allowed_campaign_ids") or ()),
+            allowed_objective_levels=tuple(raw.get("allowed_objective_levels") or ()),
+            max_canary_rounds=int(raw.get("max_canary_rounds") or 0),
+            max_learned_policy_weight=float(raw.get("max_learned_policy_weight") or 0.0),
+            max_top1_change_rate=float(raw.get("max_top1_change_rate") or 0.0),
+            rollback_policy_id=raw.get("rollback_policy_id"),
+            rollback_policy_version=raw.get("rollback_policy_version"),
+            eligible=bool(raw.get("eligible", False)),
+            eligibility_reasons=tuple(raw.get("eligibility_reasons") or ()),
+            required_approvals=tuple(raw.get("required_approvals") or ()),
+            status=raw.get("status", CanaryPromotionProposalStatus.PROPOSED),
+            created_at=str(raw.get("created_at") or _now_iso()),
+            updated_at=str(raw.get("updated_at") or _now_iso()),
+        )
+
+
+@dataclass(frozen=True)
 class PolicyVersionRegistryEntry:
     """Registered policy version metadata and lineage."""
 
@@ -423,6 +502,11 @@ class PolicyVersionRegistryEntry:
     shadow_approval_metadata: dict[str, Any] = field(default_factory=dict)
     shadow_run_schedule_metadata: dict[str, Any] = field(default_factory=dict)
     latest_shadow_run_result_summary: dict[str, Any] = field(default_factory=dict)
+    canary_proposed: bool = False
+    canary_proposal_id: str | None = None
+    canary_proposal_status: str | None = None
+    canary_eligibility_summary: dict[str, Any] = field(default_factory=dict)
+    recommended_canary_scope: dict[str, Any] = field(default_factory=dict)
     registered_at: str = field(default_factory=lambda: _now_iso())
 
 
@@ -562,6 +646,31 @@ class PolicyVersionRegistry:
         updated = replace(
             entry,
             latest_shadow_run_result_summary=result.to_dict(),
+            approved_for_safe_soft=False,
+            approved_for_live_canary=False,
+        )
+        return self._replace_entry(updated)
+
+    def register_canary_proposal(
+        self,
+        policy_id: str,
+        policy_version: str,
+        proposal: CanaryPromotionProposal,
+    ) -> PolicyVersionRegistry:
+        entry = self.get(policy_id, policy_version)
+        if entry is None:
+            return self
+        updated = replace(
+            entry,
+            canary_proposed=True,
+            canary_proposal_id=proposal.proposal_id,
+            canary_proposal_status=str(getattr(proposal.status, "value", proposal.status)),
+            canary_eligibility_summary={
+                "eligible": proposal.eligible,
+                "eligibility_reasons": proposal.eligibility_reasons,
+                "required_approvals": proposal.required_approvals,
+            },
+            recommended_canary_scope=dict(proposal.recommended_canary_scope),
             approved_for_safe_soft=False,
             approved_for_live_canary=False,
         )
@@ -895,6 +1004,118 @@ class ShadowApprovalGuard:
 
 
 @dataclass(frozen=True)
+class CanaryPromotionGuardResult:
+    """Guardrail result for canary-promotion proposals."""
+
+    allowed: bool
+    violations: tuple[dict[str, Any], ...] = ()
+    warnings: tuple[dict[str, Any], ...] = ()
+    required_human_approval: bool = True
+    recommended_scope: dict[str, Any] = field(default_factory=dict)
+    recommended_weight_cap: float = 0.0
+
+
+class CanaryPromotionGuard:
+    """Validate canary promotion proposals without enabling canary."""
+
+    def __init__(
+        self,
+        *,
+        min_shadow_rounds: int = 10,
+        max_safety_warning_rate: float = 0.0,
+        max_invalid_suggestion_rate: float = 0.05,
+        min_confidence_calibration: float = 0.6,
+        max_top1_change_rate: float = 0.25,
+        max_unknown_counterfactual_rate: float = 0.5,
+        max_weight_cap: float = 0.005,
+    ) -> None:
+        self.min_shadow_rounds = min_shadow_rounds
+        self.max_safety_warning_rate = max_safety_warning_rate
+        self.max_invalid_suggestion_rate = max_invalid_suggestion_rate
+        self.min_confidence_calibration = min_confidence_calibration
+        self.max_top1_change_rate = max_top1_change_rate
+        self.max_unknown_counterfactual_rate = max_unknown_counterfactual_rate
+        self.max_weight_cap = max_weight_cap
+
+    def evaluate(
+        self,
+        proposal: CanaryPromotionProposal,
+        *,
+        registry: PolicyVersionRegistry | None = None,
+        shadow_approval: ShadowApprovalRecord | None = None,
+    ) -> CanaryPromotionGuardResult:
+        violations: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        result = proposal.shadow_result_summary
+        round_count = int(result.get("round_count") or 0)
+        safety_warning_count = int(result.get("safety_warning_count") or 0)
+        safety_warning_rate = safety_warning_count / round_count if round_count else 1.0
+        invalid_rate = float(result.get("invalid_suggestion_rate") or 0.0)
+        top1_rate = float(result.get("would_change_top1_rate") or 0.0)
+        confidence = _confidence_calibration_score(proposal.confidence_calibration_summary)
+        recommendation = str(result.get("recommendation") or "")
+
+        if not result:
+            violations.append(_violation("missing_shadow_result", "Shadow run result is required"))
+        if recommendation != ShadowRunRecommendation.PROPOSE_CANARY.value:
+            violations.append(_violation("shadow_recommendation_not_propose_canary", "Shadow result must recommend propose_canary"))
+        if registry is not None:
+            entry = registry.get(proposal.policy_id, proposal.policy_version)
+            rollback = registry.get(proposal.rollback_policy_id or "", proposal.rollback_policy_version or "")
+            if entry is None:
+                violations.append(_violation("policy_lineage_invalid", "Policy is missing from registry"))
+            else:
+                if not entry.approved_for_shadow:
+                    violations.append(_violation("policy_not_approved_for_shadow", "Policy must be approved for shadow first"))
+                if (
+                    entry.parent_policy_id != proposal.source_policy_id
+                    or entry.parent_policy_version != proposal.source_policy_version
+                ):
+                    violations.append(_violation("policy_lineage_invalid", "Policy lineage does not match proposal"))
+            if rollback is None:
+                violations.append(_violation("rollback_target_missing_from_registry", "Rollback target is missing from registry"))
+        if shadow_approval is not None:
+            if shadow_approval.revoked:
+                violations.append(_violation("shadow_approval_revoked", "Shadow approval has been revoked"))
+            if _is_past_iso(shadow_approval.expires_at):
+                violations.append(_violation("shadow_approval_expired", "Shadow approval has expired"))
+        if round_count < self.min_shadow_rounds:
+            violations.append(_violation("insufficient_shadow_rounds", "Shadow round count is below threshold", {"round_count": round_count}))
+        if safety_warning_rate > self.max_safety_warning_rate:
+            violations.append(_violation("safety_warning_threshold_breached", "Safety warning rate exceeds threshold", {"rate": safety_warning_rate}))
+        if invalid_rate > self.max_invalid_suggestion_rate:
+            violations.append(_violation("invalid_suggestion_rate_too_high", "Invalid suggestion rate exceeds threshold", {"rate": invalid_rate}))
+        if confidence < self.min_confidence_calibration:
+            violations.append(_violation("confidence_calibration_too_low", "Confidence calibration is below threshold", {"score": confidence}))
+        if top1_rate > self.max_top1_change_rate:
+            violations.append(_violation("top1_change_rate_too_high", "Would-change top1 rate exceeds threshold", {"rate": top1_rate}))
+        if _unknown_counterfactual_rate(proposal.counterfactual_breakdown) > self.max_unknown_counterfactual_rate:
+            violations.append(_violation("counterfactual_uncertainty_too_high", "Counterfactual uncertainty is too high"))
+        if _canary_unknown_counterfactual_ground_truth(proposal):
+            violations.append(_violation("unknown_counterfactual_as_ground_truth", "Unknown counterfactual cannot be ground truth"))
+        if not proposal.rollback_policy_id or not proposal.rollback_policy_version:
+            violations.append(_violation("missing_rollback_target", "Rollback target is required"))
+        if proposal.max_learned_policy_weight > self.max_weight_cap:
+            warnings.append(_warning("weight_cap_reduced", "Requested learned policy weight was above guard cap"))
+
+        scope = dict(proposal.recommended_canary_scope or {})
+        if not scope:
+            scope = {
+                "campaign_ids": proposal.allowed_campaign_ids,
+                "objective_levels": proposal.allowed_objective_levels,
+                "max_rounds": proposal.max_canary_rounds,
+            }
+        return CanaryPromotionGuardResult(
+            allowed=not violations,
+            violations=tuple(violations),
+            warnings=tuple(warnings),
+            required_human_approval=True,
+            recommended_scope=scope,
+            recommended_weight_cap=min(proposal.max_learned_policy_weight, self.max_weight_cap),
+        )
+
+
+@dataclass(frozen=True)
 class PolicyEvolutionReport:
     """Review report for one policy-evolution plan."""
 
@@ -930,10 +1151,12 @@ class PolicyEvolutionManager:
         guard: EvolutionGuard | None = None,
         shadow_promotion_guard: ShadowPromotionGuard | None = None,
         shadow_approval_guard: ShadowApprovalGuard | None = None,
+        canary_promotion_guard: CanaryPromotionGuard | None = None,
     ) -> None:
         self.guard = guard or EvolutionGuard()
         self.shadow_promotion_guard = shadow_promotion_guard or ShadowPromotionGuard()
         self.shadow_approval_guard = shadow_approval_guard or ShadowApprovalGuard()
+        self.canary_promotion_guard = canary_promotion_guard or CanaryPromotionGuard()
 
     def create_evolution_plan(
         self,
@@ -1189,6 +1412,109 @@ class PolicyEvolutionManager:
             f"shadow result does not support canary:{result.run_id}",
         )
 
+    def create_canary_promotion_proposal(
+        self,
+        plan: PolicyEvolutionPlan,
+        shadow_run_result: ShadowRunResult | None,
+        *,
+        shadow_approval: ShadowApprovalRecord | None = None,
+        registry: PolicyVersionRegistry | None = None,
+    ) -> CanaryPromotionProposal:
+        result_dict = shadow_run_result.to_dict() if shadow_run_result is not None else {}
+        entry = (
+            registry.get(result_dict.get("policy_id", ""), result_dict.get("policy_version", ""))
+            if registry is not None and result_dict else None
+        )
+        approval = shadow_approval or _approval_from_registry(entry)
+        proposal = CanaryPromotionProposal(
+            proposal_id=f"canary-{_compact_timestamp()}-{plan.candidate_policy_id}-{plan.candidate_policy_version}",
+            plan_id=plan.plan_id,
+            shadow_run_id=result_dict.get("run_id"),
+            shadow_approval_id=approval.approval_id if approval else None,
+            policy_id=result_dict.get("policy_id", plan.candidate_policy_id),
+            policy_version=result_dict.get("policy_version", plan.candidate_policy_version),
+            source_policy_id=plan.source_policy_id,
+            source_policy_version=plan.source_policy_version,
+            shadow_result_summary=result_dict,
+            confidence_calibration_summary=dict(result_dict.get("confidence_calibration_summary") or {}),
+            counterfactual_breakdown=dict(result_dict.get("counterfactual_breakdown") or {}),
+            safety_summary={
+                "safety_warning_count": result_dict.get("safety_warning_count", 0),
+                "safety_warning_rate": (
+                    float(result_dict.get("safety_warning_count", 0) or 0)
+                    / float(result_dict.get("round_count", 0) or 1)
+                ),
+            },
+            failure_summary=dict(result_dict.get("failure_summary") or {}),
+            recommended_canary_scope={
+                "campaign_ids": approval.allowed_campaign_ids if approval else (),
+                "objective_levels": approval.allowed_objective_levels if approval else (),
+                "max_rounds": min(5, approval.max_shadow_rounds if approval else 0),
+            },
+            allowed_campaign_ids=approval.allowed_campaign_ids if approval else (),
+            allowed_objective_levels=approval.allowed_objective_levels if approval else (),
+            max_canary_rounds=min(5, approval.max_shadow_rounds if approval else 0),
+            max_learned_policy_weight=0.005,
+            max_top1_change_rate=0.25,
+            rollback_policy_id=plan.rollback_policy_id,
+            rollback_policy_version=plan.rollback_policy_version,
+            eligible=bool(shadow_run_result is not None and _shadow_result_passes_canary_thresholds(shadow_run_result)),
+            eligibility_reasons=("shadow result passed canary proposal thresholds",)
+            if shadow_run_result is not None and _shadow_result_passes_canary_thresholds(shadow_run_result) else (),
+            required_approvals=("human_canary_approval",),
+        )
+        guard = self.evaluate_canary_promotion_guard(
+            proposal,
+            registry=registry,
+            shadow_approval=approval,
+        )
+        return replace(
+            proposal,
+            status=(
+                CanaryPromotionProposalStatus.ELIGIBLE.value
+                if guard.allowed else CanaryPromotionProposalStatus.BLOCKED.value
+            ),
+            eligible=guard.allowed and proposal.eligible,
+            eligibility_reasons=tuple((
+                *proposal.eligibility_reasons,
+                *tuple(v["check"] for v in guard.violations),
+            )),
+            recommended_canary_scope=guard.recommended_scope or proposal.recommended_canary_scope,
+            max_learned_policy_weight=guard.recommended_weight_cap,
+            updated_at=_now_iso(),
+        )
+
+    def evaluate_canary_promotion_guard(
+        self,
+        proposal: CanaryPromotionProposal,
+        *,
+        registry: PolicyVersionRegistry | None = None,
+        shadow_approval: ShadowApprovalRecord | None = None,
+    ) -> CanaryPromotionGuardResult:
+        return self.canary_promotion_guard.evaluate(
+            proposal,
+            registry=registry,
+            shadow_approval=shadow_approval,
+        )
+
+    def attach_canary_proposal(
+        self,
+        plan: PolicyEvolutionPlan,
+        proposal: CanaryPromotionProposal,
+    ) -> PolicyEvolutionPlan:
+        guard = self.evaluate_canary_promotion_guard(proposal)
+        if guard.allowed and proposal.eligible:
+            return self.update_plan_status(
+                plan,
+                PolicyEvolutionPlanStatus.CANARY_ELIGIBLE,
+                f"canary proposal eligible:{proposal.proposal_id}",
+            )
+        return self.update_plan_status(
+            plan,
+            plan.status,
+            f"canary proposal blocked:{proposal.proposal_id}",
+        )
+
     def attach_shadow_proposal(
         self,
         plan: PolicyEvolutionPlan,
@@ -1241,7 +1567,7 @@ class PolicyEvolutionManager:
                 return PolicyEvolutionRecommendation.APPROVE_CANARY
             return PolicyEvolutionRecommendation.KEEP_CURRENT
         if str(plan.status) == PolicyEvolutionPlanStatus.CANARY_ELIGIBLE.value:
-            return PolicyEvolutionRecommendation.PROMOTE
+            return PolicyEvolutionRecommendation.APPROVE_CANARY
         if str(plan.status) == PolicyEvolutionPlanStatus.PROMOTED.value:
             return PolicyEvolutionRecommendation.KEEP_CURRENT
         return PolicyEvolutionRecommendation.KEEP_CURRENT
@@ -1571,6 +1897,48 @@ def _shadow_result_passes_canary_thresholds(result: ShadowRunResult) -> bool:
         and result.safety_warning_count == 0
         and result.invalid_suggestion_rate <= 0.05
         and result.backend_agreement_rate >= 0.7
+    )
+
+
+def _approval_from_registry(entry: PolicyVersionRegistryEntry | None) -> ShadowApprovalRecord | None:
+    if entry is None or not entry.shadow_approval_metadata:
+        return None
+    return ShadowApprovalRecord.from_dict(entry.shadow_approval_metadata)
+
+
+def _is_past_iso(value: str | None) -> bool:
+    if not value:
+        return False
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed < datetime.now(timezone.utc)
+
+
+def _confidence_calibration_score(summary: dict[str, Any]) -> float:
+    if "calibration_score" in summary:
+        return float(summary.get("calibration_score") or 0.0)
+    if "score" in summary:
+        return float(summary.get("score") or 0.0)
+    if not summary:
+        return 1.0
+    return float(summary.get("mean_confidence_alignment", 1.0) or 0.0)
+
+
+def _unknown_counterfactual_rate(breakdown: dict[str, int]) -> float:
+    total = sum(int(value or 0) for value in breakdown.values())
+    if total <= 0:
+        return 0.0
+    return int(breakdown.get("unknown_counterfactual", 0) or 0) / total
+
+
+def _canary_unknown_counterfactual_ground_truth(proposal: CanaryPromotionProposal) -> bool:
+    return bool(
+        proposal.failure_summary.get("unknown_counterfactual_as_ground_truth")
+        or proposal.shadow_result_summary.get("unknown_counterfactual_as_ground_truth")
     )
 
 

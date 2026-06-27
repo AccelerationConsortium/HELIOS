@@ -6,6 +6,8 @@ import inspect
 from app.optimization.backend_selection import rank_backends
 import app.services.policy_evolution as policy_evolution
 from app.services.policy_evolution import (
+    CanaryPromotionGuard,
+    CanaryPromotionProposal,
     CandidatePolicyArtifact,
     CandidatePolicyTrainingJobStatus,
     CandidatePolicyTrainingMode,
@@ -845,6 +847,262 @@ def test_default_backend_behavior_remains_unchanged_after_shadow_approval():
     manager, _plan, _job, _artifact, proposal, _registry = _eligible_shadow_proposal()
 
     _ = manager.schedule_shadow_run(_approval_record(proposal))
+    after = select_strategy(snapshot, config=PhaseConfig())
+
+    assert after.backend_name == before.backend_name
+    assert after.strategy_trace.selected_backend == before.strategy_trace.selected_backend
+
+
+def _approved_shadow_state():
+    manager, plan, _job, artifact, proposal, registry = _eligible_shadow_proposal()
+    approval = _approval_record(proposal)
+    _approved_proposal, registry, _guard = manager.approve_shadow_proposal(
+        proposal,
+        approval,
+        registry=registry,
+    )
+    result = ShadowRunResult(
+        run_id="shadow-run-a",
+        schedule_id="schedule-a",
+        policy_id=artifact.policy_id,
+        policy_version=artifact.policy_version,
+        campaign_ids=("replay",),
+        round_count=20,
+        intent_agreement_rate=0.9,
+        mode_agreement_rate=0.9,
+        backend_agreement_rate=0.9,
+        would_change_top1_rate=0.1,
+        invalid_suggestion_rate=0.0,
+        safety_warning_count=0,
+        confidence_calibration_summary={"calibration_score": 0.9},
+        counterfactual_breakdown={"observed_outcome": 15, "unknown_counterfactual": 5},
+        recommendation=ShadowRunRecommendation.PROPOSE_CANARY,
+    )
+    registry = registry.register_shadow_result(artifact.policy_id, artifact.policy_version, result)
+    return manager, plan, artifact, approval, result, registry
+
+
+def test_canary_promotion_proposal_round_trip_serialization():
+    manager, plan, artifact, approval, result, registry = _approved_shadow_state()
+
+    proposal = manager.create_canary_promotion_proposal(
+        plan,
+        result,
+        shadow_approval=approval,
+        registry=registry,
+    )
+    restored = CanaryPromotionProposal.from_dict(proposal.to_dict())
+
+    assert proposal.status == "eligible"
+    assert restored.proposal_id == proposal.proposal_id
+    assert restored.policy_id == artifact.policy_id
+    assert restored.required_approvals == ("human_canary_approval",)
+    assert restored.eligible is True
+
+
+def test_canary_guard_blocks_missing_shadow_result():
+    manager, plan, _artifact, approval, _result, registry = _approved_shadow_state()
+
+    proposal = manager.create_canary_promotion_proposal(
+        plan,
+        None,
+        shadow_approval=approval,
+        registry=registry,
+    )
+    guard = CanaryPromotionGuard().evaluate(proposal, registry=registry, shadow_approval=approval)
+
+    assert guard.allowed is False
+    assert "missing_shadow_result" in {violation["check"] for violation in guard.violations}
+
+
+def test_canary_guard_blocks_shadow_recommendation_not_propose_canary():
+    manager, plan, _artifact, approval, result, registry = _approved_shadow_state()
+    result = dataclasses.replace(result, recommendation=ShadowRunRecommendation.CONTINUE_SHADOW)
+
+    proposal = manager.create_canary_promotion_proposal(
+        plan,
+        result,
+        shadow_approval=approval,
+        registry=registry,
+    )
+    guard = CanaryPromotionGuard().evaluate(proposal, registry=registry, shadow_approval=approval)
+
+    assert guard.allowed is False
+    assert "shadow_recommendation_not_propose_canary" in {violation["check"] for violation in guard.violations}
+
+
+def test_canary_guard_blocks_policy_not_approved_for_shadow():
+    manager, plan, artifact, approval, result, registry = _approved_shadow_state()
+    entry = registry.get(artifact.policy_id, artifact.policy_version)
+    registry = registry._replace_entry(dataclasses.replace(entry, approved_for_shadow=False))
+
+    proposal = manager.create_canary_promotion_proposal(
+        plan,
+        result,
+        shadow_approval=approval,
+        registry=registry,
+    )
+    guard = CanaryPromotionGuard().evaluate(proposal, registry=registry, shadow_approval=approval)
+
+    assert guard.allowed is False
+    assert "policy_not_approved_for_shadow" in {violation["check"] for violation in guard.violations}
+
+
+def test_canary_guard_blocks_expired_or_revoked_shadow_approval():
+    manager, plan, _artifact, approval, result, registry = _approved_shadow_state()
+    expired = dataclasses.replace(
+        approval,
+        expires_at="2000-01-01T00:00:00+00:00",
+        revoked=True,
+    )
+
+    proposal = manager.create_canary_promotion_proposal(
+        plan,
+        result,
+        shadow_approval=expired,
+        registry=registry,
+    )
+    guard = CanaryPromotionGuard().evaluate(proposal, registry=registry, shadow_approval=expired)
+
+    checks = {violation["check"] for violation in guard.violations}
+    assert guard.allowed is False
+    assert {"shadow_approval_expired", "shadow_approval_revoked"} <= checks
+
+
+def test_canary_guard_blocks_insufficient_shadow_rounds():
+    manager, plan, _artifact, approval, result, registry = _approved_shadow_state()
+    result = dataclasses.replace(result, round_count=3)
+    proposal = manager.create_canary_promotion_proposal(plan, result, shadow_approval=approval, registry=registry)
+
+    guard = CanaryPromotionGuard().evaluate(proposal, registry=registry, shadow_approval=approval)
+
+    assert guard.allowed is False
+    assert "insufficient_shadow_rounds" in {violation["check"] for violation in guard.violations}
+
+
+def test_canary_guard_blocks_safety_warning_threshold_breach():
+    manager, plan, _artifact, approval, result, registry = _approved_shadow_state()
+    result = dataclasses.replace(result, safety_warning_count=1)
+    proposal = manager.create_canary_promotion_proposal(plan, result, shadow_approval=approval, registry=registry)
+
+    guard = CanaryPromotionGuard().evaluate(proposal, registry=registry, shadow_approval=approval)
+
+    assert guard.allowed is False
+    assert "safety_warning_threshold_breached" in {violation["check"] for violation in guard.violations}
+
+
+def test_canary_guard_blocks_invalid_suggestion_rate_breach():
+    manager, plan, _artifact, approval, result, registry = _approved_shadow_state()
+    result = dataclasses.replace(result, invalid_suggestion_rate=0.2)
+    proposal = manager.create_canary_promotion_proposal(plan, result, shadow_approval=approval, registry=registry)
+
+    guard = CanaryPromotionGuard().evaluate(proposal, registry=registry, shadow_approval=approval)
+
+    assert guard.allowed is False
+    assert "invalid_suggestion_rate_too_high" in {violation["check"] for violation in guard.violations}
+
+
+def test_canary_guard_blocks_poor_confidence_calibration():
+    manager, plan, _artifact, approval, result, registry = _approved_shadow_state()
+    result = dataclasses.replace(result, confidence_calibration_summary={"calibration_score": 0.2})
+    proposal = manager.create_canary_promotion_proposal(plan, result, shadow_approval=approval, registry=registry)
+
+    guard = CanaryPromotionGuard().evaluate(proposal, registry=registry, shadow_approval=approval)
+
+    assert guard.allowed is False
+    assert "confidence_calibration_too_low" in {violation["check"] for violation in guard.violations}
+
+
+def test_canary_guard_blocks_excessive_would_change_top1_rate():
+    manager, plan, _artifact, approval, result, registry = _approved_shadow_state()
+    result = dataclasses.replace(result, would_change_top1_rate=0.9)
+    proposal = manager.create_canary_promotion_proposal(plan, result, shadow_approval=approval, registry=registry)
+
+    guard = CanaryPromotionGuard().evaluate(proposal, registry=registry, shadow_approval=approval)
+
+    assert guard.allowed is False
+    assert "top1_change_rate_too_high" in {violation["check"] for violation in guard.violations}
+
+
+def test_canary_guard_blocks_unknown_counterfactual_used_as_ground_truth():
+    manager, plan, _artifact, approval, result, registry = _approved_shadow_state()
+    result = dataclasses.replace(result, reasons=("unknown counterfactual",))
+    proposal = manager.create_canary_promotion_proposal(plan, result, shadow_approval=approval, registry=registry)
+    proposal = dataclasses.replace(
+        proposal,
+        failure_summary={"unknown_counterfactual_as_ground_truth": True},
+    )
+
+    guard = CanaryPromotionGuard().evaluate(proposal, registry=registry, shadow_approval=approval)
+
+    assert guard.allowed is False
+    assert "unknown_counterfactual_as_ground_truth" in {violation["check"] for violation in guard.violations}
+
+
+def test_canary_guard_blocks_missing_rollback_target():
+    manager, plan, _artifact, approval, result, registry = _approved_shadow_state()
+    plan = dataclasses.replace(plan, rollback_policy_id=None, rollback_policy_version=None)
+    proposal = manager.create_canary_promotion_proposal(plan, result, shadow_approval=approval, registry=registry)
+
+    guard = CanaryPromotionGuard().evaluate(proposal, registry=registry, shadow_approval=approval)
+
+    assert guard.allowed is False
+    assert "missing_rollback_target" in {violation["check"] for violation in guard.violations}
+
+
+def test_registry_stores_canary_proposal_metadata_without_live_approval():
+    manager, plan, artifact, approval, result, registry = _approved_shadow_state()
+    proposal = manager.create_canary_promotion_proposal(plan, result, shadow_approval=approval, registry=registry)
+
+    updated = registry.register_canary_proposal(artifact.policy_id, artifact.policy_version, proposal)
+    entry = updated.get(artifact.policy_id, artifact.policy_version)
+
+    assert entry.canary_proposed is True
+    assert entry.canary_proposal_id == proposal.proposal_id
+    assert entry.canary_proposal_status == "eligible"
+    assert entry.canary_eligibility_summary["eligible"] is True
+    assert entry.recommended_canary_scope
+    assert entry.approved_for_safe_soft is False
+    assert entry.approved_for_live_canary is False
+
+
+def test_manager_recommends_approve_canary_without_auto_approval():
+    manager, plan, artifact, approval, result, registry = _approved_shadow_state()
+    proposal = manager.create_canary_promotion_proposal(plan, result, shadow_approval=approval, registry=registry)
+
+    updated_plan = manager.attach_canary_proposal(plan, proposal)
+
+    assert updated_plan.status == "canary_eligible"
+    assert manager.recommend_next_step(updated_plan) == PolicyEvolutionRecommendation.APPROVE_CANARY
+    entry = registry.get(artifact.policy_id, artifact.policy_version)
+    assert entry.approved_for_safe_soft is False
+    assert entry.approved_for_live_canary is False
+
+
+def test_learned_policy_still_does_not_affect_live_ranking_after_canary_proposal():
+    before = rank_backends(
+        "optimize",
+        ("nexus_gp_bo", "built_in"),
+        {"nexus_gp_bo": True, "built_in": True},
+    )
+    manager, plan, _artifact, approval, result, registry = _approved_shadow_state()
+
+    _ = manager.create_canary_promotion_proposal(plan, result, shadow_approval=approval, registry=registry)
+    after = rank_backends(
+        "optimize",
+        ("nexus_gp_bo", "built_in"),
+        {"nexus_gp_bo": True, "built_in": True},
+    )
+
+    assert after == before
+
+
+def test_default_backend_behavior_remains_unchanged_after_canary_proposal():
+    snapshot = all_replay_scenarios()[2]
+    before = select_strategy(snapshot, config=PhaseConfig())
+    manager, plan, _artifact, approval, result, registry = _approved_shadow_state()
+
+    _ = manager.create_canary_promotion_proposal(plan, result, shadow_approval=approval, registry=registry)
     after = select_strategy(snapshot, config=PhaseConfig())
 
     assert after.backend_name == before.backend_name
