@@ -179,6 +179,107 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         except Exception:
             pass  # SSE is best-effort; don't break orchestrator on publish failure
 
+    @staticmethod
+    def _build_campaign_context(input_data: OrchestratorInput) -> dict[str, Any]:
+        """Derive the initial scientific context from the orchestrator contract."""
+        constraints = []
+        for dim in input_data.dimensions:
+            if dim.get("choices") is not None:
+                constraints.append({
+                    "type": "categorical_domain",
+                    "parameter": dim.get("param_name") or dim.get("name"),
+                    "choices": dim.get("choices"),
+                })
+            if dim.get("min_value") is not None or dim.get("max_value") is not None:
+                constraints.append({
+                    "type": "bounds",
+                    "parameter": dim.get("param_name") or dim.get("name"),
+                    "min": dim.get("min_value"),
+                    "max": dim.get("max_value"),
+                })
+
+        return {
+            "scientific_goal": input_data.objective_kpi,
+            "objective_hierarchy": [
+                {
+                    "level": "performance",
+                    "name": input_data.objective_kpi,
+                    "metric": input_data.objective_kpi,
+                    "direction": input_data.direction,
+                    "target": input_data.target_value,
+                    "weight": 1.0,
+                }
+            ],
+            "current_objective_level": "performance",
+            "known_constraints": constraints,
+            "measurement_protocols": [input_data.protocol_template]
+            if input_data.protocol_template else [],
+            "budget_remaining": {
+                "max_rounds": input_data.max_rounds,
+                "batch_size": input_data.batch_size,
+            },
+            "human_preferences": dict(input_data.policy_snapshot or {}),
+            "synthesis_routes": [],
+            "domain_hypotheses": [],
+            "literature_priors": [],
+            "human_observations": [],
+        }
+
+    @staticmethod
+    def _campaign_context_from_dict(raw: dict[str, Any] | None):
+        """Convert persisted context JSON into the selector dataclass."""
+        from app.services.strategy_models import CampaignContext, ObjectiveSpec
+
+        if not raw:
+            return None
+        objectives = tuple(
+            ObjectiveSpec(
+                level=obj.get("level", "performance"),
+                name=obj.get("name", obj.get("metric", "")),
+                metric=obj.get("metric"),
+                direction=obj.get("direction", "maximize"),
+                target=obj.get("target"),
+                weight=float(obj.get("weight", 1.0)),
+            )
+            for obj in raw.get("objective_hierarchy", [])
+            if isinstance(obj, dict)
+        )
+        return CampaignContext(
+            scientific_goal=raw.get("scientific_goal", ""),
+            objective_hierarchy=objectives,
+            current_objective_level=raw.get("current_objective_level", "performance"),
+            domain_hypotheses=tuple(raw.get("domain_hypotheses", []) or []),
+            known_constraints=tuple(raw.get("known_constraints", []) or []),
+            synthesis_routes=tuple(raw.get("synthesis_routes", []) or []),
+            measurement_protocols=tuple(raw.get("measurement_protocols", []) or []),
+            instrument_state=dict(raw.get("instrument_state", {}) or {}),
+            material_family=raw.get("material_family"),
+            prior_campaigns=tuple(raw.get("prior_campaigns", []) or []),
+            literature_priors=tuple(raw.get("literature_priors", []) or []),
+            budget_remaining=dict(raw.get("budget_remaining", {}) or {}),
+            human_preferences=dict(raw.get("human_preferences", {}) or {}),
+            human_observations=tuple(raw.get("human_observations", []) or []),
+        )
+
+    @staticmethod
+    def _failure_events_from_dicts(raw: list[dict[str, Any]] | None):
+        """Convert persisted failure-event JSON into selector dataclasses."""
+        from app.services.strategy_models import FailureEvent
+
+        return tuple(
+            FailureEvent(
+                failure_type=event.get("failure_type", "backend"),
+                reason=event.get("reason", ""),
+                backend_name=event.get("backend_name"),
+                round_number=event.get("round_number"),
+                candidate_index=event.get("candidate_index"),
+                params=dict(event.get("params", {}) or {}),
+                penalize_backend=bool(event.get("penalize_backend", False)),
+            )
+            for event in (raw or [])
+            if isinstance(event, dict)
+        )
+
     def _register_campaign_agents(self, campaign_id: str) -> None:
         """Register the campaign's agent runtime with the ControlPlane."""
         from app.agents.analyzer_agent import AnalyzerAgent
@@ -381,9 +482,13 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         # v2: Track campaign_id for pause handler
         self._current_campaign_id = campaign_id
         self._register_campaign_agents(campaign_id)
+        campaign_context_dict = self._build_campaign_context(input_data)
+        failure_event_dicts: list[dict[str, Any]] = []
 
         # --- Checkpoint: create campaign in DB ---
         from app.services.campaign_state import (
+            append_failure_event,
+            append_space_revision,
             checkpoint_kpi,
             complete_candidate,
             complete_round,
@@ -402,7 +507,15 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 campaign_id,
                 input_data.model_dump(mode="json"),
                 direction=input_data.direction,
+                campaign_context=campaign_context_dict,
             )
+
+        def _note_failure_event(event: dict[str, Any]) -> None:
+            failure_event_dicts.append(event)
+            try:
+                append_failure_event(campaign_id, event)
+            except Exception:
+                logger.debug("Failed to persist failure event", exc_info=True)
 
         self._emit(campaign_id, {
             "type": "campaign_start",
@@ -429,6 +542,10 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     errors=["Cannot resume: no saved plan found"],
                     agent_trace=agent_trace,
                 )
+            campaign_context_dict = dict(
+                _saved.get("campaign_context") or campaign_context_dict
+            )
+            failure_event_dicts = list(_saved.get("failure_events") or [])
             # Re-run planner with same input to get CampaignPlan object
             plan_input = PlannerInput(
                 contract_id=input_data.contract_id,
@@ -687,6 +804,12 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             bomcp_backend_state: dict[str, Any] | None = restored_state.get(
                 "bomcp_backend_state"
             )
+            latest_strategy_trace: dict[str, Any] | None = restored_state.get(
+                "latest_strategy_trace"
+            )
+            backend_performance_records: dict[str, Any] = dict(
+                restored_state.get("backend_performance", {}) or {}
+            )
         else:
             kpi_history: list[float] = []
             all_kpis: list[float] = []
@@ -697,6 +820,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             backend_failure_counts = {}
             all_failed_params = []
             bomcp_backend_state = None
+            latest_strategy_trace = None
+            backend_performance_records = {}
 
         step_history: list[dict[str, Any]] = []
 
@@ -766,6 +891,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     from app.services.strategy_selector import (
                         CampaignSnapshot,
                         select_strategy,
+                        strategy_trace_to_dict,
                     )
 
                     qc_fail_rate = (
@@ -802,6 +928,17 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         backend_failure_counts=dict(backend_failure_counts),
                         # Dim 9 / P3b: failed coordinates -> failure-region avoidance.
                         failed_params=tuple(all_failed_params),
+                        campaign_context=self._campaign_context_from_dict(
+                            campaign_context_dict
+                        ),
+                        failure_events=self._failure_events_from_dicts(
+                            failure_event_dicts
+                        ),
+                        campaign_id=campaign_id,
+                        previous_intent=(
+                            latest_strategy_trace or {}
+                        ).get("selected_intent"),
+                        backend_performance_records=backend_performance_records,
                     )
                     # Route through RL or rule-based strategy router
                     if self._strategy_router is not None:
@@ -835,7 +972,24 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         "phase": decision.phase,
                         "reason": decision.reason,
                         "confidence": decision.confidence,
+                        "strategy_trace": strategy_trace_to_dict(
+                            decision.strategy_trace
+                        ),
                     }
+                    latest_strategy_trace = strategy_decision_info.get(
+                        "strategy_trace"
+                    )
+                    _space_revision = (
+                        strategy_decision_info.get("strategy_trace") or {}
+                    ).get("space_revision")
+                    if _space_revision:
+                        try:
+                            append_space_revision(campaign_id, _space_revision)
+                        except Exception:
+                            logger.debug(
+                                "Failed to persist space revision",
+                                exc_info=True,
+                            )
 
                     # Include diagnostic signals in SSE event
                     diag_info = {}
@@ -921,6 +1075,9 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         "drift_score": decision.drift_score,
                         "evidence": evidence_info,
                         "stabilize_spec": stabilize_info,
+                        "strategy_trace": strategy_trace_to_dict(
+                            decision.strategy_trace
+                        ),
                         "message": f"Strategy: {decision.backend_name} ({decision.phase}) — {decision.reason}",
                     })
                 except Exception:
@@ -1116,6 +1273,16 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         complete_candidate(campaign_id, round_num, i, status="failed", error="compilation_failed")
                     except Exception:
                         pass
+                    _note_failure_event({
+                        "failure_type": "protocol",
+                        "reason": "Compilation failed before execution",
+                        "backend_name": strategy_decision.backend_name
+                        if strategy_decision is not None else None,
+                        "round_number": round_num,
+                        "candidate_index": i,
+                        "params": candidate_params,
+                        "penalize_backend": False,
+                    })
                     continue
 
                 # --- Idempotent skip: check graph_hash ---
@@ -1168,6 +1335,16 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         complete_candidate(campaign_id, round_num, i, status="failed", error="safety_veto")
                     except Exception:
                         pass
+                    _note_failure_event({
+                        "failure_type": "constraint",
+                        "reason": "Safety preflight vetoed the candidate",
+                        "backend_name": strategy_decision.backend_name
+                        if strategy_decision is not None else None,
+                        "round_number": round_num,
+                        "candidate_index": i,
+                        "params": candidate_params,
+                        "penalize_backend": True,
+                    })
                     continue
 
                 self._emit(campaign_id, {
@@ -1236,6 +1413,16 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                             complete_candidate(campaign_id, round_num, i, status="failed", error="simulation_fail")
                         except Exception:
                             pass
+                        _note_failure_event({
+                            "failure_type": "model",
+                            "reason": "Simulation vetoed the candidate before execution",
+                            "backend_name": strategy_decision.backend_name
+                            if strategy_decision is not None else None,
+                            "round_number": round_num,
+                            "candidate_index": i,
+                            "params": candidate_params,
+                            "penalize_backend": False,
+                        })
                         continue
                 else:
                     logger.warning(
@@ -1464,8 +1651,28 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                             campaign_id, round_num, i,
                             qc=qc_quality, status="failed", error="qc_abort",
                         )
+                        checkpoint_kpi(
+                            campaign_id, kpi_history, all_kpis, all_params,
+                            all_rounds, best_kpi, total_runs,
+                            backend_failure_counts=backend_failure_counts,
+                            all_failed_params=all_failed_params,
+                            bomcp_backend_state=bomcp_backend_state,
+                            latest_strategy_trace=(strategy_decision_info or {}).get(
+                                "strategy_trace"
+                            ),
+                        )
                     except Exception:
                         pass
+                    _note_failure_event({
+                        "failure_type": "measurement",
+                        "reason": f"QC monitor recommended abort: {qc_quality}",
+                        "backend_name": strategy_decision.backend_name
+                        if strategy_decision is not None else None,
+                        "round_number": round_num,
+                        "candidate_index": i,
+                        "params": candidate_params,
+                        "penalize_backend": False,
+                    })
                     continue
 
                 # Record KPI (after QC pass)
@@ -1500,6 +1707,12 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     checkpoint_kpi(
                         campaign_id, kpi_history, all_kpis, all_params,
                         all_rounds, best_kpi, total_runs,
+                        backend_failure_counts=backend_failure_counts,
+                        all_failed_params=all_failed_params,
+                        bomcp_backend_state=bomcp_backend_state,
+                        latest_strategy_trace=(strategy_decision_info or {}).get(
+                            "strategy_trace"
+                        ),
                     )
                 except Exception:
                     logger.debug("Failed to checkpoint candidate", exc_info=True)
@@ -1558,6 +1771,19 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     strategy_decision.backend_name,
                     round_had_failure=_round_had_failure,
                 )
+                try:
+                    checkpoint_kpi(
+                        campaign_id, kpi_history, all_kpis, all_params,
+                        all_rounds, best_kpi, total_runs,
+                        backend_failure_counts=backend_failure_counts,
+                        all_failed_params=all_failed_params,
+                        bomcp_backend_state=bomcp_backend_state,
+                        latest_strategy_trace=(strategy_decision_info or {}).get(
+                            "strategy_trace"
+                        ),
+                    )
+                except Exception:
+                    logger.debug("Failed to checkpoint strategy state", exc_info=True)
 
             # 2e-ext. Causal model update (async, non-blocking)
             # After each round, update the causal graph with new observations.

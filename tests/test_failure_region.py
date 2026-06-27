@@ -8,6 +8,10 @@ suggestions avoid -- expressed as a bomcp OutcomeConstraint on a synthetic
 """
 from __future__ import annotations
 
+import importlib.util
+
+import pytest
+
 from app.optimization.failure_region import (
     FailureRegionModel,
     build_feasibility_observations,
@@ -16,6 +20,11 @@ from app.optimization.failure_region import (
 )
 from app.services.candidate_gen import OutcomeConstraint, ParameterSpace, SearchDimension
 from app.services.optimization_backends import Observation
+
+_needs_bomcp = pytest.mark.skipif(
+    importlib.util.find_spec("bo_engine") is None,
+    reason="bo-engine not installed",
+)
 
 
 def _unit_square() -> ParameterSpace:
@@ -99,6 +108,7 @@ def test_filter_failure_prone_removes_points_in_region():
 # --- bomcp expression (learned outcome constraint) --------------------------
 
 
+@_needs_bomcp
 def test_feasibility_observations_label_success_and_failure():
     succeeded = [Observation(params={"x0": 0.1, "x1": 0.1}, objective=5.0)]
     failed = [{"x0": 0.8, "x1": 0.8}]

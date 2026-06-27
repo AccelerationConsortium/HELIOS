@@ -1,7 +1,7 @@
-"""Optimization service entrypoint -- the one call HELIOS makes per round.
+"""Optimization service entrypoint for provider-level callers.
 
-``suggest_next`` wires the optimization-intelligence layer together with a
-hard graceful-degradation guarantee:
+``suggest_next`` wires the optimization-intelligence provider layer together
+with a hard graceful-degradation guarantee:
 
     provider (Nexus)  --unavailable/raises-->  local fallback
                        |
@@ -14,6 +14,12 @@ hard graceful-degradation guarantee:
 A Nexus outage degrades to the built-in optimizer; it never stops a campaign.
 HELIOS retains the final say through the decision policy, and every round is
 recorded for audit.
+
+The production campaign loop currently routes through the adaptive strategy
+selector and backend registry directly because it also has to thread
+campaign-local state such as BO MCP TuRBO trust regions and failure-region
+avoidance.  This service remains the stable facade for direct provider calls
+and tests of the Nexus/local fallback contract.
 """
 from __future__ import annotations
 

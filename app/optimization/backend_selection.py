@@ -33,6 +33,7 @@ class BackendScore:
     fingerprint_boost: float
     failure_penalty: float
     total: float
+    influence_delta: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -60,9 +61,11 @@ def rank_backends(
     failure_penalty: float = 0.5,
     failure_veto_threshold: int = 3,
     fallback_backend: str = "built_in",
+    influence_deltas: Mapping[str, float] | None = None,
 ) -> BackendSelection:
     """Rank *pool* backends and return the ratified selection with provenance."""
     failures = failure_counts or {}
+    external_deltas = influence_deltas or {}
     n = len(pool)
 
     # Hard veto 1: availability + phase-incompatibility (only pool members count).
@@ -102,13 +105,15 @@ def rank_backends(
             else 0.0
         )
 
-        total = phase_weight * phase_score + boost - penalty
+        influence_delta = external_deltas.get(backend, 0.0)
+        total = phase_weight * phase_score + boost - penalty + influence_delta
         scores.append(
             BackendScore(
                 backend=backend,
                 phase_score=round(phase_score, 4),
                 fingerprint_boost=round(boost, 4),
                 failure_penalty=round(penalty, 4),
+                influence_delta=round(influence_delta, 4),
                 total=round(total, 4),
             )
         )
@@ -122,7 +127,9 @@ def rank_backends(
     # Fallback status: the run is using the universal fallback optimizer.
     fallback = selected == fallback_backend
 
-    if biased:
+    if biased and any(abs(v) > 0 for v in external_deltas.values()):
+        reason = f"ranking influence promoted '{selected}' over phase-default '{phase_only}'"
+    elif biased:
         reason = f"fingerprint promoted '{selected}' over phase-default '{phase_only}'"
     elif fallback:
         reason = f"using fallback backend '{fallback_backend}'"

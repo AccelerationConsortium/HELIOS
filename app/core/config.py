@@ -78,6 +78,13 @@ class Settings:
         self.llm_base_url: str = os.getenv("LLM_BASE_URL", "https://api.anthropic.com")
         self.llm_max_tokens: int = int(os.getenv("LLM_MAX_TOKENS", "4096"))
 
+        # ---- Optional Nexus REST advisor settings ----
+        # The per-round optimization path is in-process.  REST advisory calls
+        # are opt-in so a missing Nexus server cannot add latency to normal runs.
+        self.nexus_advisor_enabled: bool = os.getenv(
+            "NEXUS_ADVISOR_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+
     @staticmethod
     def _load_puda_machine_map(raw: str) -> dict[str, str]:
         try:
