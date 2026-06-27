@@ -18,6 +18,9 @@ from app.services.policy_evolution import (
     CandidatePolicyTrainingJobStatus,
     CandidatePolicyTrainingMode,
     EvolutionGuard,
+    FinalApprovalGuard,
+    FinalApprovalMode,
+    FinalApprovalRecord,
     FinalPromotionGuard,
     FinalPromotionProposal,
     PolicyEvolutionManager,
@@ -1709,6 +1712,262 @@ def test_default_backend_behavior_remains_unchanged_after_final_promotion_propos
     manager, plan, _artifact, approval, result, registry = _approved_canary_state()
 
     _ = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+    after = select_strategy(snapshot, config=PhaseConfig())
+
+    assert after.backend_name == before.backend_name
+    assert after.strategy_trace.selected_backend == before.strategy_trace.selected_backend
+
+
+def _eligible_final_promotion_state():
+    manager, plan, artifact, canary_approval, result, registry = _approved_canary_state()
+    proposal = manager.create_final_promotion_proposal(
+        plan,
+        result,
+        canary_approval=canary_approval,
+        registry=registry,
+    )
+    registry = registry.register_final_promotion_proposal(artifact.policy_id, artifact.policy_version, proposal)
+    return manager, plan, artifact, proposal, registry
+
+
+def _final_approval_record(proposal):
+    return FinalApprovalRecord(
+        approval_id="final-approval-a",
+        proposal_id=proposal.proposal_id,
+        policy_id=proposal.policy_id,
+        policy_version=proposal.policy_version,
+        approved_by="sissi",
+        approval_mode=FinalApprovalMode.TEST,
+        approval_reason="test approval for safe-soft eligibility",
+        expires_at="2099-01-01T00:00:00+00:00",
+        allowed_campaign_ids=("replay",),
+        allowed_objective_levels=("performance",),
+        max_live_weight=proposal.max_live_weight,
+        max_top1_change_rate=proposal.max_top1_change_rate,
+        rollback_policy_id=proposal.rollback_policy_id,
+        rollback_policy_version=proposal.rollback_policy_version,
+    )
+
+
+def test_final_approval_record_round_trip_serialization():
+    _manager, _plan, _artifact, proposal, _registry = _eligible_final_promotion_state()
+    approval = _final_approval_record(proposal)
+
+    restored = FinalApprovalRecord.from_dict(approval.to_dict())
+
+    assert restored.approval_id == approval.approval_id
+    assert restored.approval_mode == "test"
+    assert restored.allowed_campaign_ids == ("replay",)
+    assert restored.max_live_weight == proposal.max_live_weight
+    assert restored.rollback_policy_id == proposal.rollback_policy_id
+
+
+def test_final_approval_guard_blocks_missing_proposal():
+    _manager, _plan, _artifact, proposal, registry = _eligible_final_promotion_state()
+
+    result = FinalApprovalGuard().evaluate(None, _final_approval_record(proposal), registry)
+
+    assert result.allowed is False
+    assert "missing_final_promotion_proposal" in {violation["check"] for violation in result.violations}
+
+
+def test_final_approval_guard_blocks_ineligible_proposal():
+    _manager, _plan, _artifact, proposal, registry = _eligible_final_promotion_state()
+    proposal = dataclasses.replace(proposal, eligible=False)
+
+    result = FinalApprovalGuard().evaluate(proposal, _final_approval_record(proposal), registry)
+
+    assert result.allowed is False
+    assert "proposal_not_eligible" in {violation["check"] for violation in result.violations}
+
+
+def test_final_approval_guard_blocks_expired_or_rejected_proposal():
+    _manager, _plan, _artifact, proposal, registry = _eligible_final_promotion_state()
+    rejected = dataclasses.replace(proposal, status="rejected")
+
+    result = FinalApprovalGuard().evaluate(rejected, _final_approval_record(proposal), registry)
+
+    assert result.allowed is False
+    assert "proposal_status_blocked" in {violation["check"] for violation in result.violations}
+
+
+def test_final_approval_guard_blocks_policy_not_approved_for_live_canary():
+    _manager, _plan, artifact, proposal, registry = _eligible_final_promotion_state()
+    entry = registry.get(artifact.policy_id, artifact.policy_version)
+    registry = registry._replace_entry(dataclasses.replace(entry, approved_for_live_canary=False))
+
+    result = FinalApprovalGuard().evaluate(proposal, _final_approval_record(proposal), registry)
+
+    assert result.allowed is False
+    assert "policy_not_approved_for_live_canary" in {violation["check"] for violation in result.violations}
+
+
+def test_final_approval_guard_blocks_missing_rollback_target():
+    _manager, _plan, _artifact, proposal, registry = _eligible_final_promotion_state()
+    proposal = dataclasses.replace(proposal, rollback_policy_id=None, rollback_policy_version=None)
+
+    result = FinalApprovalGuard().evaluate(proposal, _final_approval_record(proposal), registry)
+
+    assert result.allowed is False
+    assert "missing_rollback_target" in {violation["check"] for violation in result.violations}
+
+
+def test_final_approval_guard_blocks_scope_broader_than_proposal():
+    _manager, _plan, _artifact, proposal, registry = _eligible_final_promotion_state()
+    approval = dataclasses.replace(
+        _final_approval_record(proposal),
+        allowed_campaign_ids=("replay", "unapproved-campaign"),
+    )
+
+    result = FinalApprovalGuard().evaluate(proposal, approval, registry)
+
+    assert result.allowed is False
+    assert "scope_exceeds_proposal" in {violation["check"] for violation in result.violations}
+
+
+def test_final_approval_guard_blocks_weight_above_proposal_cap():
+    _manager, _plan, _artifact, proposal, registry = _eligible_final_promotion_state()
+    approval = dataclasses.replace(
+        _final_approval_record(proposal),
+        max_live_weight=proposal.max_live_weight + 0.001,
+    )
+
+    result = FinalApprovalGuard().evaluate(proposal, approval, registry)
+
+    assert result.allowed is False
+    assert "weight_above_proposal_cap" in {violation["check"] for violation in result.violations}
+
+
+def test_final_approval_guard_blocks_top1_cap_above_proposal_cap():
+    _manager, _plan, _artifact, proposal, registry = _eligible_final_promotion_state()
+    approval = dataclasses.replace(
+        _final_approval_record(proposal),
+        max_top1_change_rate=proposal.max_top1_change_rate + 0.1,
+    )
+
+    result = FinalApprovalGuard().evaluate(proposal, approval, registry)
+
+    assert result.allowed is False
+    assert "top1_change_rate_above_proposal_cap" in {violation["check"] for violation in result.violations}
+
+
+def test_registry_sets_approved_for_safe_soft_only_after_explicit_final_approval():
+    manager, _plan, artifact, proposal, registry = _eligible_final_promotion_state()
+    before = registry.get(artifact.policy_id, artifact.policy_version)
+    approval = _final_approval_record(proposal)
+
+    approved_proposal, updated, guard = manager.approve_final_promotion(
+        proposal,
+        approval,
+        registry=registry,
+    )
+    after = updated.get(artifact.policy_id, artifact.policy_version)
+
+    assert guard.allowed is True
+    assert approved_proposal.status == "approved"
+    assert before.approved_for_safe_soft is False
+    assert after.approved_for_safe_soft is True
+    assert after.final_approval_metadata["final_approval_id"] == "final-approval-a"
+    assert after.final_approval_metadata["approved_weight_cap"] == approval.max_live_weight
+    assert after.final_approval_metadata["approval_expiration"] == approval.expires_at
+
+
+def test_registry_supports_final_approval_revocation():
+    manager, _plan, artifact, proposal, registry = _eligible_final_promotion_state()
+    _proposal, registry, _guard = manager.approve_final_promotion(
+        proposal,
+        _final_approval_record(proposal),
+        registry=registry,
+    )
+
+    updated = manager.revoke_final_approval(
+        registry,
+        artifact.policy_id,
+        artifact.policy_version,
+        "manual rollback",
+    )
+    entry = updated.get(artifact.policy_id, artifact.policy_version)
+
+    assert entry.approved_for_safe_soft is False
+    assert entry.final_approval_metadata["revoked"] is True
+    assert entry.final_approval_metadata["revoked_reason"] == "manual rollback"
+
+
+def test_manager_returns_active_safe_soft_metadata_without_touching_live_selector():
+    before = rank_backends(
+        "optimize",
+        ("nexus_gp_bo", "built_in"),
+        {"nexus_gp_bo": True, "built_in": True},
+    )
+    manager, _plan, artifact, proposal, registry = _eligible_final_promotion_state()
+    _proposal, registry, _guard = manager.approve_final_promotion(
+        proposal,
+        _final_approval_record(proposal),
+        registry=registry,
+    )
+
+    metadata = manager.get_active_safe_soft_policy(
+        registry,
+        campaign_id="replay",
+        objective_level="performance",
+    )
+    after = rank_backends(
+        "optimize",
+        ("nexus_gp_bo", "built_in"),
+        {"nexus_gp_bo": True, "built_in": True},
+    )
+
+    assert metadata["policy_id"] == artifact.policy_id
+    assert metadata["approved_for_safe_soft"] is True
+    assert metadata["live_selector_activation"] is False
+    assert after == before
+
+
+def test_final_approval_metadata_scope_filtering():
+    manager, _plan, _artifact, proposal, registry = _eligible_final_promotion_state()
+    _proposal, registry, _guard = manager.approve_final_promotion(
+        proposal,
+        _final_approval_record(proposal),
+        registry=registry,
+    )
+
+    assert manager.get_active_safe_soft_policy(registry, campaign_id="other") is None
+    assert manager.get_active_safe_soft_policy(registry, objective_level="mechanism") is None
+
+
+def test_learned_policy_final_approval_constraints_are_guarded():
+    plan = _safe_plan(
+        proposed_changes={
+            "learned_policy_hard_veto": True,
+            "learned_policy_add_backend": True,
+            "learned_policy_override_action": True,
+            "learned_policy_override_objective": True,
+            "auto_apply_space_revision": True,
+        },
+    )
+
+    result = EvolutionGuard().evaluate(plan)
+
+    checks = {violation["check"] for violation in result.violations}
+    assert result.allowed is False
+    assert {
+        "learned_policy_hard_veto",
+        "learned_policy_add_backend",
+        "learned_policy_override_action_objective",
+        "auto_apply_space_revision",
+    } <= checks
+
+
+def test_default_backend_behavior_remains_unchanged_after_final_approval_metadata():
+    snapshot = all_replay_scenarios()[2]
+    before = select_strategy(snapshot, config=PhaseConfig())
+    manager, _plan, _artifact, proposal, registry = _eligible_final_promotion_state()
+
+    _proposal, _registry, _guard = manager.approve_final_promotion(
+        proposal,
+        _final_approval_record(proposal),
+        registry=registry,
+    )
     after = select_strategy(snapshot, config=PhaseConfig())
 
     assert after.backend_name == before.backend_name

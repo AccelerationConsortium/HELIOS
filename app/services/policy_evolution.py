@@ -165,6 +165,14 @@ class FinalPromotionProposalStatus(StrEnum):
     EXPIRED = "expired"
 
 
+class FinalApprovalMode(StrEnum):
+    """Explicit approval source for final safe-soft eligibility."""
+
+    MANUAL = "manual"
+    CONFIG = "config"
+    TEST = "test"
+
+
 @dataclass(frozen=True)
 class PolicyEvolutionTrigger:
     """Structured reason to start a policy-evolution review."""
@@ -689,6 +697,54 @@ class FinalPromotionProposal:
 
 
 @dataclass(frozen=True)
+class FinalApprovalRecord:
+    """Explicit approval that marks a policy safe-soft eligible."""
+
+    approval_id: str
+    proposal_id: str
+    policy_id: str
+    policy_version: str
+    approved_by: str
+    approval_mode: FinalApprovalMode | str
+    approval_reason: str
+    approved_at: str = field(default_factory=lambda: _now_iso())
+    expires_at: str | None = None
+    allowed_campaign_ids: tuple[str, ...] = ()
+    allowed_objective_levels: tuple[str, ...] = ()
+    max_live_weight: float = 0.0
+    max_top1_change_rate: float = 0.0
+    rollback_policy_id: str | None = None
+    rollback_policy_version: str | None = None
+    revoked: bool = False
+    revoked_reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> FinalApprovalRecord:
+        return cls(
+            approval_id=str(raw.get("approval_id", "")),
+            proposal_id=str(raw.get("proposal_id", "")),
+            policy_id=str(raw.get("policy_id", "")),
+            policy_version=str(raw.get("policy_version", "")),
+            approved_by=str(raw.get("approved_by", "")),
+            approval_mode=raw.get("approval_mode", FinalApprovalMode.MANUAL),
+            approval_reason=str(raw.get("approval_reason", "")),
+            approved_at=str(raw.get("approved_at") or _now_iso()),
+            expires_at=raw.get("expires_at"),
+            allowed_campaign_ids=tuple(raw.get("allowed_campaign_ids") or ()),
+            allowed_objective_levels=tuple(raw.get("allowed_objective_levels") or ()),
+            max_live_weight=float(raw.get("max_live_weight") or 0.0),
+            max_top1_change_rate=float(raw.get("max_top1_change_rate") or 0.0),
+            rollback_policy_id=raw.get("rollback_policy_id"),
+            rollback_policy_version=raw.get("rollback_policy_version"),
+            revoked=bool(raw.get("revoked", False)),
+            revoked_reason=raw.get("revoked_reason"),
+        )
+
+
+@dataclass(frozen=True)
 class PolicyVersionRegistryEntry:
     """Registered policy version metadata and lineage."""
 
@@ -728,6 +784,7 @@ class PolicyVersionRegistryEntry:
     promotion_eligibility_summary: dict[str, Any] = field(default_factory=dict)
     recommended_promotion_scope: dict[str, Any] = field(default_factory=dict)
     recommended_live_weight: float = 0.0
+    final_approval_metadata: dict[str, Any] = field(default_factory=dict)
     registered_at: str = field(default_factory=lambda: _now_iso())
 
 
@@ -968,6 +1025,65 @@ class PolicyVersionRegistry:
             recommended_promotion_scope=dict(proposal.recommended_promotion_scope),
             recommended_live_weight=proposal.max_live_weight,
             approved_for_safe_soft=False,
+        )
+        return self._replace_entry(updated)
+
+    def mark_final_approved(
+        self,
+        policy_id: str,
+        policy_version: str,
+        approval: FinalApprovalRecord,
+    ) -> PolicyVersionRegistry:
+        entry = self.get(policy_id, policy_version)
+        if entry is None:
+            return self
+        approved_scope = {
+            "campaign_ids": approval.allowed_campaign_ids,
+            "objective_levels": approval.allowed_objective_levels,
+        }
+        updated = replace(
+            entry,
+            approved_for_safe_soft=True,
+            final_approval_metadata={
+                "final_approval_id": approval.approval_id,
+                "proposal_id": approval.proposal_id,
+                "approved_by": approval.approved_by,
+                "approval_mode": str(getattr(approval.approval_mode, "value", approval.approval_mode)),
+                "approval_reason": approval.approval_reason,
+                "approved_at": approval.approved_at,
+                "approved_scope": approved_scope,
+                "approved_weight_cap": approval.max_live_weight,
+                "approved_top1_change_cap": approval.max_top1_change_rate,
+                "rollback_target": (
+                    approval.rollback_policy_id,
+                    approval.rollback_policy_version,
+                ),
+                "approval_expiration": approval.expires_at,
+                "revoked": False,
+                "revoked_reason": None,
+            },
+        )
+        return self._replace_entry(updated)
+
+    def revoke_final_approval(
+        self,
+        policy_id: str,
+        policy_version: str,
+        reason: str,
+    ) -> PolicyVersionRegistry:
+        entry = self.get(policy_id, policy_version)
+        if entry is None:
+            return self
+        metadata = dict(entry.final_approval_metadata or {})
+        metadata.update({
+            "revoked": True,
+            "revoked_reason": reason,
+            "revoked_at": _now_iso(),
+        })
+        updated = replace(
+            entry,
+            approved_for_safe_soft=False,
+            final_approval_metadata=metadata,
         )
         return self._replace_entry(updated)
 
@@ -1656,6 +1772,113 @@ class FinalPromotionGuard:
 
 
 @dataclass(frozen=True)
+class FinalApprovalGuardResult:
+    """Guardrail result for explicit final approvals."""
+
+    allowed: bool
+    violations: tuple[dict[str, Any], ...] = ()
+    warnings: tuple[dict[str, Any], ...] = ()
+    required_human_approval: bool = True
+
+
+class FinalApprovalGuard:
+    """Validate final approval before marking a policy safe-soft eligible."""
+
+    BLOCKED_STATUSES = {
+        FinalPromotionProposalStatus.BLOCKED.value,
+        FinalPromotionProposalStatus.REJECTED.value,
+        FinalPromotionProposalStatus.EXPIRED.value,
+    }
+
+    def evaluate(
+        self,
+        proposal: FinalPromotionProposal | None,
+        approval: FinalApprovalRecord,
+        registry: PolicyVersionRegistry | None = None,
+    ) -> FinalApprovalGuardResult:
+        violations: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        if proposal is None:
+            return FinalApprovalGuardResult(
+                allowed=False,
+                violations=(_violation("missing_final_promotion_proposal", "Final promotion proposal is required"),),
+                warnings=(),
+                required_human_approval=True,
+            )
+
+        status = str(getattr(proposal.status, "value", proposal.status))
+        if not proposal.eligible:
+            violations.append(_violation("proposal_not_eligible", "Proposal is not eligible for final approval"))
+        if status in self.BLOCKED_STATUSES:
+            violations.append(_violation("proposal_status_blocked", "Proposal status blocks final approval", {"status": status}))
+        if not proposal.rollback_policy_id or not proposal.rollback_policy_version:
+            violations.append(_violation("missing_rollback_target", "Rollback target is required"))
+        required = set(proposal.required_approvals or ())
+        if "human_promotion_approval" in required and not approval.approved_by:
+            violations.append(_violation("required_approval_missing", "Human final approval is required"))
+        if approval.revoked:
+            violations.append(_violation("approval_revoked", "Approval has been revoked"))
+        if _is_past_iso(approval.expires_at):
+            violations.append(_violation("approval_expired", "Approval has expired"))
+        if approval.proposal_id != proposal.proposal_id:
+            violations.append(_violation("approval_proposal_mismatch", "Approval does not match proposal"))
+        if approval.policy_id != proposal.policy_id or approval.policy_version != proposal.policy_version:
+            violations.append(_violation("approval_policy_mismatch", "Approval does not match proposal policy"))
+        if not _scope_within(approval.allowed_campaign_ids, proposal.allowed_campaign_ids):
+            violations.append(_violation("scope_exceeds_proposal", "Campaign approval scope exceeds proposal scope"))
+        if not _scope_within(approval.allowed_objective_levels, proposal.allowed_objective_levels):
+            violations.append(_violation("scope_exceeds_proposal", "Objective approval scope exceeds proposal scope"))
+        if approval.max_live_weight > proposal.max_live_weight:
+            violations.append(_violation(
+                "weight_above_proposal_cap",
+                "Requested live weight exceeds proposal cap",
+                {
+                    "requested": approval.max_live_weight,
+                    "cap": proposal.max_live_weight,
+                },
+            ))
+        if approval.max_top1_change_rate > proposal.max_top1_change_rate:
+            violations.append(_violation(
+                "top1_change_rate_above_proposal_cap",
+                "Requested top1 change rate exceeds proposal cap",
+                {
+                    "requested": approval.max_top1_change_rate,
+                    "cap": proposal.max_top1_change_rate,
+                },
+            ))
+        if not approval.rollback_policy_id or not approval.rollback_policy_version:
+            violations.append(_violation("approval_missing_rollback_target", "Approval rollback target is required"))
+        if (
+            approval.rollback_policy_id != proposal.rollback_policy_id
+            or approval.rollback_policy_version != proposal.rollback_policy_version
+        ):
+            violations.append(_violation("approval_rollback_mismatch", "Approval rollback target does not match proposal"))
+        if registry is not None:
+            entry = registry.get(proposal.policy_id, proposal.policy_version)
+            rollback = registry.get(proposal.rollback_policy_id or "", proposal.rollback_policy_version or "")
+            if entry is None:
+                violations.append(_violation("policy_lineage_invalid", "Policy is missing from registry"))
+            else:
+                if not entry.approved_for_live_canary:
+                    violations.append(_violation("policy_not_approved_for_live_canary", "Policy must be approved for live canary first"))
+                if (
+                    entry.parent_policy_id != proposal.source_policy_id
+                    or entry.parent_policy_version != proposal.source_policy_version
+                ):
+                    violations.append(_violation("policy_lineage_invalid", "Policy lineage does not match proposal"))
+            if rollback is None:
+                violations.append(_violation("rollback_target_missing_from_registry", "Rollback target is missing from registry"))
+        if approval.approval_mode != FinalApprovalMode.MANUAL.value:
+            warnings.append(_warning("non_manual_final_approval", "Non-manual final approvals still require audit visibility"))
+        return FinalApprovalGuardResult(
+            allowed=not violations,
+            violations=tuple(violations),
+            warnings=tuple(warnings),
+            required_human_approval=True,
+        )
+
+
+@dataclass(frozen=True)
 class PolicyEvolutionReport:
     """Review report for one policy-evolution plan."""
 
@@ -1694,6 +1917,7 @@ class PolicyEvolutionManager:
         canary_promotion_guard: CanaryPromotionGuard | None = None,
         canary_approval_guard: CanaryApprovalGuard | None = None,
         final_promotion_guard: FinalPromotionGuard | None = None,
+        final_approval_guard: FinalApprovalGuard | None = None,
     ) -> None:
         self.guard = guard or EvolutionGuard()
         self.shadow_promotion_guard = shadow_promotion_guard or ShadowPromotionGuard()
@@ -1701,6 +1925,7 @@ class PolicyEvolutionManager:
         self.canary_promotion_guard = canary_promotion_guard or CanaryPromotionGuard()
         self.canary_approval_guard = canary_approval_guard or CanaryApprovalGuard()
         self.final_promotion_guard = final_promotion_guard or FinalPromotionGuard()
+        self.final_approval_guard = final_approval_guard or FinalApprovalGuard()
 
     def create_evolution_plan(
         self,
@@ -2256,6 +2481,75 @@ class PolicyEvolutionManager:
             f"final promotion proposal blocked:{proposal.proposal_id}",
         )
 
+    def evaluate_final_approval_guard(
+        self,
+        proposal: FinalPromotionProposal | None,
+        approval_record: FinalApprovalRecord,
+        registry: PolicyVersionRegistry | None = None,
+    ) -> FinalApprovalGuardResult:
+        return self.final_approval_guard.evaluate(proposal, approval_record, registry)
+
+    def approve_final_promotion(
+        self,
+        proposal: FinalPromotionProposal | None,
+        approval_record: FinalApprovalRecord,
+        *,
+        registry: PolicyVersionRegistry | None = None,
+    ) -> tuple[FinalPromotionProposal | None, PolicyVersionRegistry | None, FinalApprovalGuardResult]:
+        guard = self.evaluate_final_approval_guard(proposal, approval_record, registry)
+        if not guard.allowed or proposal is None:
+            return proposal, registry, guard
+        approved = replace(
+            proposal,
+            status=FinalPromotionProposalStatus.APPROVED.value,
+            updated_at=_now_iso(),
+        )
+        if registry is not None:
+            registry = registry.mark_final_approved(
+                approved.policy_id,
+                approved.policy_version,
+                approval_record,
+            )
+        return approved, registry, guard
+
+    def revoke_final_approval(
+        self,
+        registry: PolicyVersionRegistry,
+        policy_id: str,
+        policy_version: str,
+        reason: str,
+    ) -> PolicyVersionRegistry:
+        return registry.revoke_final_approval(policy_id, policy_version, reason)
+
+    def get_active_safe_soft_policy(
+        self,
+        registry: PolicyVersionRegistry,
+        *,
+        campaign_id: str | None = None,
+        objective_level: str | None = None,
+    ) -> dict[str, Any] | None:
+        for entry in sorted(registry.entries, key=lambda item: item.registered_at, reverse=True):
+            if not entry.approved_for_safe_soft:
+                continue
+            metadata = dict(entry.final_approval_metadata or {})
+            if not metadata or metadata.get("revoked"):
+                continue
+            if _is_past_iso(metadata.get("approval_expiration")):
+                continue
+            scope = dict(metadata.get("approved_scope") or {})
+            if campaign_id and not _scope_contains(campaign_id, tuple(scope.get("campaign_ids") or ())):
+                continue
+            if objective_level and not _scope_contains(objective_level, tuple(scope.get("objective_levels") or ())):
+                continue
+            return {
+                "policy_id": entry.policy_id,
+                "policy_version": entry.policy_version,
+                "approved_for_safe_soft": True,
+                "final_approval_metadata": metadata,
+                "live_selector_activation": False,
+            }
+        return None
+
     def attach_shadow_proposal(
         self,
         plan: PolicyEvolutionPlan,
@@ -2699,6 +2993,10 @@ def _scope_within(requested: tuple[str, ...], allowed: tuple[str, ...]) -> bool:
     if not allowed:
         return False
     return set(requested).issubset(set(allowed))
+
+
+def _scope_contains(value: str, allowed: tuple[str, ...]) -> bool:
+    return not allowed or value in set(allowed)
 
 
 def _canary_result_passes_promotion_thresholds(result: CanaryRunResult) -> bool:
