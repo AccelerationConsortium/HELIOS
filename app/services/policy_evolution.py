@@ -47,6 +47,7 @@ class PolicyEvolutionRecommendation(StrEnum):
     RUN_OFFLINE_EVAL = "run_offline_eval"
     APPROVE_SHADOW = "approve_shadow"
     APPROVE_CANARY = "approve_canary"
+    PROPOSE_PROMOTION = "propose_promotion"
     PROMOTE = "promote"
     ROLLBACK = "rollback"
     REJECT = "reject"
@@ -119,6 +120,36 @@ class CanaryPromotionProposalStatus(StrEnum):
     APPROVED = "approved"
     REJECTED = "rejected"
     EXPIRED = "expired"
+
+
+class CanaryApprovalMode(StrEnum):
+    """Explicit approval source for bounded canary runs."""
+
+    MANUAL = "manual"
+    CONFIG = "config"
+    TEST = "test"
+
+
+class CanaryRunScheduleStatus(StrEnum):
+    """Lifecycle state for a bounded canary run schedule."""
+
+    SCHEDULED = "scheduled"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+    AUTO_DISABLED = "auto_disabled"
+
+
+class CanaryRunRecommendation(StrEnum):
+    """Recommendation from a completed bounded canary run."""
+
+    CONTINUE_CANARY = "continue_canary"
+    REDUCE_WEIGHT = "reduce_weight"
+    CONTINUE_SHADOW = "continue_shadow"
+    ROLLBACK = "rollback"
+    REJECT_POLICY = "reject_policy"
+    PROPOSE_PROMOTION = "propose_promotion"
 
 
 @dataclass(frozen=True)
@@ -477,6 +508,104 @@ class CanaryPromotionProposal:
 
 
 @dataclass(frozen=True)
+class CanaryApprovalRecord:
+    """Explicit approval for a bounded learned-policy SAFE_SOFT canary run."""
+
+    approval_id: str
+    proposal_id: str
+    policy_id: str
+    policy_version: str
+    approved_by: str
+    approval_mode: CanaryApprovalMode | str
+    approval_reason: str
+    approved_at: str = field(default_factory=lambda: _now_iso())
+    expires_at: str | None = None
+    allowed_campaign_ids: tuple[str, ...] = ()
+    allowed_objective_levels: tuple[str, ...] = ()
+    max_canary_rounds: int = 0
+    max_learned_policy_weight: float = 0.0
+    max_top1_change_rate: float = 0.0
+    auto_disable_enabled: bool = True
+    revoked: bool = False
+    revoked_reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> CanaryApprovalRecord:
+        return cls(
+            approval_id=str(raw.get("approval_id", "")),
+            proposal_id=str(raw.get("proposal_id", "")),
+            policy_id=str(raw.get("policy_id", "")),
+            policy_version=str(raw.get("policy_version", "")),
+            approved_by=str(raw.get("approved_by", "")),
+            approval_mode=raw.get("approval_mode", CanaryApprovalMode.MANUAL),
+            approval_reason=str(raw.get("approval_reason", "")),
+            approved_at=str(raw.get("approved_at") or _now_iso()),
+            expires_at=raw.get("expires_at"),
+            allowed_campaign_ids=tuple(raw.get("allowed_campaign_ids") or ()),
+            allowed_objective_levels=tuple(raw.get("allowed_objective_levels") or ()),
+            max_canary_rounds=int(raw.get("max_canary_rounds") or 0),
+            max_learned_policy_weight=float(raw.get("max_learned_policy_weight") or 0.0),
+            max_top1_change_rate=float(raw.get("max_top1_change_rate") or 0.0),
+            auto_disable_enabled=bool(raw.get("auto_disable_enabled", True)),
+            revoked=bool(raw.get("revoked", False)),
+            revoked_reason=raw.get("revoked_reason"),
+        )
+
+
+@dataclass(frozen=True)
+class CanaryRunSchedule:
+    """Approved bounded SAFE_SOFT canary run schedule."""
+
+    schedule_id: str
+    approval_id: str
+    policy_id: str
+    policy_version: str
+    campaign_allowlist: tuple[str, ...] = ()
+    objective_allowlist: tuple[str, ...] = ()
+    max_rounds: int = 0
+    max_learned_policy_weight: float = 0.0
+    max_top1_change_rate: float = 0.0
+    status: CanaryRunScheduleStatus | str = CanaryRunScheduleStatus.SCHEDULED
+    created_at: str = field(default_factory=lambda: _now_iso())
+    started_at: str | None = None
+    completed_at: str | None = None
+    cancellation_reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+
+@dataclass(frozen=True)
+class CanaryRunResult:
+    """Aggregate result from a bounded SAFE_SOFT canary run."""
+
+    run_id: str
+    schedule_id: str
+    policy_id: str
+    policy_version: str
+    campaign_ids: tuple[str, ...] = ()
+    round_count: int = 0
+    applied_round_count: int = 0
+    top1_changed_count: int = 0
+    top1_change_rate: float = 0.0
+    reward_vs_baseline: float = 0.0
+    reward_vs_safe_influence: float = 0.0
+    backend_failure_rate: float = 0.0
+    constraint_failure_rate: float = 0.0
+    safety_warning_count: int = 0
+    auto_disable_triggered: bool = False
+    auto_disable_reason: str | None = None
+    recommendation: CanaryRunRecommendation | str = CanaryRunRecommendation.CONTINUE_CANARY
+    reasons: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+
+@dataclass(frozen=True)
 class PolicyVersionRegistryEntry:
     """Registered policy version metadata and lineage."""
 
@@ -507,6 +636,9 @@ class PolicyVersionRegistryEntry:
     canary_proposal_status: str | None = None
     canary_eligibility_summary: dict[str, Any] = field(default_factory=dict)
     recommended_canary_scope: dict[str, Any] = field(default_factory=dict)
+    canary_approval_metadata: dict[str, Any] = field(default_factory=dict)
+    canary_run_schedule_metadata: dict[str, Any] = field(default_factory=dict)
+    latest_canary_run_result_summary: dict[str, Any] = field(default_factory=dict)
     registered_at: str = field(default_factory=lambda: _now_iso())
 
 
@@ -676,6 +808,55 @@ class PolicyVersionRegistry:
         )
         return self._replace_entry(updated)
 
+    def mark_canary_approved(
+        self,
+        policy_id: str,
+        policy_version: str,
+        approval: CanaryApprovalRecord,
+    ) -> PolicyVersionRegistry:
+        entry = self.get(policy_id, policy_version)
+        if entry is None:
+            return self
+        updated = replace(
+            entry,
+            approved_for_live_canary=True,
+            approved_for_safe_soft=False,
+            canary_approval_metadata=approval.to_dict(),
+        )
+        return self._replace_entry(updated)
+
+    def register_canary_schedule(
+        self,
+        policy_id: str,
+        policy_version: str,
+        schedule: CanaryRunSchedule,
+    ) -> PolicyVersionRegistry:
+        entry = self.get(policy_id, policy_version)
+        if entry is None:
+            return self
+        updated = replace(
+            entry,
+            canary_run_schedule_metadata=schedule.to_dict(),
+            approved_for_safe_soft=False,
+        )
+        return self._replace_entry(updated)
+
+    def register_canary_result(
+        self,
+        policy_id: str,
+        policy_version: str,
+        result: CanaryRunResult,
+    ) -> PolicyVersionRegistry:
+        entry = self.get(policy_id, policy_version)
+        if entry is None:
+            return self
+        updated = replace(
+            entry,
+            latest_canary_run_result_summary=result.to_dict(),
+            approved_for_safe_soft=False,
+        )
+        return self._replace_entry(updated)
+
     def _replace_entry(self, updated: PolicyVersionRegistryEntry) -> PolicyVersionRegistry:
         entries = tuple(
             updated if (
@@ -732,6 +913,12 @@ class EvolutionGuard:
             violations.append(_violation("bypass_promotion_gates", "Promotion gates cannot be bypassed"))
         if changes.get("auto_apply_space_revision"):
             violations.append(_violation("auto_apply_space_revision", "Space revisions remain approval-only"))
+        if changes.get("learned_policy_hard_veto"):
+            violations.append(_violation("learned_policy_hard_veto", "Learned policies cannot hard-veto live choices"))
+        if changes.get("learned_policy_add_backend"):
+            violations.append(_violation("learned_policy_add_backend", "Learned policies cannot add backends"))
+        if changes.get("learned_policy_override_action") or changes.get("learned_policy_override_objective"):
+            violations.append(_violation("learned_policy_override_action_objective", "Learned policies cannot override action or objective"))
         if changes.get("enable_live_influence_directly") or changes.get("enable_learned_online_influence"):
             violations.append(_violation("enable_live_influence_directly", "Evolution plans cannot enable live influence"))
         if plan.promotion_allowed:
@@ -1116,6 +1303,117 @@ class CanaryPromotionGuard:
 
 
 @dataclass(frozen=True)
+class CanaryApprovalGuardResult:
+    """Guardrail result for explicit canary approvals."""
+
+    allowed: bool
+    violations: tuple[dict[str, Any], ...] = ()
+    warnings: tuple[dict[str, Any], ...] = ()
+    required_human_approval: bool = True
+
+
+class CanaryApprovalGuard:
+    """Validate explicit approval before any bounded SAFE_SOFT canary schedule."""
+
+    BLOCKED_STATUSES = {
+        CanaryPromotionProposalStatus.BLOCKED.value,
+        CanaryPromotionProposalStatus.REJECTED.value,
+        CanaryPromotionProposalStatus.EXPIRED.value,
+    }
+
+    def evaluate(
+        self,
+        proposal: CanaryPromotionProposal | None,
+        approval: CanaryApprovalRecord,
+        registry: PolicyVersionRegistry | None = None,
+    ) -> CanaryApprovalGuardResult:
+        violations: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        if proposal is None:
+            return CanaryApprovalGuardResult(
+                allowed=False,
+                violations=(_violation("missing_canary_proposal", "Canary proposal is required"),),
+                warnings=(),
+                required_human_approval=True,
+            )
+
+        status = str(getattr(proposal.status, "value", proposal.status))
+        if not proposal.eligible:
+            violations.append(_violation("proposal_not_eligible", "Proposal is not eligible for canary approval"))
+        if status in self.BLOCKED_STATUSES:
+            violations.append(_violation("proposal_status_blocked", "Proposal status blocks approval", {"status": status}))
+        if not proposal.rollback_policy_id or not proposal.rollback_policy_version:
+            violations.append(_violation("missing_rollback_target", "Rollback target is required"))
+        required = set(proposal.required_approvals or ())
+        if "human_canary_approval" in required and not approval.approved_by:
+            violations.append(_violation("required_approval_missing", "Human canary approval is required"))
+        if approval.revoked:
+            violations.append(_violation("approval_revoked", "Approval has been revoked"))
+        if _is_past_iso(approval.expires_at):
+            violations.append(_violation("approval_expired", "Approval has expired"))
+        if approval.proposal_id != proposal.proposal_id:
+            violations.append(_violation("approval_proposal_mismatch", "Approval does not match proposal"))
+        if approval.policy_id != proposal.policy_id or approval.policy_version != proposal.policy_version:
+            violations.append(_violation("approval_policy_mismatch", "Approval does not match proposal policy"))
+        if not _scope_within(approval.allowed_campaign_ids, proposal.allowed_campaign_ids):
+            violations.append(_violation("scope_exceeds_proposal", "Campaign approval scope exceeds proposal scope"))
+        if not _scope_within(approval.allowed_objective_levels, proposal.allowed_objective_levels):
+            violations.append(_violation("scope_exceeds_proposal", "Objective approval scope exceeds proposal scope"))
+        if approval.max_learned_policy_weight > proposal.max_learned_policy_weight:
+            violations.append(_violation(
+                "weight_above_proposal_cap",
+                "Requested learned policy weight exceeds proposal cap",
+                {
+                    "requested": approval.max_learned_policy_weight,
+                    "cap": proposal.max_learned_policy_weight,
+                },
+            ))
+        if approval.max_canary_rounds > proposal.max_canary_rounds:
+            violations.append(_violation(
+                "rounds_above_proposal_cap",
+                "Requested canary rounds exceed proposal cap",
+                {
+                    "requested": approval.max_canary_rounds,
+                    "cap": proposal.max_canary_rounds,
+                },
+            ))
+        if approval.max_top1_change_rate > proposal.max_top1_change_rate:
+            violations.append(_violation(
+                "top1_change_rate_above_proposal_cap",
+                "Requested top1 change rate exceeds proposal cap",
+                {
+                    "requested": approval.max_top1_change_rate,
+                    "cap": proposal.max_top1_change_rate,
+                },
+            ))
+        if registry is not None:
+            entry = registry.get(proposal.policy_id, proposal.policy_version)
+            rollback = registry.get(proposal.rollback_policy_id or "", proposal.rollback_policy_version or "")
+            if entry is None:
+                violations.append(_violation("policy_lineage_invalid", "Policy is missing from registry"))
+            else:
+                if not entry.approved_for_shadow:
+                    violations.append(_violation("policy_not_approved_for_shadow", "Policy must be approved for shadow before canary"))
+                if (
+                    entry.parent_policy_id != proposal.source_policy_id
+                    or entry.parent_policy_version != proposal.source_policy_version
+                ):
+                    violations.append(_violation("policy_lineage_invalid", "Policy lineage does not match proposal"))
+            if rollback is None:
+                violations.append(_violation("rollback_target_missing_from_registry", "Rollback target is missing from registry"))
+        if approval.approval_mode != CanaryApprovalMode.MANUAL.value:
+            warnings.append(_warning("non_manual_canary_approval", "Non-manual canary approvals still require audit visibility"))
+        if approval.auto_disable_enabled is False:
+            warnings.append(_warning("auto_disable_disabled", "Canary approval disabled automatic safety stop"))
+        return CanaryApprovalGuardResult(
+            allowed=not violations,
+            violations=tuple(violations),
+            warnings=tuple(warnings),
+            required_human_approval=True,
+        )
+
+
+@dataclass(frozen=True)
 class PolicyEvolutionReport:
     """Review report for one policy-evolution plan."""
 
@@ -1152,11 +1450,13 @@ class PolicyEvolutionManager:
         shadow_promotion_guard: ShadowPromotionGuard | None = None,
         shadow_approval_guard: ShadowApprovalGuard | None = None,
         canary_promotion_guard: CanaryPromotionGuard | None = None,
+        canary_approval_guard: CanaryApprovalGuard | None = None,
     ) -> None:
         self.guard = guard or EvolutionGuard()
         self.shadow_promotion_guard = shadow_promotion_guard or ShadowPromotionGuard()
         self.shadow_approval_guard = shadow_approval_guard or ShadowApprovalGuard()
         self.canary_promotion_guard = canary_promotion_guard or CanaryPromotionGuard()
+        self.canary_approval_guard = canary_approval_guard or CanaryApprovalGuard()
 
     def create_evolution_plan(
         self,
@@ -1515,6 +1815,93 @@ class PolicyEvolutionManager:
             f"canary proposal blocked:{proposal.proposal_id}",
         )
 
+    def evaluate_canary_approval_guard(
+        self,
+        proposal: CanaryPromotionProposal | None,
+        approval_record: CanaryApprovalRecord,
+        registry: PolicyVersionRegistry | None = None,
+    ) -> CanaryApprovalGuardResult:
+        return self.canary_approval_guard.evaluate(proposal, approval_record, registry)
+
+    def approve_canary_proposal(
+        self,
+        proposal: CanaryPromotionProposal | None,
+        approval_record: CanaryApprovalRecord,
+        *,
+        registry: PolicyVersionRegistry | None = None,
+    ) -> tuple[CanaryPromotionProposal | None, PolicyVersionRegistry | None, CanaryApprovalGuardResult]:
+        guard = self.evaluate_canary_approval_guard(proposal, approval_record, registry)
+        if not guard.allowed or proposal is None:
+            return proposal, registry, guard
+        approved = replace(
+            proposal,
+            status=CanaryPromotionProposalStatus.APPROVED.value,
+            updated_at=_now_iso(),
+        )
+        if registry is not None:
+            registry = registry.mark_canary_approved(
+                approved.policy_id,
+                approved.policy_version,
+                approval_record,
+            )
+        return approved, registry, guard
+
+    def schedule_canary_run(
+        self,
+        approval_record: CanaryApprovalRecord,
+    ) -> CanaryRunSchedule:
+        return CanaryRunSchedule(
+            schedule_id=f"canary-run-{_compact_timestamp()}-{approval_record.policy_id}-{approval_record.policy_version}",
+            approval_id=approval_record.approval_id,
+            policy_id=approval_record.policy_id,
+            policy_version=approval_record.policy_version,
+            campaign_allowlist=approval_record.allowed_campaign_ids,
+            objective_allowlist=approval_record.allowed_objective_levels,
+            max_rounds=approval_record.max_canary_rounds,
+            max_learned_policy_weight=approval_record.max_learned_policy_weight,
+            max_top1_change_rate=approval_record.max_top1_change_rate,
+        )
+
+    def update_canary_run_status(
+        self,
+        schedule: CanaryRunSchedule,
+        status: CanaryRunScheduleStatus | str,
+        reason: str | None = None,
+    ) -> CanaryRunSchedule:
+        value = str(getattr(status, "value", status))
+        return replace(
+            schedule,
+            status=value,
+            started_at=_now_iso() if value == CanaryRunScheduleStatus.RUNNING.value else schedule.started_at,
+            completed_at=_now_iso() if value in {
+                CanaryRunScheduleStatus.COMPLETED.value,
+                CanaryRunScheduleStatus.CANCELLED.value,
+                CanaryRunScheduleStatus.EXPIRED.value,
+                CanaryRunScheduleStatus.AUTO_DISABLED.value,
+            } else schedule.completed_at,
+            cancellation_reason=reason if value in {
+                CanaryRunScheduleStatus.CANCELLED.value,
+                CanaryRunScheduleStatus.AUTO_DISABLED.value,
+            } else schedule.cancellation_reason,
+        )
+
+    def attach_canary_run_result(
+        self,
+        plan: PolicyEvolutionPlan,
+        result: CanaryRunResult,
+    ) -> PolicyEvolutionPlan:
+        if _canary_result_passes_promotion_thresholds(result):
+            return self.update_plan_status(
+                plan,
+                plan.status,
+                f"canary result supports promotion proposal:{result.run_id}",
+            )
+        return self.update_plan_status(
+            plan,
+            plan.status,
+            f"canary result does not support promotion:{result.run_id}",
+        )
+
     def attach_shadow_proposal(
         self,
         plan: PolicyEvolutionPlan,
@@ -1567,6 +1954,8 @@ class PolicyEvolutionManager:
                 return PolicyEvolutionRecommendation.APPROVE_CANARY
             return PolicyEvolutionRecommendation.KEEP_CURRENT
         if str(plan.status) == PolicyEvolutionPlanStatus.CANARY_ELIGIBLE.value:
+            if any("canary result supports promotion proposal" in reason for reason in plan.reasons):
+                return PolicyEvolutionRecommendation.PROPOSE_PROMOTION
             return PolicyEvolutionRecommendation.APPROVE_CANARY
         if str(plan.status) == PolicyEvolutionPlanStatus.PROMOTED.value:
             return PolicyEvolutionRecommendation.KEEP_CURRENT
@@ -1939,6 +2328,29 @@ def _canary_unknown_counterfactual_ground_truth(proposal: CanaryPromotionProposa
     return bool(
         proposal.failure_summary.get("unknown_counterfactual_as_ground_truth")
         or proposal.shadow_result_summary.get("unknown_counterfactual_as_ground_truth")
+    )
+
+
+def _scope_within(requested: tuple[str, ...], allowed: tuple[str, ...]) -> bool:
+    if not requested:
+        return True
+    if not allowed:
+        return False
+    return set(requested).issubset(set(allowed))
+
+
+def _canary_result_passes_promotion_thresholds(result: CanaryRunResult) -> bool:
+    return (
+        str(getattr(result.recommendation, "value", result.recommendation))
+        == CanaryRunRecommendation.PROPOSE_PROMOTION.value
+        and result.round_count > 0
+        and result.applied_round_count > 0
+        and result.safety_warning_count == 0
+        and not result.auto_disable_triggered
+        and result.backend_failure_rate <= 0.05
+        and result.constraint_failure_rate <= 0.05
+        and result.reward_vs_baseline >= 0.0
+        and result.reward_vs_safe_influence >= 0.0
     )
 
 

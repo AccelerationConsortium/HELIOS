@@ -6,8 +6,14 @@ import inspect
 from app.optimization.backend_selection import rank_backends
 import app.services.policy_evolution as policy_evolution
 from app.services.policy_evolution import (
+    CanaryApprovalGuard,
+    CanaryApprovalMode,
+    CanaryApprovalRecord,
     CanaryPromotionGuard,
     CanaryPromotionProposal,
+    CanaryRunRecommendation,
+    CanaryRunResult,
+    CanaryRunScheduleStatus,
     CandidatePolicyArtifact,
     CandidatePolicyTrainingJobStatus,
     CandidatePolicyTrainingMode,
@@ -1103,6 +1109,310 @@ def test_default_backend_behavior_remains_unchanged_after_canary_proposal():
     manager, plan, _artifact, approval, result, registry = _approved_shadow_state()
 
     _ = manager.create_canary_promotion_proposal(plan, result, shadow_approval=approval, registry=registry)
+    after = select_strategy(snapshot, config=PhaseConfig())
+
+    assert after.backend_name == before.backend_name
+    assert after.strategy_trace.selected_backend == before.strategy_trace.selected_backend
+
+
+def _eligible_canary_state():
+    manager, plan, artifact, shadow_approval, shadow_result, registry = _approved_shadow_state()
+    proposal = manager.create_canary_promotion_proposal(
+        plan,
+        shadow_result,
+        shadow_approval=shadow_approval,
+        registry=registry,
+    )
+    registry = registry.register_canary_proposal(artifact.policy_id, artifact.policy_version, proposal)
+    return manager, plan, artifact, proposal, registry
+
+
+def _canary_approval_record(proposal):
+    return CanaryApprovalRecord(
+        approval_id="canary-approval-a",
+        proposal_id=proposal.proposal_id,
+        policy_id=proposal.policy_id,
+        policy_version=proposal.policy_version,
+        approved_by="sissi",
+        approval_mode=CanaryApprovalMode.TEST,
+        approval_reason="test approval for bounded canary run",
+        expires_at="2099-01-01T00:00:00+00:00",
+        allowed_campaign_ids=("replay",),
+        allowed_objective_levels=("performance",),
+        max_canary_rounds=3,
+        max_learned_policy_weight=0.003,
+        max_top1_change_rate=0.2,
+    )
+
+
+def test_canary_approval_record_round_trip():
+    _manager, _plan, _artifact, proposal, _registry = _eligible_canary_state()
+    approval = _canary_approval_record(proposal)
+
+    restored = CanaryApprovalRecord.from_dict(approval.to_dict())
+
+    assert restored.approval_id == approval.approval_id
+    assert restored.approval_mode == "test"
+    assert restored.allowed_campaign_ids == ("replay",)
+    assert restored.max_learned_policy_weight == 0.003
+    assert restored.auto_disable_enabled is True
+
+
+def test_canary_approval_guard_blocks_ineligible_proposal():
+    _manager, _plan, _artifact, proposal, registry = _eligible_canary_state()
+    ineligible = dataclasses.replace(proposal, eligible=False)
+
+    result = CanaryApprovalGuard().evaluate(ineligible, _canary_approval_record(proposal), registry)
+
+    assert result.allowed is False
+    assert "proposal_not_eligible" in {violation["check"] for violation in result.violations}
+
+
+def test_canary_approval_guard_blocks_missing_proposal():
+    _manager, _plan, _artifact, proposal, registry = _eligible_canary_state()
+
+    result = CanaryApprovalGuard().evaluate(None, _canary_approval_record(proposal), registry)
+
+    assert result.allowed is False
+    assert "missing_canary_proposal" in {violation["check"] for violation in result.violations}
+
+
+def test_canary_approval_guard_blocks_expired_or_rejected_proposal():
+    _manager, _plan, _artifact, proposal, registry = _eligible_canary_state()
+    rejected = dataclasses.replace(proposal, status="rejected")
+
+    result = CanaryApprovalGuard().evaluate(rejected, _canary_approval_record(proposal), registry)
+
+    assert result.allowed is False
+    assert "proposal_status_blocked" in {violation["check"] for violation in result.violations}
+
+
+def test_canary_approval_guard_blocks_policy_not_approved_for_shadow():
+    _manager, _plan, artifact, proposal, registry = _eligible_canary_state()
+    entry = registry.get(artifact.policy_id, artifact.policy_version)
+    registry = registry._replace_entry(dataclasses.replace(entry, approved_for_shadow=False))
+
+    result = CanaryApprovalGuard().evaluate(proposal, _canary_approval_record(proposal), registry)
+
+    assert result.allowed is False
+    assert "policy_not_approved_for_shadow" in {violation["check"] for violation in result.violations}
+
+
+def test_canary_approval_guard_blocks_missing_rollback_target():
+    _manager, _plan, _artifact, proposal, registry = _eligible_canary_state()
+    proposal = dataclasses.replace(proposal, rollback_policy_id=None, rollback_policy_version=None)
+
+    result = CanaryApprovalGuard().evaluate(proposal, _canary_approval_record(proposal), registry)
+
+    assert result.allowed is False
+    assert "missing_rollback_target" in {violation["check"] for violation in result.violations}
+
+
+def test_canary_approval_guard_blocks_required_approval_missing():
+    _manager, _plan, _artifact, proposal, registry = _eligible_canary_state()
+    approval = dataclasses.replace(_canary_approval_record(proposal), approved_by="")
+
+    result = CanaryApprovalGuard().evaluate(proposal, approval, registry)
+
+    assert result.allowed is False
+    assert "required_approval_missing" in {violation["check"] for violation in result.violations}
+
+
+def test_canary_approval_guard_blocks_scope_broader_than_proposal():
+    _manager, _plan, _artifact, proposal, registry = _eligible_canary_state()
+    approval = dataclasses.replace(
+        _canary_approval_record(proposal),
+        allowed_campaign_ids=("replay", "unapproved-campaign"),
+    )
+
+    result = CanaryApprovalGuard().evaluate(proposal, approval, registry)
+
+    assert result.allowed is False
+    assert "scope_exceeds_proposal" in {violation["check"] for violation in result.violations}
+
+
+def test_canary_approval_guard_blocks_weight_above_proposal_cap():
+    _manager, _plan, _artifact, proposal, registry = _eligible_canary_state()
+    approval = dataclasses.replace(
+        _canary_approval_record(proposal),
+        max_learned_policy_weight=proposal.max_learned_policy_weight + 0.001,
+    )
+
+    result = CanaryApprovalGuard().evaluate(proposal, approval, registry)
+
+    assert result.allowed is False
+    assert "weight_above_proposal_cap" in {violation["check"] for violation in result.violations}
+
+
+def test_canary_approval_guard_blocks_rounds_above_proposal_cap():
+    _manager, _plan, _artifact, proposal, registry = _eligible_canary_state()
+    approval = dataclasses.replace(
+        _canary_approval_record(proposal),
+        max_canary_rounds=proposal.max_canary_rounds + 1,
+    )
+
+    result = CanaryApprovalGuard().evaluate(proposal, approval, registry)
+
+    assert result.allowed is False
+    assert "rounds_above_proposal_cap" in {violation["check"] for violation in result.violations}
+
+
+def test_registry_sets_approved_for_live_canary_only_with_explicit_approval():
+    manager, _plan, artifact, proposal, registry = _eligible_canary_state()
+    before = registry.get(artifact.policy_id, artifact.policy_version)
+    approval = _canary_approval_record(proposal)
+
+    approved_proposal, updated, guard = manager.approve_canary_proposal(
+        proposal,
+        approval,
+        registry=registry,
+    )
+    after = updated.get(artifact.policy_id, artifact.policy_version)
+
+    assert guard.allowed is True
+    assert approved_proposal.status == "approved"
+    assert before.approved_for_live_canary is False
+    assert after.approved_for_live_canary is True
+    assert after.approved_for_safe_soft is False
+    assert after.canary_approval_metadata["approval_id"] == "canary-approval-a"
+
+
+def test_canary_schedule_lifecycle_transitions():
+    manager, _plan, _artifact, proposal, _registry = _eligible_canary_state()
+    approval = _canary_approval_record(proposal)
+
+    schedule = manager.schedule_canary_run(approval)
+    running = manager.update_canary_run_status(schedule, CanaryRunScheduleStatus.RUNNING)
+    disabled = manager.update_canary_run_status(
+        running,
+        CanaryRunScheduleStatus.AUTO_DISABLED,
+        "safety warning",
+    )
+
+    assert schedule.status == "scheduled"
+    assert schedule.max_rounds == 3
+    assert schedule.max_learned_policy_weight == 0.003
+    assert running.status == "running"
+    assert running.started_at is not None
+    assert disabled.status == "auto_disabled"
+    assert disabled.completed_at is not None
+    assert disabled.cancellation_reason == "safety warning"
+
+
+def test_canary_run_result_attaches_to_evolution_plan():
+    manager, plan, artifact, _proposal, _registry = _eligible_canary_state()
+    result = CanaryRunResult(
+        run_id="canary-run-a",
+        schedule_id="schedule-a",
+        policy_id=artifact.policy_id,
+        policy_version=artifact.policy_version,
+        campaign_ids=("replay",),
+        round_count=5,
+        applied_round_count=5,
+        top1_changed_count=0,
+        top1_change_rate=0.0,
+        reward_vs_baseline=0.1,
+        reward_vs_safe_influence=0.01,
+        backend_failure_rate=0.0,
+        constraint_failure_rate=0.0,
+        safety_warning_count=0,
+        recommendation=CanaryRunRecommendation.PROPOSE_PROMOTION,
+    )
+
+    updated = manager.attach_canary_run_result(dataclasses.replace(plan, status="canary_eligible"), result)
+
+    assert updated.status == "canary_eligible"
+    assert "canary result supports promotion proposal:canary-run-a" in updated.reasons
+
+
+def test_manager_recommends_propose_promotion_only_after_passing_canary_result():
+    manager, plan, artifact, _proposal, _registry = _eligible_canary_state()
+    eligible_plan = dataclasses.replace(plan, status="canary_eligible")
+    weak = CanaryRunResult(
+        run_id="canary-weak",
+        schedule_id="schedule-a",
+        policy_id=artifact.policy_id,
+        policy_version=artifact.policy_version,
+        round_count=5,
+        applied_round_count=5,
+        reward_vs_baseline=-0.1,
+        reward_vs_safe_influence=0.0,
+        backend_failure_rate=0.0,
+        constraint_failure_rate=0.0,
+        safety_warning_count=0,
+        recommendation=CanaryRunRecommendation.PROPOSE_PROMOTION,
+    )
+    strong = dataclasses.replace(weak, run_id="canary-strong", reward_vs_baseline=0.1)
+
+    weak_plan = manager.attach_canary_run_result(eligible_plan, weak)
+    strong_plan = manager.attach_canary_run_result(eligible_plan, strong)
+
+    assert manager.recommend_next_step(eligible_plan) == PolicyEvolutionRecommendation.APPROVE_CANARY
+    assert manager.recommend_next_step(weak_plan) == PolicyEvolutionRecommendation.APPROVE_CANARY
+    assert manager.recommend_next_step(strong_plan) == PolicyEvolutionRecommendation.PROPOSE_PROMOTION
+
+
+def test_no_automatic_final_promotion_after_canary_result():
+    manager, plan, artifact, proposal, registry = _eligible_canary_state()
+    approval = _canary_approval_record(proposal)
+
+    _proposal, registry, _guard = manager.approve_canary_proposal(proposal, approval, registry=registry)
+    schedule = manager.schedule_canary_run(approval)
+    registry = registry.register_canary_schedule(artifact.policy_id, artifact.policy_version, schedule)
+    result = CanaryRunResult(
+        run_id="canary-passing",
+        schedule_id=schedule.schedule_id,
+        policy_id=artifact.policy_id,
+        policy_version=artifact.policy_version,
+        round_count=5,
+        applied_round_count=5,
+        reward_vs_baseline=0.1,
+        reward_vs_safe_influence=0.01,
+        backend_failure_rate=0.0,
+        constraint_failure_rate=0.0,
+        safety_warning_count=0,
+        recommendation=CanaryRunRecommendation.PROPOSE_PROMOTION,
+    )
+    registry = registry.register_canary_result(artifact.policy_id, artifact.policy_version, result)
+    updated_plan = manager.attach_canary_run_result(dataclasses.replace(plan, status="canary_eligible"), result)
+    entry = registry.get(artifact.policy_id, artifact.policy_version)
+
+    assert updated_plan.status == "canary_eligible"
+    assert manager.recommend_next_step(updated_plan) == PolicyEvolutionRecommendation.PROPOSE_PROMOTION
+    assert entry.approved_for_live_canary is True
+    assert entry.approved_for_safe_soft is False
+    assert entry.latest_canary_run_result_summary["run_id"] == "canary-passing"
+
+
+def test_learned_policy_canary_constraints_are_guarded():
+    plan = _safe_plan(
+        proposed_changes={
+            "learned_policy_hard_veto": True,
+            "learned_policy_add_backend": True,
+            "learned_policy_override_action": True,
+            "learned_policy_override_objective": True,
+            "auto_apply_space_revision": True,
+        },
+    )
+
+    result = EvolutionGuard().evaluate(plan)
+
+    checks = {violation["check"] for violation in result.violations}
+    assert result.allowed is False
+    assert {
+        "learned_policy_hard_veto",
+        "learned_policy_add_backend",
+        "learned_policy_override_action_objective",
+        "auto_apply_space_revision",
+    } <= checks
+
+
+def test_default_backend_behavior_remains_unchanged_without_explicit_canary_approval():
+    snapshot = all_replay_scenarios()[2]
+    before = select_strategy(snapshot, config=PhaseConfig())
+    manager, plan, _artifact, proposal, _registry = _eligible_canary_state()
+
+    _ = manager.attach_canary_proposal(plan, proposal)
     after = select_strategy(snapshot, config=PhaseConfig())
 
     assert after.backend_name == before.backend_name
