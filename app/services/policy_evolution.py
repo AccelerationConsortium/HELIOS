@@ -34,6 +34,7 @@ class PolicyEvolutionPlanStatus(StrEnum):
     SHADOW_ELIGIBLE = "shadow_eligible"
     CANARY_ELIGIBLE = "canary_eligible"
     PROMOTION_ELIGIBLE = "promotion_eligible"
+    WEIGHT_TUNING_ELIGIBLE = "weight_tuning_eligible"
     PROMOTED = "promoted"
     REJECTED = "rejected"
     ROLLED_BACK = "rolled_back"
@@ -50,6 +51,7 @@ class PolicyEvolutionRecommendation(StrEnum):
     APPROVE_CANARY = "approve_canary"
     PROPOSE_PROMOTION = "propose_promotion"
     APPROVE_PROMOTION = "approve_promotion"
+    APPROVE_WEIGHT_TUNING = "approve_weight_tuning"
     PROMOTE = "promote"
     ROLLBACK = "rollback"
     REJECT = "reject"
@@ -171,6 +173,48 @@ class FinalApprovalMode(StrEnum):
     MANUAL = "manual"
     CONFIG = "config"
     TEST = "test"
+
+
+class PolicyWeightTuningTarget(StrEnum):
+    """Policy influence weight knobs that can be proposed for review."""
+
+    ACTION_POLICY_MAX_WEIGHT = "action_policy_max_weight"
+    BACKEND_MEMORY_MAX_WEIGHT = "backend_memory_max_weight"
+    BANDIT_MAX_WEIGHT = "bandit_max_weight"
+    LEARNED_POLICY_MAX_WEIGHT = "learned_policy_max_weight"
+    TRANSITION_GUARD_PENALTY = "transition_guard_penalty"
+    TOTAL_INFLUENCE_CAP = "total_influence_cap"
+
+
+class WeightTuningEvidenceSource(StrEnum):
+    """Evidence sources for proposal-only weight tuning."""
+
+    OFFLINE_EVAL = "offline_eval"
+    SHADOW_RUN = "shadow_run"
+    CANARY_RUN = "canary_run"
+    FINAL_APPROVAL = "final_approval"
+    SAFETY_REPORT = "safety_report"
+    REWARD_REPORT = "reward_report"
+    FAILURE_REPORT = "failure_report"
+
+
+class PolicyWeightTuningRiskLevel(StrEnum):
+    """Risk label for a proposed weight change."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class PolicyWeightTuningProposalStatus(StrEnum):
+    """Lifecycle state for a policy weight tuning proposal."""
+
+    PROPOSED = "proposed"
+    ELIGIBLE = "eligible"
+    BLOCKED = "blocked"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
 
 
 @dataclass(frozen=True)
@@ -745,6 +789,95 @@ class FinalApprovalRecord:
 
 
 @dataclass(frozen=True)
+class WeightTuningEvidence:
+    """Metric evidence used to justify a proposal-only weight adjustment."""
+
+    evidence_id: str
+    source_type: WeightTuningEvidenceSource | str
+    metric_name: str
+    baseline_value: float | None = None
+    candidate_value: float | None = None
+    delta: float | None = None
+    confidence: float = 0.0
+    counterfactual_label: str = "observed_outcome"
+    notes: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> WeightTuningEvidence:
+        return cls(
+            evidence_id=str(raw.get("evidence_id", "")),
+            source_type=raw.get("source_type", WeightTuningEvidenceSource.OFFLINE_EVAL),
+            metric_name=str(raw.get("metric_name", "")),
+            baseline_value=_optional_float(raw.get("baseline_value")),
+            candidate_value=_optional_float(raw.get("candidate_value")),
+            delta=_optional_float(raw.get("delta")),
+            confidence=float(raw.get("confidence") or 0.0),
+            counterfactual_label=str(raw.get("counterfactual_label") or "observed_outcome"),
+            notes=str(raw.get("notes") or ""),
+        )
+
+
+@dataclass(frozen=True)
+class PolicyWeightTuningProposal:
+    """Proposal-only review record for influence weight changes."""
+
+    proposal_id: str
+    policy_id: str
+    policy_version: str
+    tuning_target: PolicyWeightTuningTarget | str
+    current_weight: float
+    proposed_weight: float
+    max_allowed_weight: float
+    delta: float
+    evidence: tuple[WeightTuningEvidence, ...] = ()
+    evidence_summary: dict[str, Any] = field(default_factory=dict)
+    risk_level: PolicyWeightTuningRiskLevel | str = PolicyWeightTuningRiskLevel.MEDIUM
+    expected_effect: str = ""
+    rollback_policy_id: str | None = None
+    rollback_policy_version: str | None = None
+    requires_human_approval: bool = True
+    eligible: bool = False
+    eligibility_reasons: tuple[str, ...] = ()
+    status: PolicyWeightTuningProposalStatus | str = PolicyWeightTuningProposalStatus.PROPOSED
+    created_at: str = field(default_factory=lambda: _now_iso())
+    updated_at: str = field(default_factory=lambda: _now_iso())
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> PolicyWeightTuningProposal:
+        return cls(
+            proposal_id=str(raw.get("proposal_id", "")),
+            policy_id=str(raw.get("policy_id", "")),
+            policy_version=str(raw.get("policy_version", "")),
+            tuning_target=raw.get("tuning_target", PolicyWeightTuningTarget.LEARNED_POLICY_MAX_WEIGHT),
+            current_weight=float(raw.get("current_weight") or 0.0),
+            proposed_weight=float(raw.get("proposed_weight") or 0.0),
+            max_allowed_weight=float(raw.get("max_allowed_weight") or 0.0),
+            delta=float(raw.get("delta") or 0.0),
+            evidence=tuple(
+                item if isinstance(item, WeightTuningEvidence) else WeightTuningEvidence.from_dict(dict(item))
+                for item in (raw.get("evidence") or ())
+            ),
+            evidence_summary=dict(raw.get("evidence_summary") or {}),
+            risk_level=raw.get("risk_level", PolicyWeightTuningRiskLevel.MEDIUM),
+            expected_effect=str(raw.get("expected_effect") or ""),
+            rollback_policy_id=raw.get("rollback_policy_id"),
+            rollback_policy_version=raw.get("rollback_policy_version"),
+            requires_human_approval=bool(raw.get("requires_human_approval", True)),
+            eligible=bool(raw.get("eligible", False)),
+            eligibility_reasons=tuple(raw.get("eligibility_reasons") or ()),
+            status=raw.get("status", PolicyWeightTuningProposalStatus.PROPOSED),
+            created_at=str(raw.get("created_at") or _now_iso()),
+            updated_at=str(raw.get("updated_at") or _now_iso()),
+        )
+
+
+@dataclass(frozen=True)
 class PolicyVersionRegistryEntry:
     """Registered policy version metadata and lineage."""
 
@@ -785,6 +918,12 @@ class PolicyVersionRegistryEntry:
     recommended_promotion_scope: dict[str, Any] = field(default_factory=dict)
     recommended_live_weight: float = 0.0
     final_approval_metadata: dict[str, Any] = field(default_factory=dict)
+    weight_tuning_proposed: bool = False
+    weight_tuning_proposal_id: str | None = None
+    weight_tuning_status: str | None = None
+    current_weights: dict[str, float] = field(default_factory=dict)
+    recommended_weights: dict[str, float] = field(default_factory=dict)
+    tuning_eligibility_summary: dict[str, Any] = field(default_factory=dict)
     registered_at: str = field(default_factory=lambda: _now_iso())
 
 
@@ -1084,6 +1223,36 @@ class PolicyVersionRegistry:
             entry,
             approved_for_safe_soft=False,
             final_approval_metadata=metadata,
+        )
+        return self._replace_entry(updated)
+
+    def register_weight_tuning_proposal(
+        self,
+        policy_id: str,
+        policy_version: str,
+        proposal: PolicyWeightTuningProposal,
+    ) -> PolicyVersionRegistry:
+        entry = self.get(policy_id, policy_version)
+        if entry is None:
+            return self
+        target = str(getattr(proposal.tuning_target, "value", proposal.tuning_target))
+        current = dict(entry.current_weights or {})
+        recommended = dict(entry.recommended_weights or {})
+        current[target] = proposal.current_weight
+        recommended[target] = proposal.proposed_weight
+        updated = replace(
+            entry,
+            weight_tuning_proposed=True,
+            weight_tuning_proposal_id=proposal.proposal_id,
+            weight_tuning_status=str(getattr(proposal.status, "value", proposal.status)),
+            current_weights=current,
+            recommended_weights=recommended,
+            tuning_eligibility_summary={
+                "eligible": proposal.eligible,
+                "eligibility_reasons": proposal.eligibility_reasons,
+                "risk_level": str(getattr(proposal.risk_level, "value", proposal.risk_level)),
+                "requires_human_approval": proposal.requires_human_approval,
+            },
         )
         return self._replace_entry(updated)
 
@@ -1879,6 +2048,82 @@ class FinalApprovalGuard:
 
 
 @dataclass(frozen=True)
+class PolicyWeightTuningGuardResult:
+    """Guardrail result for policy weight tuning proposals."""
+
+    allowed: bool
+    violations: tuple[dict[str, Any], ...] = ()
+    warnings: tuple[dict[str, Any], ...] = ()
+    required_human_approval: bool = True
+    recommended_safe_weight: float = 0.0
+
+
+class PolicyWeightTuningGuard:
+    """Validate proposal-only policy weight adjustments."""
+
+    def evaluate(
+        self,
+        proposal: PolicyWeightTuningProposal,
+        *,
+        registry: PolicyVersionRegistry | None = None,
+    ) -> PolicyWeightTuningGuardResult:
+        violations: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        target = str(getattr(proposal.tuning_target, "value", proposal.tuning_target))
+        increasing = proposal.proposed_weight > proposal.current_weight
+
+        if proposal.proposed_weight > proposal.max_allowed_weight:
+            violations.append(_violation(
+                "weight_above_max_allowed",
+                "Proposed weight exceeds max allowed weight",
+                {
+                    "proposed_weight": proposal.proposed_weight,
+                    "max_allowed_weight": proposal.max_allowed_weight,
+                },
+            ))
+        if proposal.proposed_weight < 0:
+            violations.append(_violation("negative_weight", "Proposed weight cannot be negative"))
+        if not proposal.rollback_policy_id or not proposal.rollback_policy_version:
+            violations.append(_violation("missing_rollback_target", "Rollback target is required"))
+        if proposal.evidence_summary.get("alter_hard_safety_gates") or proposal.evidence_summary.get("lower_approval_requirements"):
+            violations.append(_violation("safety_or_approval_gate_change", "Weight tuning cannot alter safety gates or approval requirements"))
+        if proposal.evidence_summary.get("auto_apply_space_revision"):
+            violations.append(_violation("auto_apply_space_revision", "Weight tuning cannot auto-apply space revisions"))
+        if _weight_unknown_counterfactual_primary_evidence(proposal):
+            violations.append(_violation("unknown_counterfactual_primary_evidence", "Unknown counterfactual cannot be primary tuning evidence"))
+        if _evidence_metric_increased(proposal.evidence, "safety_warning"):
+            violations.append(_violation("safety_warnings_increased", "Safety warnings increased in tuning evidence"))
+        if _evidence_metric_increased(proposal.evidence, "backend_failure"):
+            violations.append(_violation("backend_failure_rate_increased", "Backend failure rate increased in tuning evidence"))
+        if _evidence_metric_increased(proposal.evidence, "constraint_failure"):
+            violations.append(_violation("constraint_failure_rate_increased", "Constraint failure rate increased in tuning evidence"))
+        if (
+            target == PolicyWeightTuningTarget.LEARNED_POLICY_MAX_WEIGHT.value
+            and increasing
+        ):
+            entry = registry.get(proposal.policy_id, proposal.policy_version) if registry is not None else None
+            if entry is None or not entry.approved_for_safe_soft:
+                violations.append(_violation("learned_weight_requires_safe_soft_approval", "Learned policy weight increase requires approved_for_safe_soft"))
+        if (
+            target == PolicyWeightTuningTarget.BANDIT_MAX_WEIGHT.value
+            and increasing
+            and not _has_calibration_evidence(proposal.evidence)
+        ):
+            violations.append(_violation("bandit_increase_requires_calibration", "Bandit weight increase requires calibration evidence"))
+        if proposal.delta > 0:
+            warnings.append(_warning("weight_increase_requires_approval", "Weight increases remain approval-only and must not auto-apply"))
+
+        recommended = min(max(proposal.proposed_weight, 0.0), max(proposal.max_allowed_weight, 0.0))
+        return PolicyWeightTuningGuardResult(
+            allowed=not violations,
+            violations=tuple(violations),
+            warnings=tuple(warnings),
+            required_human_approval=True,
+            recommended_safe_weight=recommended,
+        )
+
+
+@dataclass(frozen=True)
 class PolicyEvolutionReport:
     """Review report for one policy-evolution plan."""
 
@@ -1918,6 +2163,7 @@ class PolicyEvolutionManager:
         canary_approval_guard: CanaryApprovalGuard | None = None,
         final_promotion_guard: FinalPromotionGuard | None = None,
         final_approval_guard: FinalApprovalGuard | None = None,
+        weight_tuning_guard: PolicyWeightTuningGuard | None = None,
     ) -> None:
         self.guard = guard or EvolutionGuard()
         self.shadow_promotion_guard = shadow_promotion_guard or ShadowPromotionGuard()
@@ -1926,6 +2172,7 @@ class PolicyEvolutionManager:
         self.canary_approval_guard = canary_approval_guard or CanaryApprovalGuard()
         self.final_promotion_guard = final_promotion_guard or FinalPromotionGuard()
         self.final_approval_guard = final_approval_guard or FinalApprovalGuard()
+        self.weight_tuning_guard = weight_tuning_guard or PolicyWeightTuningGuard()
 
     def create_evolution_plan(
         self,
@@ -2550,6 +2797,84 @@ class PolicyEvolutionManager:
             }
         return None
 
+    def create_weight_tuning_proposal(
+        self,
+        policy: PolicyVersionRegistryEntry,
+        target: PolicyWeightTuningTarget | str,
+        current_weight: float,
+        proposed_weight: float,
+        evidence: tuple[WeightTuningEvidence, ...] | list[WeightTuningEvidence],
+        *,
+        max_allowed_weight: float | None = None,
+        expected_effect: str = "",
+        evidence_summary: dict[str, Any] | None = None,
+        registry: PolicyVersionRegistry | None = None,
+    ) -> PolicyWeightTuningProposal:
+        target_value = str(getattr(target, "value", target))
+        evidence_tuple = tuple(evidence or ())
+        max_weight = float(max_allowed_weight if max_allowed_weight is not None else _default_weight_cap(target_value))
+        delta = float(proposed_weight) - float(current_weight)
+        proposal = PolicyWeightTuningProposal(
+            proposal_id=f"weight-tuning-{_compact_timestamp()}-{policy.policy_id}-{policy.policy_version}-{target_value}",
+            policy_id=policy.policy_id,
+            policy_version=policy.policy_version,
+            tuning_target=target_value,
+            current_weight=float(current_weight),
+            proposed_weight=float(proposed_weight),
+            max_allowed_weight=max_weight,
+            delta=delta,
+            evidence=evidence_tuple,
+            evidence_summary=dict(evidence_summary or _weight_evidence_summary(evidence_tuple)),
+            risk_level=_weight_risk_level(delta, proposed_weight, max_weight),
+            expected_effect=expected_effect,
+            rollback_policy_id=(policy.rollback_target or (None, None))[0],
+            rollback_policy_version=(policy.rollback_target or (None, None))[1],
+            requires_human_approval=True,
+            eligible=bool(evidence_tuple),
+            eligibility_reasons=("evidence available; proposal requires explicit approval",) if evidence_tuple else (),
+        )
+        guard = self.evaluate_weight_tuning_guard(proposal, registry=registry)
+        return replace(
+            proposal,
+            status=(
+                PolicyWeightTuningProposalStatus.ELIGIBLE.value
+                if guard.allowed else PolicyWeightTuningProposalStatus.BLOCKED.value
+            ),
+            eligible=guard.allowed and proposal.eligible,
+            eligibility_reasons=tuple((
+                *proposal.eligibility_reasons,
+                *tuple(v["check"] for v in guard.violations),
+            )),
+            proposed_weight=guard.recommended_safe_weight,
+            updated_at=_now_iso(),
+        )
+
+    def evaluate_weight_tuning_guard(
+        self,
+        proposal: PolicyWeightTuningProposal,
+        *,
+        registry: PolicyVersionRegistry | None = None,
+    ) -> PolicyWeightTuningGuardResult:
+        return self.weight_tuning_guard.evaluate(proposal, registry=registry)
+
+    def attach_weight_tuning_proposal(
+        self,
+        plan: PolicyEvolutionPlan,
+        proposal: PolicyWeightTuningProposal,
+    ) -> PolicyEvolutionPlan:
+        status = str(getattr(proposal.status, "value", proposal.status))
+        if status == PolicyWeightTuningProposalStatus.ELIGIBLE.value and proposal.eligible:
+            return self.update_plan_status(
+                plan,
+                PolicyEvolutionPlanStatus.WEIGHT_TUNING_ELIGIBLE,
+                f"weight tuning proposal eligible:{proposal.proposal_id}",
+            )
+        return self.update_plan_status(
+            plan,
+            plan.status,
+            f"weight tuning proposal blocked:{proposal.proposal_id}",
+        )
+
     def attach_shadow_proposal(
         self,
         plan: PolicyEvolutionPlan,
@@ -2607,6 +2932,8 @@ class PolicyEvolutionManager:
             return PolicyEvolutionRecommendation.APPROVE_CANARY
         if str(plan.status) == PolicyEvolutionPlanStatus.PROMOTION_ELIGIBLE.value:
             return PolicyEvolutionRecommendation.APPROVE_PROMOTION
+        if str(plan.status) == PolicyEvolutionPlanStatus.WEIGHT_TUNING_ELIGIBLE.value:
+            return PolicyEvolutionRecommendation.APPROVE_WEIGHT_TUNING
         if str(plan.status) == PolicyEvolutionPlanStatus.PROMOTED.value:
             return PolicyEvolutionRecommendation.KEEP_CURRENT
         return PolicyEvolutionRecommendation.KEEP_CURRENT
@@ -2997,6 +3324,62 @@ def _scope_within(requested: tuple[str, ...], allowed: tuple[str, ...]) -> bool:
 
 def _scope_contains(value: str, allowed: tuple[str, ...]) -> bool:
     return not allowed or value in set(allowed)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def _default_weight_cap(target: str) -> float:
+    if target == PolicyWeightTuningTarget.LEARNED_POLICY_MAX_WEIGHT.value:
+        return 0.005
+    if target == PolicyWeightTuningTarget.BANDIT_MAX_WEIGHT.value:
+        return 0.01
+    if target == PolicyWeightTuningTarget.TOTAL_INFLUENCE_CAP.value:
+        return 0.05
+    return 0.03
+
+
+def _weight_evidence_summary(evidence: tuple[WeightTuningEvidence, ...]) -> dict[str, Any]:
+    return {
+        "evidence_count": len(evidence),
+        "source_types": tuple(str(getattr(item.source_type, "value", item.source_type)) for item in evidence),
+        "metric_names": tuple(item.metric_name for item in evidence),
+        "primary_improvement_evidence": "observed_or_replay_reward",
+    }
+
+
+def _weight_risk_level(delta: float, proposed_weight: float, max_allowed_weight: float) -> str:
+    if delta <= 0:
+        return PolicyWeightTuningRiskLevel.LOW.value
+    if max_allowed_weight > 0 and proposed_weight >= max_allowed_weight:
+        return PolicyWeightTuningRiskLevel.HIGH.value
+    return PolicyWeightTuningRiskLevel.MEDIUM.value
+
+
+def _has_calibration_evidence(evidence: tuple[WeightTuningEvidence, ...]) -> bool:
+    return any("calibration" in item.metric_name for item in evidence)
+
+
+def _evidence_metric_increased(evidence: tuple[WeightTuningEvidence, ...], metric_fragment: str) -> bool:
+    for item in evidence:
+        if metric_fragment not in item.metric_name:
+            continue
+        delta = item.delta
+        if delta is None and item.baseline_value is not None and item.candidate_value is not None:
+            delta = item.candidate_value - item.baseline_value
+        if delta is not None and delta > 0:
+            return True
+    return False
+
+
+def _weight_unknown_counterfactual_primary_evidence(proposal: PolicyWeightTuningProposal) -> bool:
+    primary = str(proposal.evidence_summary.get("primary_improvement_evidence") or "")
+    if primary == "unknown_counterfactual":
+        return True
+    return any(item.counterfactual_label == "unknown_counterfactual" and item.confidence >= 0.8 for item in proposal.evidence)
 
 
 def _canary_result_passes_promotion_thresholds(result: CanaryRunResult) -> bool:

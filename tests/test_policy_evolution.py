@@ -27,6 +27,9 @@ from app.services.policy_evolution import (
     PolicyEvolutionPlan,
     PolicyEvolutionPlanStatus,
     PolicyEvolutionRecommendation,
+    PolicyWeightTuningGuard,
+    PolicyWeightTuningProposal,
+    PolicyWeightTuningTarget,
     PolicyEvolutionTrigger,
     PolicyEvolutionTriggerType,
     PolicyAutoTrainer,
@@ -41,6 +44,8 @@ from app.services.policy_evolution import (
     ShadowRunResult,
     ShadowRunScheduleStatus,
     TrainingGuard,
+    WeightTuningEvidence,
+    WeightTuningEvidenceSource,
 )
 from app.services.learned_policy import (
     PolicyDataset,
@@ -1972,3 +1977,233 @@ def test_default_backend_behavior_remains_unchanged_after_final_approval_metadat
 
     assert after.backend_name == before.backend_name
     assert after.strategy_trace.selected_backend == before.strategy_trace.selected_backend
+
+
+def _approved_safe_soft_state():
+    manager, plan, artifact, proposal, registry = _eligible_final_promotion_state()
+    _proposal, registry, _guard = manager.approve_final_promotion(
+        proposal,
+        _final_approval_record(proposal),
+        registry=registry,
+    )
+    return manager, plan, artifact, registry
+
+
+def _reward_evidence(metric_name="reward_delta", delta=0.1, confidence=0.9):
+    return WeightTuningEvidence(
+        evidence_id=f"evidence-{metric_name}",
+        source_type=WeightTuningEvidenceSource.REWARD_REPORT,
+        metric_name=metric_name,
+        baseline_value=0.0,
+        candidate_value=delta,
+        delta=delta,
+        confidence=confidence,
+        counterfactual_label="observed_outcome",
+        notes="test evidence",
+    )
+
+
+def _weight_tuning_proposal(**kwargs):
+    manager, _plan, artifact, registry = _approved_safe_soft_state()
+    entry = registry.get(artifact.policy_id, artifact.policy_version)
+    proposal = manager.create_weight_tuning_proposal(
+        entry,
+        kwargs.pop("target", PolicyWeightTuningTarget.LEARNED_POLICY_MAX_WEIGHT),
+        kwargs.pop("current_weight", 0.002),
+        kwargs.pop("proposed_weight", 0.003),
+        kwargs.pop("evidence", (_reward_evidence(),)),
+        registry=kwargs.pop("registry", registry),
+        **kwargs,
+    )
+    return manager, artifact, proposal, registry
+
+
+def test_weight_tuning_proposal_round_trip_serialization():
+    _manager, artifact, proposal, _registry = _weight_tuning_proposal()
+
+    restored = PolicyWeightTuningProposal.from_dict(proposal.to_dict())
+
+    assert proposal.status == "eligible"
+    assert restored.proposal_id == proposal.proposal_id
+    assert restored.policy_id == artifact.policy_id
+    assert restored.tuning_target == "learned_policy_max_weight"
+    assert restored.evidence[0].metric_name == "reward_delta"
+    assert restored.requires_human_approval is True
+
+
+def test_weight_tuning_guard_blocks_weight_above_max_cap():
+    _manager, _artifact, proposal, registry = _weight_tuning_proposal(
+        proposed_weight=0.02,
+        max_allowed_weight=0.005,
+    )
+    proposal = dataclasses.replace(proposal, proposed_weight=0.02)
+    guard = PolicyWeightTuningGuard().evaluate(proposal, registry=registry)
+
+    assert guard.allowed is False
+    assert "weight_above_max_allowed" in {violation["check"] for violation in guard.violations}
+
+
+def test_weight_tuning_guard_blocks_negative_weight():
+    _manager, _artifact, proposal, registry = _weight_tuning_proposal(
+        current_weight=0.002,
+        proposed_weight=-0.001,
+    )
+    proposal = dataclasses.replace(proposal, proposed_weight=-0.001)
+    guard = PolicyWeightTuningGuard().evaluate(proposal, registry=registry)
+
+    assert guard.allowed is False
+    assert "negative_weight" in {violation["check"] for violation in guard.violations}
+
+
+def test_weight_tuning_guard_blocks_learned_increase_without_safe_soft_approval():
+    manager, _plan, artifact, _approval, _result, registry = _approved_canary_state()
+    entry = registry.get(artifact.policy_id, artifact.policy_version)
+    proposal = manager.create_weight_tuning_proposal(
+        entry,
+        PolicyWeightTuningTarget.LEARNED_POLICY_MAX_WEIGHT,
+        0.001,
+        0.002,
+        (_reward_evidence(),),
+        registry=registry,
+    )
+    guard = PolicyWeightTuningGuard().evaluate(proposal, registry=registry)
+
+    assert guard.allowed is False
+    assert "learned_weight_requires_safe_soft_approval" in {violation["check"] for violation in guard.violations}
+
+
+def test_weight_tuning_guard_blocks_bandit_increase_without_calibration_evidence():
+    _manager, _artifact, proposal, registry = _weight_tuning_proposal(
+        target=PolicyWeightTuningTarget.BANDIT_MAX_WEIGHT,
+        current_weight=0.001,
+        proposed_weight=0.002,
+        evidence=(_reward_evidence("reward_delta"),),
+    )
+    guard = PolicyWeightTuningGuard().evaluate(proposal, registry=registry)
+
+    assert guard.allowed is False
+    assert "bandit_increase_requires_calibration" in {violation["check"] for violation in guard.violations}
+
+
+def test_weight_tuning_guard_allows_bandit_increase_with_calibration_evidence():
+    evidence = (
+        _reward_evidence("reward_delta"),
+        _reward_evidence("bandit_calibration_score", delta=0.05),
+    )
+    _manager, _artifact, proposal, registry = _weight_tuning_proposal(
+        target=PolicyWeightTuningTarget.BANDIT_MAX_WEIGHT,
+        current_weight=0.001,
+        proposed_weight=0.002,
+        evidence=evidence,
+    )
+    guard = PolicyWeightTuningGuard().evaluate(proposal, registry=registry)
+
+    assert guard.allowed is True
+
+
+def test_weight_tuning_guard_blocks_safety_warning_increase():
+    evidence = (_reward_evidence("safety_warning_count", delta=1.0),)
+    _manager, _artifact, proposal, registry = _weight_tuning_proposal(evidence=evidence)
+
+    guard = PolicyWeightTuningGuard().evaluate(proposal, registry=registry)
+
+    assert guard.allowed is False
+    assert "safety_warnings_increased" in {violation["check"] for violation in guard.violations}
+
+
+def test_weight_tuning_guard_blocks_backend_or_constraint_failure_increase():
+    evidence = (
+        _reward_evidence("backend_failure_rate", delta=0.1),
+        _reward_evidence("constraint_failure_rate", delta=0.1),
+    )
+    _manager, _artifact, proposal, registry = _weight_tuning_proposal(evidence=evidence)
+
+    guard = PolicyWeightTuningGuard().evaluate(proposal, registry=registry)
+
+    checks = {violation["check"] for violation in guard.violations}
+    assert guard.allowed is False
+    assert {"backend_failure_rate_increased", "constraint_failure_rate_increased"} <= checks
+
+
+def test_weight_tuning_guard_blocks_unknown_counterfactual_as_primary_evidence():
+    _manager, _artifact, proposal, registry = _weight_tuning_proposal(
+        evidence_summary={"primary_improvement_evidence": "unknown_counterfactual"},
+    )
+
+    guard = PolicyWeightTuningGuard().evaluate(proposal, registry=registry)
+
+    assert guard.allowed is False
+    assert "unknown_counterfactual_primary_evidence" in {violation["check"] for violation in guard.violations}
+
+
+def test_weight_tuning_guard_blocks_missing_rollback_target():
+    _manager, _artifact, proposal, registry = _weight_tuning_proposal()
+    proposal = dataclasses.replace(proposal, rollback_policy_id=None, rollback_policy_version=None)
+
+    guard = PolicyWeightTuningGuard().evaluate(proposal, registry=registry)
+
+    assert guard.allowed is False
+    assert "missing_rollback_target" in {violation["check"] for violation in guard.violations}
+
+
+def test_weight_tuning_guard_blocks_gate_or_approval_changes():
+    _manager, _artifact, proposal, registry = _weight_tuning_proposal(
+        evidence_summary={
+            "alter_hard_safety_gates": True,
+            "lower_approval_requirements": True,
+            "auto_apply_space_revision": True,
+        },
+    )
+    guard = PolicyWeightTuningGuard().evaluate(proposal, registry=registry)
+
+    checks = {violation["check"] for violation in guard.violations}
+    assert guard.allowed is False
+    assert {"safety_or_approval_gate_change", "auto_apply_space_revision"} <= checks
+
+
+def test_registry_stores_weight_tuning_metadata_without_altering_live_config():
+    manager, artifact, proposal, registry = _weight_tuning_proposal()
+    before = rank_backends(
+        "optimize",
+        ("nexus_gp_bo", "built_in"),
+        {"nexus_gp_bo": True, "built_in": True},
+    )
+
+    updated = registry.register_weight_tuning_proposal(artifact.policy_id, artifact.policy_version, proposal)
+    entry = updated.get(artifact.policy_id, artifact.policy_version)
+    after = rank_backends(
+        "optimize",
+        ("nexus_gp_bo", "built_in"),
+        {"nexus_gp_bo": True, "built_in": True},
+    )
+
+    assert entry.weight_tuning_proposed is True
+    assert entry.weight_tuning_proposal_id == proposal.proposal_id
+    assert entry.weight_tuning_status == "eligible"
+    assert entry.current_weights["learned_policy_max_weight"] == proposal.current_weight
+    assert entry.recommended_weights["learned_policy_max_weight"] == proposal.proposed_weight
+    assert after == before
+    assert manager.get_active_safe_soft_policy(updated, campaign_id="replay")["live_selector_activation"] is False
+
+
+def test_manager_recommends_approve_weight_tuning_without_applying_it():
+    manager, plan, _artifact, _registry = _approved_safe_soft_state()
+    _manager, _artifact, proposal, _registry = _weight_tuning_proposal()
+
+    updated_plan = manager.attach_weight_tuning_proposal(plan, proposal)
+
+    assert updated_plan.status == "weight_tuning_eligible"
+    assert manager.recommend_next_step(updated_plan) == PolicyEvolutionRecommendation.APPROVE_WEIGHT_TUNING
+
+
+def test_default_backend_behavior_remains_unchanged_after_weight_tuning_proposal():
+    snapshot = all_replay_scenarios()[2]
+    before = select_strategy(snapshot, config=PhaseConfig())
+    manager, _artifact, proposal, registry = _weight_tuning_proposal()
+
+    _ = registry.register_weight_tuning_proposal(proposal.policy_id, proposal.policy_version, proposal)
+    after = select_strategy(snapshot, config=PhaseConfig())
+
+    assert after.backend_name == before.backend_name
+    assert after.strategy_trace.selected_backend == before.strategy_trace.selected_backend
+    assert manager.evaluate_weight_tuning_guard(proposal, registry=registry).allowed is True
