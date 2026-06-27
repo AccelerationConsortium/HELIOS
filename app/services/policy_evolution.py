@@ -83,6 +83,33 @@ class ShadowPromotionProposalStatus(StrEnum):
     EXPIRED = "expired"
 
 
+class ShadowApprovalMode(StrEnum):
+    """Explicit approval source for shadow-only policy runs."""
+
+    MANUAL = "manual"
+    CONFIG = "config"
+    TEST = "test"
+
+
+class ShadowRunScheduleStatus(StrEnum):
+    """Lifecycle state for a shadow run schedule."""
+
+    SCHEDULED = "scheduled"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+
+
+class ShadowRunRecommendation(StrEnum):
+    """Recommendation from a completed shadow run."""
+
+    CONTINUE_SHADOW = "continue_shadow"
+    PROPOSE_CANARY = "propose_canary"
+    REDUCE_SCOPE = "reduce_scope"
+    REJECT_POLICY = "reject_policy"
+
+
 @dataclass(frozen=True)
 class PolicyEvolutionTrigger:
     """Structured reason to start a policy-evolution review."""
@@ -283,6 +310,94 @@ class ShadowPromotionProposal:
 
 
 @dataclass(frozen=True)
+class ShadowApprovalRecord:
+    """Explicit human/config/test approval to schedule a shadow run."""
+
+    approval_id: str
+    proposal_id: str
+    policy_id: str
+    policy_version: str
+    approved_by: str
+    approval_mode: ShadowApprovalMode | str
+    approval_reason: str
+    approved_at: str = field(default_factory=lambda: _now_iso())
+    expires_at: str | None = None
+    max_shadow_rounds: int = 0
+    allowed_campaign_ids: tuple[str, ...] = ()
+    allowed_objective_levels: tuple[str, ...] = ()
+    revoked: bool = False
+    revoked_reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> ShadowApprovalRecord:
+        return cls(
+            approval_id=str(raw.get("approval_id", "")),
+            proposal_id=str(raw.get("proposal_id", "")),
+            policy_id=str(raw.get("policy_id", "")),
+            policy_version=str(raw.get("policy_version", "")),
+            approved_by=str(raw.get("approved_by", "")),
+            approval_mode=raw.get("approval_mode", ShadowApprovalMode.MANUAL),
+            approval_reason=str(raw.get("approval_reason", "")),
+            approved_at=str(raw.get("approved_at") or _now_iso()),
+            expires_at=raw.get("expires_at"),
+            max_shadow_rounds=int(raw.get("max_shadow_rounds") or 0),
+            allowed_campaign_ids=tuple(raw.get("allowed_campaign_ids") or ()),
+            allowed_objective_levels=tuple(raw.get("allowed_objective_levels") or ()),
+            revoked=bool(raw.get("revoked", False)),
+            revoked_reason=raw.get("revoked_reason"),
+        )
+
+
+@dataclass(frozen=True)
+class ShadowRunSchedule:
+    """Approved shadow-only run schedule."""
+
+    schedule_id: str
+    approval_id: str
+    policy_id: str
+    policy_version: str
+    campaign_allowlist: tuple[str, ...] = ()
+    objective_allowlist: tuple[str, ...] = ()
+    max_rounds: int = 0
+    status: ShadowRunScheduleStatus | str = ShadowRunScheduleStatus.SCHEDULED
+    created_at: str = field(default_factory=lambda: _now_iso())
+    started_at: str | None = None
+    completed_at: str | None = None
+    cancellation_reason: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+
+@dataclass(frozen=True)
+class ShadowRunResult:
+    """Aggregate result from a shadow-only policy run."""
+
+    run_id: str
+    schedule_id: str
+    policy_id: str
+    policy_version: str
+    campaign_ids: tuple[str, ...] = ()
+    round_count: int = 0
+    intent_agreement_rate: float = 0.0
+    mode_agreement_rate: float = 0.0
+    backend_agreement_rate: float = 0.0
+    would_change_top1_rate: float = 0.0
+    invalid_suggestion_rate: float = 0.0
+    safety_warning_count: int = 0
+    confidence_calibration_summary: dict[str, Any] = field(default_factory=dict)
+    counterfactual_breakdown: dict[str, int] = field(default_factory=dict)
+    recommendation: ShadowRunRecommendation | str = ShadowRunRecommendation.CONTINUE_SHADOW
+    reasons: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+
+@dataclass(frozen=True)
 class PolicyVersionRegistryEntry:
     """Registered policy version metadata and lineage."""
 
@@ -305,6 +420,9 @@ class PolicyVersionRegistryEntry:
     shadow_proposal_id: str | None = None
     shadow_proposal_status: str | None = None
     shadow_eligibility_summary: dict[str, Any] = field(default_factory=dict)
+    shadow_approval_metadata: dict[str, Any] = field(default_factory=dict)
+    shadow_run_schedule_metadata: dict[str, Any] = field(default_factory=dict)
+    latest_shadow_run_result_summary: dict[str, Any] = field(default_factory=dict)
     registered_at: str = field(default_factory=lambda: _now_iso())
 
 
@@ -392,6 +510,68 @@ class PolicyVersionRegistry:
             updated if (
                 item.policy_id == policy_id
                 and item.policy_version == policy_version
+            ) else item
+            for item in self.entries
+        )
+        return replace(self, entries=entries)
+
+    def mark_shadow_approved(
+        self,
+        policy_id: str,
+        policy_version: str,
+        approval: ShadowApprovalRecord,
+    ) -> PolicyVersionRegistry:
+        entry = self.get(policy_id, policy_version)
+        if entry is None:
+            return self
+        updated = replace(
+            entry,
+            approved_for_shadow=True,
+            approved_for_safe_soft=False,
+            approved_for_live_canary=False,
+            shadow_approval_metadata=approval.to_dict(),
+        )
+        return self._replace_entry(updated)
+
+    def register_shadow_schedule(
+        self,
+        policy_id: str,
+        policy_version: str,
+        schedule: ShadowRunSchedule,
+    ) -> PolicyVersionRegistry:
+        entry = self.get(policy_id, policy_version)
+        if entry is None:
+            return self
+        updated = replace(
+            entry,
+            shadow_run_schedule_metadata=schedule.to_dict(),
+            approved_for_safe_soft=False,
+            approved_for_live_canary=False,
+        )
+        return self._replace_entry(updated)
+
+    def register_shadow_result(
+        self,
+        policy_id: str,
+        policy_version: str,
+        result: ShadowRunResult,
+    ) -> PolicyVersionRegistry:
+        entry = self.get(policy_id, policy_version)
+        if entry is None:
+            return self
+        updated = replace(
+            entry,
+            latest_shadow_run_result_summary=result.to_dict(),
+            approved_for_safe_soft=False,
+            approved_for_live_canary=False,
+        )
+        return self._replace_entry(updated)
+
+    def _replace_entry(self, updated: PolicyVersionRegistryEntry) -> PolicyVersionRegistry:
+        entries = tuple(
+            updated if (
+                item.policy_id == updated.policy_id
+                and item.policy_version == updated.policy_version
             ) else item
             for item in self.entries
         )
@@ -650,6 +830,71 @@ class ShadowPromotionGuard:
 
 
 @dataclass(frozen=True)
+class ShadowApprovalGuardResult:
+    """Guardrail result for explicit shadow approvals."""
+
+    allowed: bool
+    violations: tuple[dict[str, Any], ...] = ()
+    warnings: tuple[dict[str, Any], ...] = ()
+    required_human_approval: bool = True
+
+
+class ShadowApprovalGuard:
+    """Validate explicit approval before any shadow run is scheduled."""
+
+    BLOCKED_STATUSES = {
+        ShadowPromotionProposalStatus.BLOCKED.value,
+        ShadowPromotionProposalStatus.REJECTED.value,
+        ShadowPromotionProposalStatus.EXPIRED.value,
+    }
+
+    def evaluate(
+        self,
+        proposal: ShadowPromotionProposal,
+        approval: ShadowApprovalRecord,
+        registry: PolicyVersionRegistry | None = None,
+    ) -> ShadowApprovalGuardResult:
+        violations: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+        status = str(getattr(proposal.status, "value", proposal.status))
+        if not proposal.eligible:
+            violations.append(_violation("proposal_not_eligible", "Proposal is not eligible for shadow approval"))
+        if status in self.BLOCKED_STATUSES:
+            violations.append(_violation("proposal_status_blocked", "Proposal status blocks approval", {"status": status}))
+        if not proposal.rollback_policy_id or not proposal.rollback_policy_version:
+            violations.append(_violation("missing_rollback_target", "Rollback target is required"))
+        required = set(proposal.required_approvals or ())
+        if "human_shadow_approval" in required and not approval.approved_by:
+            violations.append(_violation("required_approval_missing", "Human shadow approval is required"))
+        if approval.revoked:
+            violations.append(_violation("approval_revoked", "Approval has been revoked"))
+        if approval.proposal_id != proposal.proposal_id:
+            violations.append(_violation("approval_proposal_mismatch", "Approval does not match proposal"))
+        if approval.policy_id != proposal.candidate_policy_id or approval.policy_version != proposal.candidate_policy_version:
+            violations.append(_violation("approval_policy_mismatch", "Approval does not match proposal policy"))
+        if registry is not None:
+            entry = registry.get(proposal.candidate_policy_id, proposal.candidate_policy_version)
+            rollback = registry.get(proposal.rollback_policy_id or "", proposal.rollback_policy_version or "")
+            if entry is None:
+                violations.append(_violation("policy_lineage_invalid", "Candidate policy is missing from registry"))
+            elif (
+                entry.parent_policy_id != proposal.source_policy_id
+                or entry.parent_policy_version != proposal.source_policy_version
+            ):
+                violations.append(_violation("policy_lineage_invalid", "Candidate lineage does not match proposal"))
+            if rollback is None:
+                violations.append(_violation("rollback_target_missing_from_registry", "Rollback target is missing from registry"))
+        if approval.approval_mode != ShadowApprovalMode.MANUAL.value:
+            warnings.append(_warning("non_manual_shadow_approval", "Non-manual shadow approvals still require audit visibility"))
+        return ShadowApprovalGuardResult(
+            allowed=not violations,
+            violations=tuple(violations),
+            warnings=tuple(warnings),
+            required_human_approval=True,
+        )
+
+
+@dataclass(frozen=True)
 class PolicyEvolutionReport:
     """Review report for one policy-evolution plan."""
 
@@ -684,9 +929,11 @@ class PolicyEvolutionManager:
         *,
         guard: EvolutionGuard | None = None,
         shadow_promotion_guard: ShadowPromotionGuard | None = None,
+        shadow_approval_guard: ShadowApprovalGuard | None = None,
     ) -> None:
         self.guard = guard or EvolutionGuard()
         self.shadow_promotion_guard = shadow_promotion_guard or ShadowPromotionGuard()
+        self.shadow_approval_guard = shadow_approval_guard or ShadowApprovalGuard()
 
     def create_evolution_plan(
         self,
@@ -861,6 +1108,87 @@ class PolicyEvolutionManager:
     ) -> ShadowPromotionGuardResult:
         return self.shadow_promotion_guard.evaluate(proposal)
 
+    def evaluate_shadow_approval_guard(
+        self,
+        proposal: ShadowPromotionProposal,
+        approval_record: ShadowApprovalRecord,
+        registry: PolicyVersionRegistry | None = None,
+    ) -> ShadowApprovalGuardResult:
+        return self.shadow_approval_guard.evaluate(proposal, approval_record, registry)
+
+    def approve_shadow_proposal(
+        self,
+        proposal: ShadowPromotionProposal,
+        approval_record: ShadowApprovalRecord,
+        *,
+        registry: PolicyVersionRegistry | None = None,
+    ) -> tuple[ShadowPromotionProposal, PolicyVersionRegistry | None, ShadowApprovalGuardResult]:
+        guard = self.evaluate_shadow_approval_guard(proposal, approval_record, registry)
+        if not guard.allowed:
+            return proposal, registry, guard
+        approved = replace(
+            proposal,
+            status=ShadowPromotionProposalStatus.APPROVED.value,
+            updated_at=_now_iso(),
+        )
+        if registry is not None:
+            registry = registry.mark_shadow_approved(
+                approved.candidate_policy_id,
+                approved.candidate_policy_version,
+                approval_record,
+            )
+        return approved, registry, guard
+
+    def schedule_shadow_run(
+        self,
+        approval_record: ShadowApprovalRecord,
+    ) -> ShadowRunSchedule:
+        return ShadowRunSchedule(
+            schedule_id=f"shadow-run-{_compact_timestamp()}-{approval_record.policy_id}-{approval_record.policy_version}",
+            approval_id=approval_record.approval_id,
+            policy_id=approval_record.policy_id,
+            policy_version=approval_record.policy_version,
+            campaign_allowlist=approval_record.allowed_campaign_ids,
+            objective_allowlist=approval_record.allowed_objective_levels,
+            max_rounds=approval_record.max_shadow_rounds,
+        )
+
+    def update_shadow_run_status(
+        self,
+        schedule: ShadowRunSchedule,
+        status: ShadowRunScheduleStatus | str,
+        reason: str | None = None,
+    ) -> ShadowRunSchedule:
+        value = str(getattr(status, "value", status))
+        return replace(
+            schedule,
+            status=value,
+            started_at=_now_iso() if value == ShadowRunScheduleStatus.RUNNING.value else schedule.started_at,
+            completed_at=_now_iso() if value in {
+                ShadowRunScheduleStatus.COMPLETED.value,
+                ShadowRunScheduleStatus.CANCELLED.value,
+                ShadowRunScheduleStatus.EXPIRED.value,
+            } else schedule.completed_at,
+            cancellation_reason=reason if value == ShadowRunScheduleStatus.CANCELLED.value else schedule.cancellation_reason,
+        )
+
+    def attach_shadow_run_result(
+        self,
+        plan: PolicyEvolutionPlan,
+        result: ShadowRunResult,
+    ) -> PolicyEvolutionPlan:
+        if _shadow_result_passes_canary_thresholds(result):
+            return self.update_plan_status(
+                plan,
+                PolicyEvolutionPlanStatus.SHADOW_ELIGIBLE,
+                f"shadow result supports canary proposal:{result.run_id}",
+            )
+        return self.update_plan_status(
+            plan,
+            plan.status,
+            f"shadow result does not support canary:{result.run_id}",
+        )
+
     def attach_shadow_proposal(
         self,
         plan: PolicyEvolutionPlan,
@@ -909,7 +1237,9 @@ class PolicyEvolutionManager:
         if str(plan.status) == PolicyEvolutionPlanStatus.OFFLINE_EVALUATED.value:
             return PolicyEvolutionRecommendation.APPROVE_SHADOW
         if str(plan.status) == PolicyEvolutionPlanStatus.SHADOW_ELIGIBLE.value:
-            return PolicyEvolutionRecommendation.APPROVE_CANARY
+            if any("shadow result supports canary proposal" in reason for reason in plan.reasons):
+                return PolicyEvolutionRecommendation.APPROVE_CANARY
+            return PolicyEvolutionRecommendation.KEEP_CURRENT
         if str(plan.status) == PolicyEvolutionPlanStatus.CANARY_ELIGIBLE.value:
             return PolicyEvolutionRecommendation.PROMOTE
         if str(plan.status) == PolicyEvolutionPlanStatus.PROMOTED.value:
@@ -1231,6 +1561,17 @@ def _unknown_counterfactual_primary_evidence(proposal: ShadowPromotionProposal) 
     summary = proposal.counterfactual_uncertainty_summary or {}
     primary = str(summary.get("primary_improvement_evidence") or "")
     return primary == "unknown_counterfactual"
+
+
+def _shadow_result_passes_canary_thresholds(result: ShadowRunResult) -> bool:
+    return (
+        str(getattr(result.recommendation, "value", result.recommendation))
+        == ShadowRunRecommendation.PROPOSE_CANARY.value
+        and result.round_count > 0
+        and result.safety_warning_count == 0
+        and result.invalid_suggestion_rate <= 0.05
+        and result.backend_agreement_rate >= 0.7
+    )
 
 
 def _plain_dict(value: Any) -> dict[str, Any]:

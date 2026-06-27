@@ -19,8 +19,14 @@ from app.services.policy_evolution import (
     PolicyAutoTrainer,
     PolicyVersionRegistry,
     PolicyVersionRegistryEntry,
+    ShadowApprovalGuard,
+    ShadowApprovalMode,
+    ShadowApprovalRecord,
     ShadowPromotionGuard,
     ShadowPromotionProposal,
+    ShadowRunRecommendation,
+    ShadowRunResult,
+    ShadowRunScheduleStatus,
     TrainingGuard,
 )
 from app.services.learned_policy import (
@@ -616,7 +622,7 @@ def test_manager_recommends_approve_shadow_without_auto_approval():
     updated_plan = manager.attach_shadow_proposal(plan, proposal)
 
     assert updated_plan.status == "shadow_eligible"
-    assert manager.recommend_next_step(updated_plan) == PolicyEvolutionRecommendation.APPROVE_CANARY
+    assert manager.recommend_next_step(updated_plan) == PolicyEvolutionRecommendation.KEEP_CURRENT
     assert artifact.registry_entry_preview["approved_for_shadow"] is False
 
 
@@ -626,6 +632,219 @@ def test_default_backend_behavior_remains_unchanged_after_shadow_proposal():
     manager, plan, job, artifact, _registry = _trained_candidate()
 
     _ = manager.create_shadow_promotion_proposal(plan, job, artifact)
+    after = select_strategy(snapshot, config=PhaseConfig())
+
+    assert after.backend_name == before.backend_name
+    assert after.strategy_trace.selected_backend == before.strategy_trace.selected_backend
+
+
+def _eligible_shadow_proposal():
+    manager, plan, job, artifact, registry = _trained_candidate()
+    proposal = manager.create_shadow_promotion_proposal(plan, job, artifact)
+    registry = registry.register_shadow_proposal(
+        artifact.policy_id,
+        artifact.policy_version,
+        proposal,
+    )
+    return manager, plan, job, artifact, proposal, registry
+
+
+def _approval_record(proposal):
+    return ShadowApprovalRecord(
+        approval_id="approval-a",
+        proposal_id=proposal.proposal_id,
+        policy_id=proposal.candidate_policy_id,
+        policy_version=proposal.candidate_policy_version,
+        approved_by="sissi",
+        approval_mode=ShadowApprovalMode.TEST,
+        approval_reason="test approval for shadow-only run",
+        expires_at="2099-01-01T00:00:00+00:00",
+        max_shadow_rounds=12,
+        allowed_campaign_ids=("replay",),
+        allowed_objective_levels=("performance",),
+    )
+
+
+def test_shadow_approval_record_round_trip():
+    _manager, _plan, _job, _artifact, proposal, _registry = _eligible_shadow_proposal()
+    approval = _approval_record(proposal)
+
+    restored = ShadowApprovalRecord.from_dict(approval.to_dict())
+
+    assert restored.approval_id == approval.approval_id
+    assert restored.approval_mode == "test"
+    assert restored.max_shadow_rounds == 12
+    assert restored.allowed_campaign_ids == ("replay",)
+    assert restored.revoked is False
+
+
+def test_approval_guard_blocks_ineligible_proposal():
+    _manager, _plan, _job, _artifact, proposal, registry = _eligible_shadow_proposal()
+    ineligible = dataclasses.replace(proposal, eligible=False)
+
+    result = ShadowApprovalGuard().evaluate(ineligible, _approval_record(proposal), registry)
+
+    assert result.allowed is False
+    assert "proposal_not_eligible" in {violation["check"] for violation in result.violations}
+
+
+def test_approval_guard_blocks_expired_or_rejected_proposal():
+    _manager, _plan, _job, _artifact, proposal, registry = _eligible_shadow_proposal()
+    rejected = dataclasses.replace(proposal, status="rejected")
+
+    result = ShadowApprovalGuard().evaluate(rejected, _approval_record(proposal), registry)
+
+    assert result.allowed is False
+    assert "proposal_status_blocked" in {violation["check"] for violation in result.violations}
+
+
+def test_registry_sets_approved_for_shadow_only_with_explicit_approval():
+    manager, _plan, _job, artifact, proposal, registry = _eligible_shadow_proposal()
+    before = registry.get(artifact.policy_id, artifact.policy_version)
+    approval = _approval_record(proposal)
+
+    approved_proposal, updated, guard = manager.approve_shadow_proposal(
+        proposal,
+        approval,
+        registry=registry,
+    )
+    after = updated.get(artifact.policy_id, artifact.policy_version)
+
+    assert guard.allowed is True
+    assert approved_proposal.status == "approved"
+    assert before.approved_for_shadow is False
+    assert after.approved_for_shadow is True
+    assert after.approved_for_safe_soft is False
+    assert after.approved_for_live_canary is False
+    assert after.shadow_approval_metadata["approval_id"] == "approval-a"
+
+
+def test_shadow_run_schedule_lifecycle_transitions():
+    manager, _plan, _job, _artifact, proposal, _registry = _eligible_shadow_proposal()
+    approval = _approval_record(proposal)
+
+    schedule = manager.schedule_shadow_run(approval)
+    running = manager.update_shadow_run_status(schedule, ShadowRunScheduleStatus.RUNNING)
+    completed = manager.update_shadow_run_status(running, ShadowRunScheduleStatus.COMPLETED)
+
+    assert schedule.status == "scheduled"
+    assert schedule.max_rounds == 12
+    assert running.status == "running"
+    assert running.started_at is not None
+    assert completed.status == "completed"
+    assert completed.completed_at is not None
+
+
+def test_shadow_run_result_attaches_to_evolution_plan():
+    manager, plan, _job, artifact, _proposal, _registry = _eligible_shadow_proposal()
+    result = ShadowRunResult(
+        run_id="run-a",
+        schedule_id="schedule-a",
+        policy_id=artifact.policy_id,
+        policy_version=artifact.policy_version,
+        campaign_ids=("replay",),
+        round_count=10,
+        intent_agreement_rate=0.9,
+        mode_agreement_rate=0.9,
+        backend_agreement_rate=0.9,
+        would_change_top1_rate=0.1,
+        invalid_suggestion_rate=0.0,
+        safety_warning_count=0,
+        recommendation=ShadowRunRecommendation.CONTINUE_SHADOW,
+        reasons=("not enough evidence for canary",),
+    )
+
+    updated = manager.attach_shadow_run_result(plan, result)
+
+    assert updated.status == plan.status
+    assert "shadow result does not support canary:run-a" in updated.reasons
+
+
+def test_manager_recommends_propose_canary_only_after_passing_shadow_result():
+    manager, plan, _job, artifact, _proposal, _registry = _eligible_shadow_proposal()
+    eligible_plan = dataclasses.replace(plan, status="shadow_eligible")
+    weak = ShadowRunResult(
+        run_id="run-weak",
+        schedule_id="schedule-a",
+        policy_id=artifact.policy_id,
+        policy_version=artifact.policy_version,
+        round_count=5,
+        backend_agreement_rate=0.4,
+        invalid_suggestion_rate=0.0,
+        safety_warning_count=0,
+        recommendation=ShadowRunRecommendation.PROPOSE_CANARY,
+    )
+    strong = dataclasses.replace(
+        weak,
+        run_id="run-strong",
+        round_count=20,
+        backend_agreement_rate=0.9,
+    )
+
+    weak_plan = manager.attach_shadow_run_result(eligible_plan, weak)
+    strong_plan = manager.attach_shadow_run_result(eligible_plan, strong)
+
+    assert manager.recommend_next_step(eligible_plan) == PolicyEvolutionRecommendation.KEEP_CURRENT
+    assert manager.recommend_next_step(weak_plan) == PolicyEvolutionRecommendation.KEEP_CURRENT
+    assert manager.recommend_next_step(strong_plan) == PolicyEvolutionRecommendation.APPROVE_CANARY
+
+
+def test_no_automatic_canary_approval_after_shadow_approval():
+    manager, _plan, _job, artifact, proposal, registry = _eligible_shadow_proposal()
+    approval = _approval_record(proposal)
+
+    _proposal, updated, _guard = manager.approve_shadow_proposal(
+        proposal,
+        approval,
+        registry=registry,
+    )
+    schedule = manager.schedule_shadow_run(approval)
+    updated = updated.register_shadow_schedule(artifact.policy_id, artifact.policy_version, schedule)
+    result = ShadowRunResult(
+        run_id="run-canary",
+        schedule_id=schedule.schedule_id,
+        policy_id=artifact.policy_id,
+        policy_version=artifact.policy_version,
+        round_count=20,
+        backend_agreement_rate=0.9,
+        invalid_suggestion_rate=0.0,
+        safety_warning_count=0,
+        recommendation=ShadowRunRecommendation.PROPOSE_CANARY,
+    )
+    updated = updated.register_shadow_result(artifact.policy_id, artifact.policy_version, result)
+    entry = updated.get(artifact.policy_id, artifact.policy_version)
+
+    assert entry.approved_for_shadow is True
+    assert entry.approved_for_safe_soft is False
+    assert entry.approved_for_live_canary is False
+    assert entry.shadow_run_schedule_metadata["schedule_id"] == schedule.schedule_id
+    assert entry.latest_shadow_run_result_summary["run_id"] == "run-canary"
+
+
+def test_learned_policy_still_does_not_affect_live_ranking_after_shadow_schedule():
+    before = rank_backends(
+        "optimize",
+        ("nexus_gp_bo", "built_in"),
+        {"nexus_gp_bo": True, "built_in": True},
+    )
+    manager, _plan, _job, _artifact, proposal, _registry = _eligible_shadow_proposal()
+
+    _ = manager.schedule_shadow_run(_approval_record(proposal))
+    after = rank_backends(
+        "optimize",
+        ("nexus_gp_bo", "built_in"),
+        {"nexus_gp_bo": True, "built_in": True},
+    )
+
+    assert after == before
+
+
+def test_default_backend_behavior_remains_unchanged_after_shadow_approval():
+    snapshot = all_replay_scenarios()[2]
+    before = select_strategy(snapshot, config=PhaseConfig())
+    manager, _plan, _job, _artifact, proposal, _registry = _eligible_shadow_proposal()
+
+    _ = manager.schedule_shadow_run(_approval_record(proposal))
     after = select_strategy(snapshot, config=PhaseConfig())
 
     assert after.backend_name == before.backend_name
