@@ -52,6 +52,26 @@ class PolicyEvolutionRecommendation(StrEnum):
     REJECT = "reject"
 
 
+class CandidatePolicyTrainingMode(StrEnum):
+    """Offline candidate policy training modes."""
+
+    IMITATION = "imitation"
+    BACKEND_RERANKER = "backend_reranker"
+    META_POLICY = "meta_policy"
+
+
+class CandidatePolicyTrainingJobStatus(StrEnum):
+    """Lifecycle state for an offline candidate-policy training job."""
+
+    CREATED = "created"
+    DATASET_BUILT = "dataset_built"
+    AUDIT_PASSED = "audit_passed"
+    REWARD_SANITY_PASSED = "reward_sanity_passed"
+    TRAINED = "trained"
+    OFFLINE_EVALUATED = "offline_evaluated"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True)
 class PolicyEvolutionTrigger:
     """Structured reason to start a policy-evolution review."""
@@ -138,6 +158,55 @@ class PolicyEvolutionPlan:
             updated_at=str(raw.get("updated_at") or _now_iso()),
             proposed_changes=dict(raw.get("proposed_changes") or {}),
         )
+
+
+@dataclass(frozen=True)
+class CandidatePolicyTrainingJob:
+    """Offline training job derived from a policy-evolution plan."""
+
+    job_id: str
+    plan_id: str
+    source_policy_id: str
+    source_policy_version: str
+    candidate_policy_id: str
+    candidate_policy_version: str
+    dataset_version: str | None
+    feature_schema_version: str
+    reward_version: str
+    training_mode: CandidatePolicyTrainingMode | str
+    training_config: dict[str, Any] = field(default_factory=dict)
+    status: CandidatePolicyTrainingJobStatus | str = CandidatePolicyTrainingJobStatus.CREATED
+    failure_reason: str | None = None
+    created_at: str = field(default_factory=lambda: _now_iso())
+    updated_at: str = field(default_factory=lambda: _now_iso())
+    completed_at: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+
+@dataclass(frozen=True)
+class CandidatePolicyArtifact:
+    """Offline candidate policy artifact and evaluation summary."""
+
+    policy_id: str
+    policy_version: str
+    parent_policy_id: str
+    parent_policy_version: str
+    artifact_type: str
+    training_mode: CandidatePolicyTrainingMode | str
+    dataset_version: str | None
+    feature_schema_version: str
+    reward_version: str
+    training_summary: dict[str, Any]
+    offline_evaluation_summary: dict[str, Any]
+    safety_summary: dict[str, Any]
+    eligible_for_shadow_proposal: bool
+    eligible_for_canary_proposal: bool = False
+    registry_entry_preview: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
 
 
 @dataclass(frozen=True)
@@ -313,6 +382,101 @@ class EvolutionGuard:
 
 
 @dataclass(frozen=True)
+class TrainingGuardResult:
+    """Guardrail result for offline candidate-policy training."""
+
+    allowed: bool
+    violations: tuple[dict[str, Any], ...] = ()
+    warnings: tuple[dict[str, Any], ...] = ()
+
+
+class TrainingGuard:
+    """Validate offline datasets and evaluations before emitting artifacts."""
+
+    def evaluate(
+        self,
+        plan: PolicyEvolutionPlan,
+        dataset: Any,
+        audit: Any,
+        reward_sanity: Any,
+        *,
+        training_config: dict[str, Any] | None = None,
+        offline_evaluation_summary: dict[str, Any] | None = None,
+    ) -> TrainingGuardResult:
+        config = dict(training_config or {})
+        evaluation = dict(offline_evaluation_summary or {})
+        violations: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+
+        record_count = int(getattr(audit, "record_count", 0) or 0)
+        missing = dict(getattr(audit, "missing_feature_rates", {}) or {})
+        if record_count <= 0:
+            violations.append(_violation("dataset_audit_failed", "Dataset audit has no records"))
+        for key in ("state_features", "context_features", "available_actions", "candidate_backends"):
+            if float(missing.get(key, 0.0) or 0.0) > 0:
+                violations.append(_violation(
+                    "dataset_audit_failed",
+                    f"Dataset audit reports missing {key}",
+                    {"missing_rate": missing.get(key)},
+                ))
+        if float(getattr(audit, "candidate_score_coverage", 0.0) or 0.0) < 1.0:
+            violations.append(_violation("dataset_audit_failed", "Candidate backend scores are incomplete"))
+        if float(getattr(audit, "candidate_rank_coverage", 0.0) or 0.0) < 1.0:
+            violations.append(_violation("dataset_audit_failed", "Candidate backend ranks are incomplete"))
+
+        if not bool(getattr(reward_sanity, "passed", False)):
+            violations.append(_violation(
+                "reward_sanity_failed",
+                "Reward sanity checks failed",
+                {"failures": tuple(getattr(reward_sanity, "failures", ()) or ())},
+            ))
+
+        if getattr(dataset, "feature_schema_version", None) != plan.feature_schema_version:
+            violations.append(_violation(
+                "feature_schema_version_mismatch",
+                "Dataset feature schema does not match plan",
+                {
+                    "dataset": getattr(dataset, "feature_schema_version", None),
+                    "plan": plan.feature_schema_version,
+                },
+            ))
+        if getattr(dataset, "reward_version", None) != plan.reward_version:
+            violations.append(_violation(
+                "reward_version_mismatch",
+                "Dataset reward version does not match plan",
+                {
+                    "dataset": getattr(dataset, "reward_version", None),
+                    "plan": plan.reward_version,
+                },
+            ))
+
+        if config.get("use_unknown_counterfactual_as_ground_truth") and _has_unknown_counterfactual(dataset):
+            violations.append(_violation(
+                "unknown_counterfactual_as_ground_truth",
+                "Unknown counterfactual outcomes cannot be used as ground-truth reward",
+            ))
+
+        safety = dict(evaluation.get("learned_policy_safety") or evaluation.get("safety_summary") or {})
+        if safety and not bool(safety.get("passed", True)):
+            violations.append(_violation(
+                "offline_safety_violations",
+                "Offline evaluator reported learned policy safety violations",
+                {"failure_count": safety.get("failure_count", 0)},
+            ))
+
+        for warning in getattr(audit, "offline_readiness_warnings", ()) or ():
+            warnings.append(_warning("dataset_audit_warning", str(warning)))
+        for warning in getattr(reward_sanity, "warnings", ()) or ():
+            warnings.append(_warning("reward_sanity_warning", str(warning)))
+
+        return TrainingGuardResult(
+            allowed=not violations,
+            violations=tuple(violations),
+            warnings=tuple(warnings),
+        )
+
+
+@dataclass(frozen=True)
 class PolicyEvolutionReport:
     """Review report for one policy-evolution plan."""
 
@@ -400,6 +564,63 @@ class PolicyEvolutionManager:
     def evaluate_plan_guard(self, plan: PolicyEvolutionPlan) -> EvolutionGuardResult:
         return self.guard.evaluate(plan)
 
+    def create_training_job(
+        self,
+        plan: PolicyEvolutionPlan,
+        *,
+        training_mode: CandidatePolicyTrainingMode | str = CandidatePolicyTrainingMode.IMITATION,
+        training_config: dict[str, Any] | None = None,
+    ) -> CandidatePolicyTrainingJob:
+        return CandidatePolicyTrainingJob(
+            job_id=f"train-{_compact_timestamp()}-{plan.candidate_policy_id}-{plan.candidate_policy_version}",
+            plan_id=plan.plan_id,
+            source_policy_id=plan.source_policy_id,
+            source_policy_version=plan.source_policy_version,
+            candidate_policy_id=plan.candidate_policy_id,
+            candidate_policy_version=plan.candidate_policy_version,
+            dataset_version=plan.dataset_version,
+            feature_schema_version=plan.feature_schema_version,
+            reward_version=plan.reward_version,
+            training_mode=str(getattr(training_mode, "value", training_mode)),
+            training_config=dict(training_config or {}),
+        )
+
+    def update_training_job_status(
+        self,
+        job: CandidatePolicyTrainingJob,
+        new_status: CandidatePolicyTrainingJobStatus | str,
+        *,
+        failure_reason: str | None = None,
+    ) -> CandidatePolicyTrainingJob:
+        status = str(getattr(new_status, "value", new_status))
+        return replace(
+            job,
+            status=status,
+            failure_reason=failure_reason,
+            updated_at=_now_iso(),
+            completed_at=_now_iso() if status in {
+                CandidatePolicyTrainingJobStatus.OFFLINE_EVALUATED.value,
+                CandidatePolicyTrainingJobStatus.FAILED.value,
+            } else job.completed_at,
+        )
+
+    def attach_training_result(
+        self,
+        plan: PolicyEvolutionPlan,
+        artifact: CandidatePolicyArtifact,
+    ) -> PolicyEvolutionPlan:
+        if not artifact.offline_evaluation_summary:
+            return self.update_plan_status(
+                plan,
+                PolicyEvolutionPlanStatus.REJECTED,
+                "candidate artifact has no offline evaluation summary",
+            )
+        return self.update_plan_status(
+            plan,
+            PolicyEvolutionPlanStatus.OFFLINE_EVALUATED,
+            f"candidate artifact ready:{artifact.policy_id}:{artifact.policy_version}",
+        )
+
     def update_plan_status(
         self,
         plan: PolicyEvolutionPlan,
@@ -420,7 +641,11 @@ class PolicyEvolutionManager:
         if str(plan.status) == PolicyEvolutionPlanStatus.ROLLED_BACK.value:
             return PolicyEvolutionRecommendation.ROLLBACK
         if str(plan.status) == PolicyEvolutionPlanStatus.PROPOSED.value:
-            return PolicyEvolutionRecommendation.PREPARE_DATASET
+            return (
+                PolicyEvolutionRecommendation.TRAIN_CANDIDATE
+                if plan.dataset_version
+                else PolicyEvolutionRecommendation.PREPARE_DATASET
+            )
         if str(plan.status) == PolicyEvolutionPlanStatus.DATASET_READY.value:
             return PolicyEvolutionRecommendation.RUN_OFFLINE_EVAL
         if str(plan.status) == PolicyEvolutionPlanStatus.OFFLINE_EVALUATED.value:
@@ -461,6 +686,180 @@ class PolicyEvolutionManager:
         )
 
 
+class PolicyAutoTrainer:
+    """Build offline candidate artifacts from policy evolution plans."""
+
+    def __init__(
+        self,
+        *,
+        training_guard: TrainingGuard | None = None,
+        manager: PolicyEvolutionManager | None = None,
+    ) -> None:
+        self.training_guard = training_guard or TrainingGuard()
+        self.manager = manager or PolicyEvolutionManager()
+
+    def train_candidate(
+        self,
+        plan: PolicyEvolutionPlan,
+        *,
+        records: tuple[Any, ...] | list[Any] | None = None,
+        dataset: Any | None = None,
+        training_mode: CandidatePolicyTrainingMode | str = CandidatePolicyTrainingMode.IMITATION,
+        training_config: dict[str, Any] | None = None,
+        registry: PolicyVersionRegistry | None = None,
+    ) -> tuple[CandidatePolicyTrainingJob, CandidatePolicyArtifact | None, PolicyVersionRegistry | None]:
+        from app.services.learned_policy import (
+            ImitationPolicy,
+            LearnedBackendReranker,
+            LearnedMetaPolicy,
+            OfflineMetaPolicyTrainer,
+            OfflinePolicyEvaluator,
+            PolicyDatasetBuilder,
+            PolicyDatasetAuditor,
+            RewardSanityChecker,
+        )
+
+        config = dict(training_config or {})
+        mode = str(getattr(training_mode, "value", training_mode))
+        job = self.manager.create_training_job(
+            plan,
+            training_mode=mode,
+            training_config=config,
+        )
+        if dataset is None:
+            dataset = PolicyDatasetBuilder().build(tuple(records or ()))
+        job = self.manager.update_training_job_status(job, CandidatePolicyTrainingJobStatus.DATASET_BUILT)
+
+        audit = PolicyDatasetAuditor().audit(dataset)
+        reward_sanity = RewardSanityChecker().check(dataset)
+        pre_guard = self.training_guard.evaluate(
+            plan,
+            dataset,
+            audit,
+            reward_sanity,
+            training_config=config,
+        )
+        if not pre_guard.allowed:
+            return (
+                self.manager.update_training_job_status(
+                    job,
+                    CandidatePolicyTrainingJobStatus.FAILED,
+                    failure_reason=_guard_failure_reason(pre_guard),
+                ),
+                None,
+                registry,
+            )
+        job = self.manager.update_training_job_status(job, CandidatePolicyTrainingJobStatus.AUDIT_PASSED)
+        job = self.manager.update_training_job_status(job, CandidatePolicyTrainingJobStatus.REWARD_SANITY_PASSED)
+
+        if mode == CandidatePolicyTrainingMode.IMITATION.value:
+            policy = ImitationPolicy().fit(dataset)
+            training_summary = {
+                "training_mode": mode,
+                "evaluation": policy.evaluate(dataset),
+                "online_enabled": False,
+            }
+            artifact_type = "imitation_policy"
+        elif mode == CandidatePolicyTrainingMode.BACKEND_RERANKER.value:
+            reranker = LearnedBackendReranker(
+                max_delta=float(config.get("max_delta", 0.01))
+            ).fit(dataset)
+            training_summary = {
+                "training_mode": mode,
+                "backend_reward_means": dict(reranker.backend_rewards),
+                "online_enabled": False,
+            }
+            artifact_type = "learned_backend_reranker"
+        elif mode == CandidatePolicyTrainingMode.META_POLICY.value:
+            policy = LearnedMetaPolicy(
+                max_delta=float(config.get("max_delta", 0.01))
+            ).fit_imitation(dataset)
+            meta_summary = OfflineMetaPolicyTrainer().train_imitation(dataset)
+            training_summary = {
+                "training_mode": mode,
+                "evaluation": meta_summary["evaluation"],
+                "imitation_pretrained": policy.imitation_pretrained,
+                "online_enabled": False,
+            }
+            artifact_type = "learned_meta_policy"
+        else:
+            failed = self.manager.update_training_job_status(
+                job,
+                CandidatePolicyTrainingJobStatus.FAILED,
+                failure_reason=f"unsupported training mode:{mode}",
+            )
+            return failed, None, registry
+
+        job = self.manager.update_training_job_status(job, CandidatePolicyTrainingJobStatus.TRAINED)
+        offline_evaluation = OfflinePolicyEvaluator(
+            learned_delta_cap=float(config.get("learned_delta_cap", 0.01))
+        ).evaluate_dataset(dataset)
+        post_guard = self.training_guard.evaluate(
+            plan,
+            dataset,
+            audit,
+            reward_sanity,
+            training_config=config,
+            offline_evaluation_summary=offline_evaluation,
+        )
+        if not post_guard.allowed:
+            return (
+                self.manager.update_training_job_status(
+                    job,
+                    CandidatePolicyTrainingJobStatus.FAILED,
+                    failure_reason=_guard_failure_reason(post_guard),
+                ),
+                None,
+                registry,
+            )
+
+        safety_summary = dict(offline_evaluation.get("learned_policy_safety") or {})
+        registry_preview = PolicyVersionRegistryEntry(
+            policy_id=plan.candidate_policy_id,
+            policy_version=plan.candidate_policy_version,
+            parent_policy_id=plan.source_policy_id,
+            parent_policy_version=plan.source_policy_version,
+            trained_on_dataset_version=dataset.dataset_version,
+            feature_schema_version=dataset.feature_schema_version,
+            reward_version=dataset.reward_version,
+            training_config_summary=config,
+            offline_evaluation_summary=_compact_offline_summary(offline_evaluation),
+            approved_for_shadow=False,
+            approved_for_safe_soft=False,
+            approved_for_live_canary=False,
+            rollback_target=(plan.source_policy_id, plan.source_policy_version),
+        )
+        artifact = CandidatePolicyArtifact(
+            policy_id=plan.candidate_policy_id,
+            policy_version=plan.candidate_policy_version,
+            parent_policy_id=plan.source_policy_id,
+            parent_policy_version=plan.source_policy_version,
+            artifact_type=artifact_type,
+            training_mode=mode,
+            dataset_version=dataset.dataset_version,
+            feature_schema_version=dataset.feature_schema_version,
+            reward_version=dataset.reward_version,
+            training_summary=training_summary,
+            offline_evaluation_summary=_compact_offline_summary(offline_evaluation),
+            safety_summary=safety_summary,
+            eligible_for_shadow_proposal=bool(
+                offline_evaluation.get("learned_policy_safety", {}).get("passed", False)
+            ),
+            eligible_for_canary_proposal=False,
+            registry_entry_preview=_plain_dict(registry_preview),
+        )
+        if registry is not None:
+            registry = registry.register(registry_preview)
+        return (
+            self.manager.update_training_job_status(
+                job,
+                CandidatePolicyTrainingJobStatus.OFFLINE_EVALUATED,
+            ),
+            artifact,
+            registry,
+        )
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -491,6 +890,30 @@ def _plan_reasons(
     if audit_summary and audit_summary.get("audit_version"):
         reasons.append(f"audit:{audit_summary['audit_version']}")
     return reasons
+
+
+def _has_unknown_counterfactual(dataset: Any) -> bool:
+    for row in getattr(dataset, "records", ()) or ():
+        outcome = row.get("outcome") or {}
+        if outcome.get("counterfactual_label") == "unknown_counterfactual":
+            return True
+    return False
+
+
+def _guard_failure_reason(result: TrainingGuardResult) -> str:
+    return "; ".join(
+        str(violation.get("check", "training_guard_violation"))
+        for violation in result.violations
+    ) or "training_guard_violation"
+
+
+def _compact_offline_summary(report: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "imitation_policy_summary": dict(report.get("imitation_policy_summary") or {}),
+        "learned_reranker_summary": dict(report.get("learned_reranker_summary") or {}),
+        "learned_policy_safety": dict(report.get("learned_policy_safety") or {}),
+        "n_learned_policy_traces": len(report.get("learned_policy_traces") or ()),
+    }
 
 
 def _plain_dict(value: Any) -> dict[str, Any]:

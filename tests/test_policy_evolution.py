@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
 
+from app.optimization.backend_selection import rank_backends
+import app.services.policy_evolution as policy_evolution
 from app.services.policy_evolution import (
+    CandidatePolicyArtifact,
+    CandidatePolicyTrainingJobStatus,
+    CandidatePolicyTrainingMode,
     EvolutionGuard,
     PolicyEvolutionManager,
     PolicyEvolutionPlan,
@@ -10,8 +16,17 @@ from app.services.policy_evolution import (
     PolicyEvolutionRecommendation,
     PolicyEvolutionTrigger,
     PolicyEvolutionTriggerType,
+    PolicyAutoTrainer,
     PolicyVersionRegistry,
     PolicyVersionRegistryEntry,
+    TrainingGuard,
+)
+from app.services.learned_policy import (
+    PolicyDataset,
+    PolicyDatasetAuditor,
+    PolicyDatasetBuilder,
+    RewardSanityChecker,
+    replay_records_from_traces,
 )
 from app.services.strategy_selector import PhaseConfig, select_strategy
 from tests.fixtures.strategy_replay import all_replay_scenarios
@@ -74,6 +89,14 @@ def _safe_plan(**kwargs):
         reward_version=reward_version,
         **kwargs,
     )
+
+
+def _training_dataset():
+    traces = [
+        select_strategy(snapshot, config=PhaseConfig()).strategy_trace
+        for snapshot in all_replay_scenarios()
+    ]
+    return PolicyDatasetBuilder().build(replay_records_from_traces(traces))
 
 
 def test_evolution_trigger_serialization_and_round_trip():
@@ -259,7 +282,7 @@ def test_manager_creates_plans_but_does_not_train_or_modify_live_selector():
     assert plan.candidate_policy_version == "v2.candidate"
     assert plan.promotion_allowed is False
     assert guard.allowed is True
-    assert report.recommendation == PolicyEvolutionRecommendation.PREPARE_DATASET
+    assert report.recommendation == PolicyEvolutionRecommendation.TRAIN_CANDIDATE
     assert not hasattr(manager, "train")
     assert after.backend_name == before.backend_name
     assert after.phase == before.phase
@@ -276,3 +299,169 @@ def test_default_bo_mcp_nexus_backend_behavior_remains_unchanged():
 
     assert after.backend_name == before.backend_name
     assert after.strategy_trace.selected_backend == before.strategy_trace.selected_backend
+
+
+def test_training_job_lifecycle_transitions():
+    manager = PolicyEvolutionManager()
+    plan = _safe_plan()
+
+    job = manager.create_training_job(
+        plan,
+        training_mode=CandidatePolicyTrainingMode.IMITATION,
+        training_config={"max_delta": 0.01},
+    )
+    built = manager.update_training_job_status(job, CandidatePolicyTrainingJobStatus.DATASET_BUILT)
+    done = manager.update_training_job_status(built, CandidatePolicyTrainingJobStatus.OFFLINE_EVALUATED)
+
+    assert job.status == "created"
+    assert job.training_mode == "imitation"
+    assert built.status == "dataset_built"
+    assert done.status == "offline_evaluated"
+    assert done.completed_at is not None
+
+
+def test_training_guard_blocks_failed_audit():
+    dataset = PolicyDataset((
+        {
+            "campaign_id": "c",
+            "loop_id": "r",
+            "state_features": {},
+            "context_features": {},
+            "available_actions": [],
+            "selected_intent": "optimize",
+            "selected_mode": "exploit",
+            "selected_backend": "nexus_gp_bo",
+            "candidate_backends": [],
+            "applied_influences": [],
+            "reward": None,
+            "outcome": None,
+            "safety_flags": [],
+            "record_version": "policy_training_record_v1",
+        },
+    ))
+    audit = PolicyDatasetAuditor().audit(dataset)
+    reward = RewardSanityChecker().check(dataset)
+
+    result = TrainingGuard().evaluate(_safe_plan(), dataset, audit, reward)
+
+    assert result.allowed is False
+    assert "dataset_audit_failed" in {violation["check"] for violation in result.violations}
+
+
+def test_training_guard_blocks_failed_reward_sanity():
+    dataset = _training_dataset()
+    row = dict(dataset.records[0])
+    row["reward"] = {"composite_reward": 0.1, "reward_version": dataset.reward_version}
+    broken = PolicyDataset(
+        (row,),
+        dataset_version=dataset.dataset_version,
+        feature_schema_version=dataset.feature_schema_version,
+        reward_version=dataset.reward_version,
+    )
+    audit = PolicyDatasetAuditor().audit(broken)
+    reward = RewardSanityChecker().check(broken)
+
+    result = TrainingGuard().evaluate(_safe_plan(), broken, audit, reward)
+
+    assert result.allowed is False
+    assert "reward_sanity_failed" in {violation["check"] for violation in result.violations}
+
+
+def test_training_guard_blocks_unknown_counterfactual_as_ground_truth_reward():
+    dataset = _training_dataset()
+    audit = PolicyDatasetAuditor().audit(dataset)
+    reward = RewardSanityChecker().check(dataset)
+
+    result = TrainingGuard().evaluate(
+        _safe_plan(),
+        dataset,
+        audit,
+        reward,
+        training_config={"use_unknown_counterfactual_as_ground_truth": True},
+    )
+
+    assert result.allowed is False
+    assert "unknown_counterfactual_as_ground_truth" in {
+        violation["check"] for violation in result.violations
+    }
+
+
+def test_candidate_artifact_is_created_only_after_offline_evaluation():
+    plan = _safe_plan()
+    job, artifact, _registry = PolicyAutoTrainer().train_candidate(
+        plan,
+        dataset=_training_dataset(),
+        training_mode=CandidatePolicyTrainingMode.IMITATION,
+    )
+
+    assert job.status == "offline_evaluated"
+    assert job.completed_at is not None
+    assert isinstance(artifact, CandidatePolicyArtifact)
+    assert artifact.offline_evaluation_summary
+    assert artifact.safety_summary["passed"] is True
+    assert artifact.eligible_for_shadow_proposal is True
+    assert artifact.eligible_for_canary_proposal is False
+
+
+def test_registry_receives_candidate_entry_unapproved_by_default():
+    registry = _registry()
+    plan = _safe_plan()
+
+    job, artifact, updated = PolicyAutoTrainer().train_candidate(
+        plan,
+        dataset=_training_dataset(),
+        training_mode=CandidatePolicyTrainingMode.BACKEND_RERANKER,
+        registry=registry,
+    )
+    entry = updated.get(plan.candidate_policy_id, plan.candidate_policy_version)
+
+    assert job.status == "offline_evaluated"
+    assert artifact.registry_entry_preview["approved_for_shadow"] is False
+    assert entry is not None
+    assert entry.approved_for_shadow is False
+    assert entry.approved_for_safe_soft is False
+    assert entry.approved_for_live_canary is False
+
+
+def test_manager_attach_training_result_requires_offline_evaluation():
+    manager = PolicyEvolutionManager()
+    plan = _safe_plan()
+    _job, artifact, _registry = PolicyAutoTrainer().train_candidate(
+        plan,
+        dataset=_training_dataset(),
+        training_mode=CandidatePolicyTrainingMode.META_POLICY,
+    )
+
+    updated = manager.attach_training_result(plan, artifact)
+
+    assert updated.status == "offline_evaluated"
+    assert manager.recommend_next_step(updated) == PolicyEvolutionRecommendation.APPROVE_SHADOW
+
+
+def test_policy_auto_trainer_does_not_import_or_modify_strategy_selector():
+    source = inspect.getsource(policy_evolution)
+
+    assert "from app.services.strategy_selector" not in source
+    assert "import app.services.strategy_selector" not in source
+    assert "rank_backends(" not in source
+
+
+def test_live_rank_backends_behavior_remains_unchanged_after_auto_training():
+    before = rank_backends(
+        "optimize",
+        ("nexus_gp_bo", "built_in"),
+        {"nexus_gp_bo": True, "built_in": True},
+    )
+
+    PolicyAutoTrainer().train_candidate(
+        _safe_plan(),
+        dataset=_training_dataset(),
+        training_mode=CandidatePolicyTrainingMode.IMITATION,
+    )
+    after = rank_backends(
+        "optimize",
+        ("nexus_gp_bo", "built_in"),
+        {"nexus_gp_bo": True, "built_in": True},
+    )
+
+    assert after == before
