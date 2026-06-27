@@ -55,22 +55,6 @@ def check_environment_vars() -> CheckResult:
             elapsed_ms=_elapsed(t0),
         )
 
-    valid_execution_backends = {"local", "puda"}
-    if settings.execution_backend not in valid_execution_backends:
-        return CheckResult(
-            name="environment_vars",
-            ok=False,
-            message=f"EXECUTION_BACKEND='{settings.execution_backend}' invalid; "
-            f"expected one of {valid_execution_backends}",
-            elapsed_ms=_elapsed(t0),
-        )
-
-    if settings.telegram_bot_token and not settings.telegram_allowed_chat_ids:
-        warnings.append(
-            "TELEGRAM_BOT_TOKEN is set but TELEGRAM_ALLOWED_CHAT_IDS is empty; "
-            "run-control commands will be denied"
-        )
-
     # LLM_PROVIDER must be known
     valid_providers = {"mock", "anthropic", "openai"}
     if settings.llm_provider not in valid_providers:

@@ -25,7 +25,6 @@ from app.services.memory import seed_initial_recipes, start_memory_listener, sto
 from app.services.metrics import start_metrics_listener, stop_metrics_listener
 from app.services.reviewer import start_reviewer_listener, stop_reviewer_listener
 from app.services.scheduler import OrchestratorScheduler
-from app.services.telegram_bot import start_telegram_bot, stop_telegram_bot
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +71,6 @@ async def lifespan(_: FastAPI):
 
     # ---- Phase 5: Scheduler ----
     await scheduler.start()
-    telegram_service = await start_telegram_bot()
 
     elapsed = (time.monotonic() - t0) * 1000
     logger.info("HELIOS startup complete in %.0f ms", elapsed)
@@ -81,8 +79,6 @@ async def lifespan(_: FastAPI):
         yield
     finally:
         logger.info("HELIOS shutting down …")
-        if telegram_service is not None:
-            await stop_telegram_bot()
         await scheduler.stop()
         set_event_bus(None)
         await stop_governance_listener(governance_sub, event_bus)

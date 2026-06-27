@@ -44,11 +44,6 @@ logger = logging.getLogger(__name__)
 def _create_adapter() -> InstrumentAdapter:
     """Instantiate the correct adapter based on settings."""
     settings = get_settings()
-    if settings.execution_backend == "puda":
-        from app.adapters.puda_execution_backend import PudaExecutionBackend
-
-        return PudaExecutionBackend()
-
     mode = settings.adapter_mode
 
     if mode == "battery_lab":
@@ -181,25 +176,6 @@ def _get_contract_for_step(primitive: str) -> ActionContract | None:
     return None
 
 
-def _execute_backend_step(
-    *,
-    adapter: InstrumentAdapter,
-    run_id: str,
-    step: dict[str, Any],
-    instrument_id: str,
-    primitive: str,
-    params: dict[str, Any],
-) -> dict[str, Any]:
-    execute_step = getattr(adapter, "execute_step", None)
-    if callable(execute_step):
-        return execute_step(run_id=run_id, step=step, instrument_id=instrument_id)
-    return adapter.execute_primitive(
-        instrument_id=instrument_id,
-        primitive=primitive,
-        params=params,
-    )
-
-
 def _execute_step(
     *,
     adapter: InstrumentAdapter,
@@ -308,20 +284,14 @@ def _execute_step(
                         # Execute with timeout using concurrent.futures
                         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
                             future = pool.submit(
-                                _execute_backend_step,
-                                adapter=adapter,
-                                run_id=run_id,
-                                step=step,
+                                adapter.execute_primitive,
                                 instrument_id=instrument_id,
                                 primitive=primitive,
                                 params=params,
                             )
                             result = future.result(timeout=timeout_seconds)
                     else:
-                        result = _execute_backend_step(
-                            adapter=adapter,
-                            run_id=run_id,
-                            step=step,
+                        result = adapter.execute_primitive(
                             instrument_id=instrument_id,
                             primitive=primitive,
                             params=params,
@@ -401,10 +371,7 @@ def _execute_step(
                 if recovery_result.attempted and recovery_result.succeeded:
                     # Retry original step ONE more time after recovery
                     try:
-                        result = _execute_backend_step(
-                            adapter=adapter,
-                            run_id=run_id,
-                            step=step,
+                        result = adapter.execute_primitive(
                             instrument_id=instrument_id,
                             primitive=primitive,
                             params=params,
@@ -519,8 +486,6 @@ def execute_run(run_id: str) -> int:
 
     try:
         steps = worker_list_steps(run_id)
-        for index, step in enumerate(steps):
-            step["_step_number"] = index
         finished_step_keys = worker_get_completed_step_keys(run_id)
         failed_step_keys: set[str] = set()
 

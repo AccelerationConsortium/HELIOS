@@ -526,7 +526,7 @@ function connectSSE(campaignId) {
         'round_start', 'campaign_complete', 'round_complete',
         'strategy_decision', 'stabilize_execution',
         'well_allocator_init', 'well_exhausted',
-        'recovery_phase', 'recovery_decision', 'recovery_success', 'recovery_failed',
+        'recovery_decision', 'recovery_success', 'recovery_failed',
         'chemical_safety_alert',
         // Human-in-the-loop approval events
         'approval_requested', 'approval_received', 'approval_rejected',
@@ -759,30 +759,6 @@ function handleSSEEvent(type, data) {
                 execStep.detail = `${severity} ${data.error_type} → ${message}`;
                 execStep.status = data.decision === 'retry' ? 'thinking' :
                                  data.decision === 'abort' ? 'failure' : 'warning';
-                updateStepDOM(`${roundId}-execute`);
-            }
-            break;
-        }
-
-        case 'recovery_phase': {
-            // Recovery agent advanced one observe/diagnose/attempt/revise phase
-            const roundId = data.round ? `round-${data.round}` : findCurrentRoundId();
-            const execStep = state.pipeline.steps.find(s => s.id === `${roundId}-execute`);
-            if (execStep) {
-                const phaseLabels = {
-                    observe: 'Observe',
-                    diagnose: 'Diagnose',
-                    plan_attempt: 'Plan',
-                    evaluate: 'Evaluate',
-                    revise: 'Revise',
-                    exit: 'Exit'
-                };
-                const phase = phaseLabels[data.phase] || data.phase || 'Recovery';
-                const attempt = data.latest_attempt;
-                const action = attempt?.action || data.next_action?.name || data.decision;
-                const suffix = attempt?.attempt_no ? ` #${attempt.attempt_no}` : '';
-                execStep.detail = `Recovery ${phase}${suffix}: ${action}`;
-                execStep.status = data.terminal ? 'warning' : 'thinking';
                 updateStepDOM(`${roundId}-execute`);
             }
             break;

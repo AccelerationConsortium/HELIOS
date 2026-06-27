@@ -11,9 +11,8 @@ Architecture Position:
 from __future__ import annotations
 
 import sys
-import uuid
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -25,15 +24,6 @@ _RecoveryAgent = None
 _DeviceState = None
 _HardwareError = None
 _Action = None
-
-RecoveryPhase = Literal[
-    "observe",
-    "diagnose",
-    "plan_attempt",
-    "evaluate",
-    "revise",
-    "exit",
-]
 
 
 def _import_recovery_agent():
@@ -77,34 +67,6 @@ class RecoveryInput(BaseModel):
     stage: str | None = None
     retry_count: int = 0
     safety_packet: dict[str, Any] | None = None
-    episode: "RecoveryEpisode | None" = None
-    last_attempt_result: dict[str, Any] | None = None
-
-
-class RecoveryAttempt(BaseModel):
-    """One concrete recovery attempt inside an error episode."""
-
-    attempt_no: int
-    hypothesis: str
-    action: str
-    params: dict[str, Any] = Field(default_factory=dict)
-    result: str | None = None
-    error_after_attempt: str | None = None
-
-
-class RecoveryEpisode(BaseModel):
-    """Stateful trace for observe -> diagnose -> attempt -> revise recovery."""
-
-    episode_id: str = Field(default_factory=lambda: f"rec-{uuid.uuid4().hex[:12]}")
-    run_id: str | None = None
-    step_key: str | None = None
-    phase: RecoveryPhase = "observe"
-    original_error_type: str
-    current_error_type: str
-    observations: list[dict[str, Any]] = Field(default_factory=list)
-    attempts: list[RecoveryAttempt] = Field(default_factory=list)
-    rejected_hypotheses: list[str] = Field(default_factory=list)
-    max_attempts: int = 3
 
 
 class RecoveryOutput(BaseModel):
@@ -115,10 +77,6 @@ class RecoveryOutput(BaseModel):
     retry_delay_seconds: float = 0.0
     max_retries: int = 3
     chemical_safety_event: bool = False
-    phase: RecoveryPhase = "plan_attempt"
-    episode: RecoveryEpisode
-    next_action: dict[str, Any] | None = None
-    terminal: bool = False
 
 
 class RecoveryAgent(BaseAgent[RecoveryInput, RecoveryOutput]):
@@ -185,16 +143,10 @@ class RecoveryAgent(BaseAgent[RecoveryInput, RecoveryOutput]):
         )
 
         # Convert decision back to HELIOS format
-        episode = self._update_episode(input_data, decision.kind)
-        next_action = self._build_next_action(input_data, decision.kind, decision.actions)
         output = RecoveryOutput(
             decision=decision.kind,
             rationale=decision.rationale,
             actions=[self._serialize_action(a) for a in decision.actions],
-            phase=episode.phase,
-            episode=episode,
-            next_action=next_action,
-            terminal=decision.kind != "retry",
         )
 
         # Check if this is a chemical safety event
@@ -218,107 +170,6 @@ class RecoveryAgent(BaseAgent[RecoveryInput, RecoveryOutput]):
         )
 
         return output
-
-    def _update_episode(self, input_data: RecoveryInput, decision: str) -> RecoveryEpisode:
-        """Advance the recovery episode with the newest observation and plan."""
-        episode = input_data.episode or RecoveryEpisode(
-            run_id=input_data.telemetry.get("run_id"),
-            step_key=input_data.telemetry.get("step_key"),
-            original_error_type=input_data.error_type,
-            current_error_type=input_data.error_type,
-            max_attempts=3,
-        )
-
-        if input_data.last_attempt_result and episode.attempts:
-            last = episode.attempts[-1]
-            if last.result is None:
-                last.result = input_data.last_attempt_result.get("result", "failed")
-                last.error_after_attempt = input_data.last_attempt_result.get("error_type")
-
-        observation = {
-            "phase": "observe",
-            "error_type": input_data.error_type,
-            "error_message": input_data.error_message,
-            "device_name": input_data.device_name,
-            "retry_count": input_data.retry_count,
-            "telemetry": input_data.telemetry,
-        }
-        episode.observations.append(observation)
-        episode.current_error_type = input_data.error_type
-
-        if input_data.retry_count > 0:
-            previous = episode.attempts[-1].hypothesis if episode.attempts else input_data.error_type
-            if previous not in episode.rejected_hypotheses:
-                episode.rejected_hypotheses.append(previous)
-            episode.phase = "revise"
-
-        if decision == "retry":
-            episode.phase = "plan_attempt"
-            action_name = self._action_name_for(input_data, len(episode.attempts))
-            episode.attempts.append(
-                RecoveryAttempt(
-                    attempt_no=len(episode.attempts) + 1,
-                    hypothesis=self._hypothesis_for(input_data),
-                    action=action_name,
-                    params={
-                        "retry_count": input_data.retry_count,
-                        "error_type": input_data.error_type,
-                    },
-                )
-            )
-        else:
-            episode.phase = "exit"
-
-        return episode
-
-    def _hypothesis_for(self, input_data: RecoveryInput) -> str:
-        """Name the current recovery hypothesis in operator-readable terms."""
-        if input_data.error_type in {"timeout", "communication_error"}:
-            if input_data.retry_count == 0:
-                return "transient communication failure"
-            if input_data.retry_count == 1:
-                return "stale connection or slow device response"
-            return "persistent device communication fault"
-        if input_data.error_type == "postcondition_failed":
-            return "operation completed but system state has not stabilized"
-        return f"recoverable {input_data.error_type}"
-
-    def _action_name_for(self, input_data: RecoveryInput, prior_attempts: int) -> str:
-        """Choose a progressively stronger recovery action label."""
-        if input_data.error_type in {"timeout", "communication_error"}:
-            actions = ["retry_original", "wait_and_retry", "reset_connection_then_retry"]
-            return actions[min(prior_attempts, len(actions) - 1)]
-        if input_data.error_type == "postcondition_failed":
-            actions = ["retry_original", "wait_for_stabilization", "degrade_target_then_retry"]
-            return actions[min(prior_attempts, len(actions) - 1)]
-        return "retry_original"
-
-    def _build_next_action(
-        self,
-        input_data: RecoveryInput,
-        decision: str,
-        actions: list[Any],
-    ) -> dict[str, Any] | None:
-        """Expose the next planned action without expanding executor authority."""
-        if decision != "retry":
-            return None
-        if input_data.episode and input_data.episode.attempts:
-            action_name = input_data.episode.attempts[-1].action
-        else:
-            action_name = self._action_name_for(input_data, input_data.retry_count)
-        if actions:
-            serialized = self._serialize_action(actions[0])
-            serialized["planned_name"] = action_name
-            return serialized
-        return {
-            "name": action_name,
-            "effect": "control",
-            "device": input_data.device_name,
-            "params": {
-                "retry_count": input_data.retry_count,
-                "error_type": input_data.error_type,
-            },
-        }
 
     def _build_device_state(self, input_data: RecoveryInput):
         """Convert HELIOS input to recovery-agent DeviceState."""
@@ -408,22 +259,14 @@ class RecoveryAgent(BaseAgent[RecoveryInput, RecoveryOutput]):
         """Fallback recovery logic when recovery-agent is not available."""
         # Simple retry strategy
         if input_data.retry_count < 3:
-            episode = self._update_episode(input_data, "retry")
             return RecoveryOutput(
                 decision="retry",
                 rationale=f"Fallback: retry {input_data.error_type} (attempt {input_data.retry_count + 1}/3)",
                 retry_delay_seconds=2.0,
                 max_retries=3,
-                phase=episode.phase,
-                episode=episode,
-                next_action=self._build_next_action(input_data, "retry", []),
             )
         else:
-            episode = self._update_episode(input_data, "abort")
             return RecoveryOutput(
                 decision="abort",
                 rationale=f"Fallback: max retries exceeded for {input_data.error_type}",
-                phase=episode.phase,
-                episode=episode,
-                terminal=True,
             )
