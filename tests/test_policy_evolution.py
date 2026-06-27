@@ -18,6 +18,8 @@ from app.services.policy_evolution import (
     CandidatePolicyTrainingJobStatus,
     CandidatePolicyTrainingMode,
     EvolutionGuard,
+    FinalPromotionGuard,
+    FinalPromotionProposal,
     PolicyEvolutionManager,
     PolicyEvolutionPlan,
     PolicyEvolutionPlanStatus,
@@ -1413,6 +1415,300 @@ def test_default_backend_behavior_remains_unchanged_without_explicit_canary_appr
     manager, plan, _artifact, proposal, _registry = _eligible_canary_state()
 
     _ = manager.attach_canary_proposal(plan, proposal)
+    after = select_strategy(snapshot, config=PhaseConfig())
+
+    assert after.backend_name == before.backend_name
+    assert after.strategy_trace.selected_backend == before.strategy_trace.selected_backend
+
+
+def _approved_canary_state():
+    manager, plan, artifact, proposal, registry = _eligible_canary_state()
+    approval = _canary_approval_record(proposal)
+    _approved_proposal, registry, _guard = manager.approve_canary_proposal(
+        proposal,
+        approval,
+        registry=registry,
+    )
+    result = CanaryRunResult(
+        run_id="canary-run-final",
+        schedule_id="canary-schedule-a",
+        policy_id=artifact.policy_id,
+        policy_version=artifact.policy_version,
+        campaign_ids=("replay",),
+        round_count=8,
+        applied_round_count=6,
+        top1_changed_count=1,
+        top1_change_rate=0.1,
+        reward_vs_baseline=0.15,
+        reward_vs_safe_influence=0.03,
+        backend_failure_rate=0.0,
+        constraint_failure_rate=0.0,
+        safety_warning_count=0,
+        auto_disable_triggered=False,
+        recommendation=CanaryRunRecommendation.PROPOSE_PROMOTION,
+    )
+    registry = registry.register_canary_result(artifact.policy_id, artifact.policy_version, result)
+    return manager, plan, artifact, approval, result, registry
+
+
+def test_final_promotion_proposal_round_trip_serialization():
+    manager, plan, artifact, approval, result, registry = _approved_canary_state()
+
+    proposal = manager.create_final_promotion_proposal(
+        plan,
+        result,
+        canary_approval=approval,
+        registry=registry,
+    )
+    restored = FinalPromotionProposal.from_dict(proposal.to_dict())
+
+    assert proposal.status == "eligible"
+    assert restored.proposal_id == proposal.proposal_id
+    assert restored.policy_id == artifact.policy_id
+    assert restored.canary_run_id == "canary-run-final"
+    assert restored.required_approvals == ("human_promotion_approval",)
+    assert restored.eligible is True
+
+
+def test_final_guard_blocks_missing_canary_result():
+    manager, plan, _artifact, approval, _result, registry = _approved_canary_state()
+
+    proposal = manager.create_final_promotion_proposal(
+        plan,
+        None,
+        canary_approval=approval,
+        registry=registry,
+    )
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=approval)
+
+    assert guard.allowed is False
+    assert "missing_canary_result" in {violation["check"] for violation in guard.violations}
+
+
+def test_final_guard_blocks_canary_recommendation_not_propose_promotion():
+    manager, plan, _artifact, approval, result, registry = _approved_canary_state()
+    result = dataclasses.replace(result, recommendation=CanaryRunRecommendation.CONTINUE_CANARY)
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=approval)
+
+    assert guard.allowed is False
+    assert "canary_recommendation_not_propose_promotion" in {violation["check"] for violation in guard.violations}
+
+
+def test_final_guard_blocks_policy_not_approved_for_live_canary():
+    manager, plan, artifact, approval, result, registry = _approved_canary_state()
+    entry = registry.get(artifact.policy_id, artifact.policy_version)
+    registry = registry._replace_entry(dataclasses.replace(entry, approved_for_live_canary=False))
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=approval)
+
+    assert guard.allowed is False
+    assert "policy_not_approved_for_live_canary" in {violation["check"] for violation in guard.violations}
+
+
+def test_final_guard_blocks_expired_or_revoked_canary_approval():
+    manager, plan, _artifact, approval, result, registry = _approved_canary_state()
+    expired = dataclasses.replace(
+        approval,
+        expires_at="2000-01-01T00:00:00+00:00",
+        revoked=True,
+    )
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=expired, registry=registry)
+
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=expired)
+
+    checks = {violation["check"] for violation in guard.violations}
+    assert guard.allowed is False
+    assert {"canary_approval_expired", "canary_approval_revoked"} <= checks
+
+
+def test_final_guard_blocks_insufficient_canary_rounds():
+    manager, plan, _artifact, approval, result, registry = _approved_canary_state()
+    result = dataclasses.replace(result, round_count=2)
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=approval)
+
+    assert guard.allowed is False
+    assert "insufficient_canary_rounds" in {violation["check"] for violation in guard.violations}
+
+
+def test_final_guard_blocks_insufficient_applied_rounds():
+    manager, plan, _artifact, approval, result, registry = _approved_canary_state()
+    result = dataclasses.replace(result, applied_round_count=1)
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=approval)
+
+    assert guard.allowed is False
+    assert "insufficient_applied_rounds" in {violation["check"] for violation in guard.violations}
+
+
+def test_final_guard_blocks_safety_warning_threshold_breach():
+    manager, plan, _artifact, approval, result, registry = _approved_canary_state()
+    result = dataclasses.replace(result, safety_warning_count=1)
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=approval)
+
+    assert guard.allowed is False
+    assert "safety_warning_threshold_breached" in {violation["check"] for violation in guard.violations}
+
+
+def test_final_guard_blocks_auto_disable_triggered():
+    manager, plan, _artifact, approval, result, registry = _approved_canary_state()
+    result = dataclasses.replace(result, auto_disable_triggered=True)
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=approval)
+
+    assert guard.allowed is False
+    assert "auto_disable_triggered" in {violation["check"] for violation in guard.violations}
+
+
+def test_final_guard_blocks_backend_or_constraint_failure_increase():
+    manager, plan, _artifact, approval, result, registry = _approved_canary_state()
+    result = dataclasses.replace(result, backend_failure_rate=0.2, constraint_failure_rate=0.2)
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=approval)
+
+    checks = {violation["check"] for violation in guard.violations}
+    assert guard.allowed is False
+    assert {"backend_failure_rate_increased", "constraint_failure_rate_increased"} <= checks
+
+
+def test_final_guard_blocks_poor_reward_vs_baseline():
+    manager, plan, _artifact, approval, result, registry = _approved_canary_state()
+    result = dataclasses.replace(result, reward_vs_baseline=-0.1)
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=approval)
+
+    assert guard.allowed is False
+    assert "reward_vs_baseline_too_low" in {violation["check"] for violation in guard.violations}
+
+
+def test_final_guard_blocks_poor_reward_vs_safe_influence():
+    manager, plan, _artifact, approval, result, registry = _approved_canary_state()
+    result = dataclasses.replace(result, reward_vs_safe_influence=-0.1)
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=approval)
+
+    assert guard.allowed is False
+    assert "reward_vs_safe_influence_too_low" in {violation["check"] for violation in guard.violations}
+
+
+def test_final_guard_blocks_excessive_top1_change_rate():
+    manager, plan, _artifact, approval, result, registry = _approved_canary_state()
+    result = dataclasses.replace(result, top1_change_rate=0.9)
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=approval)
+
+    assert guard.allowed is False
+    assert "top1_change_rate_too_high" in {violation["check"] for violation in guard.violations}
+
+
+def test_final_guard_blocks_poor_confidence_calibration():
+    manager, plan, _artifact, approval, result, registry = _approved_canary_state()
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+    proposal = dataclasses.replace(proposal, confidence_calibration_summary={"calibration_score": 0.2})
+
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=approval)
+
+    assert guard.allowed is False
+    assert "confidence_calibration_too_low" in {violation["check"] for violation in guard.violations}
+
+
+def test_final_guard_blocks_unknown_counterfactual_as_primary_evidence():
+    manager, plan, _artifact, approval, result, registry = _approved_canary_state()
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+    proposal = dataclasses.replace(
+        proposal,
+        counterfactual_breakdown={"primary_improvement_evidence": "unknown_counterfactual"},
+    )
+
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=approval)
+
+    assert guard.allowed is False
+    assert "unknown_counterfactual_primary_evidence" in {violation["check"] for violation in guard.violations}
+
+
+def test_final_guard_blocks_missing_rollback_target():
+    manager, plan, _artifact, approval, result, registry = _approved_canary_state()
+    plan = dataclasses.replace(plan, rollback_policy_id=None, rollback_policy_version=None)
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+
+    guard = FinalPromotionGuard().evaluate(proposal, registry=registry, canary_approval=approval)
+
+    assert guard.allowed is False
+    assert "missing_rollback_target" in {violation["check"] for violation in guard.violations}
+
+
+def test_registry_stores_promotion_proposal_metadata_without_safe_soft_approval():
+    manager, plan, artifact, approval, result, registry = _approved_canary_state()
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+
+    updated = registry.register_final_promotion_proposal(artifact.policy_id, artifact.policy_version, proposal)
+    entry = updated.get(artifact.policy_id, artifact.policy_version)
+
+    assert entry.promotion_proposed is True
+    assert entry.promotion_proposal_id == proposal.proposal_id
+    assert entry.promotion_proposal_status == "eligible"
+    assert entry.promotion_eligibility_summary["eligible"] is True
+    assert entry.recommended_promotion_scope
+    assert entry.recommended_live_weight == proposal.max_live_weight
+    assert entry.approved_for_safe_soft is False
+
+
+def test_manager_recommends_approve_promotion_without_auto_promotion():
+    manager, plan, artifact, approval, result, registry = _approved_canary_state()
+    proposal = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
+
+    updated_plan = manager.attach_final_promotion_proposal(
+        dataclasses.replace(plan, status="canary_eligible"),
+        proposal,
+    )
+    entry = registry.get(artifact.policy_id, artifact.policy_version)
+
+    assert updated_plan.status == "promotion_eligible"
+    assert manager.recommend_next_step(updated_plan) == PolicyEvolutionRecommendation.APPROVE_PROMOTION
+    assert entry.approved_for_safe_soft is False
+
+
+def test_learned_policy_final_promotion_constraints_are_guarded():
+    plan = _safe_plan(
+        proposed_changes={
+            "learned_policy_hard_veto": True,
+            "learned_policy_add_backend": True,
+            "learned_policy_override_action": True,
+            "learned_policy_override_objective": True,
+            "auto_apply_space_revision": True,
+        },
+    )
+
+    result = EvolutionGuard().evaluate(plan)
+
+    checks = {violation["check"] for violation in result.violations}
+    assert result.allowed is False
+    assert {
+        "learned_policy_hard_veto",
+        "learned_policy_add_backend",
+        "learned_policy_override_action_objective",
+        "auto_apply_space_revision",
+    } <= checks
+
+
+def test_default_backend_behavior_remains_unchanged_after_final_promotion_proposal():
+    snapshot = all_replay_scenarios()[2]
+    before = select_strategy(snapshot, config=PhaseConfig())
+    manager, plan, _artifact, approval, result, registry = _approved_canary_state()
+
+    _ = manager.create_final_promotion_proposal(plan, result, canary_approval=approval, registry=registry)
     after = select_strategy(snapshot, config=PhaseConfig())
 
     assert after.backend_name == before.backend_name
