@@ -66,6 +66,7 @@ class CandidatePoolBuilder:
         *,
         nexus_suggestion: CandidateSuggestion | None = None,
         local_suggestion: CandidateSuggestion | None = None,
+        extra_suggestions: tuple[CandidateSuggestion, ...] = (),
     ) -> CandidatePool:
         cfg = self._config
         authority_action = _authority_action(decision)
@@ -147,6 +148,26 @@ class CandidatePoolBuilder:
                 )
             used.append("sobol")
             trace.append(f"sobol/lhs: {len(diversity)} diversity candidate(s)")
+
+        # --- Extra pluggable sources (CandidatePoolService: archetype, bomcp) ---
+        # Each inherits the authority archetype; the generating source/backend is
+        # recorded for audit, never overriding the archetype.
+        for sug in extra_suggestions:
+            if sug is None or not sug.candidates:
+                continue
+            for i, params in enumerate(sug.candidates):
+                action = _explicit_action(sug, i) or authority_action
+                candidates.append(
+                    PooledCandidate(
+                        params=dict(params),
+                        source=sug.source,
+                        source_action=action,
+                        generator_backend=sug.algorithm,
+                        rationale=sug.rationale,
+                    )
+                )
+            used.append(sug.source)
+            trace.append(f"{sug.source}: {len(sug.candidates)} candidate(s) via {sug.algorithm}")
 
         return CandidatePool(
             candidates=tuple(candidates),

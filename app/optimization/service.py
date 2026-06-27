@@ -35,6 +35,7 @@ from app.optimization.schemas import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover
+    from app.optimization.pool_service import CandidatePoolService
     from app.services.strategy_models import StrategyDecision
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,7 @@ def arbitrate_next(
     policy: OptimizationDecisionPolicy | None = None,
     provenance: ProvenanceLogger | None = None,
     pool_builder: CandidatePoolBuilder | None = None,
+    pool_service: "CandidatePoolService | None" = None,
     config: ArbitrationConfig | None = None,
 ) -> OptimizationOutcome:
     """Deep path: build a multi-source pool and arbitrate it under the authority.
@@ -136,12 +138,17 @@ def arbitrate_next(
     nexus_suggestion = _nexus_top_k(request, provider, config.k_nexus)
     local_suggestion = fallback.suggest(request)
 
-    pool = pool_builder.build(
-        request,
-        decision,
-        nexus_suggestion=nexus_suggestion,
-        local_suggestion=local_suggestion,
-    )
+    if pool_service is not None:
+        # Phase B-2: delegate pool construction to the unified source-composing
+        # service (Nexus + local + archetype + bomcp + failure-zone penalty).
+        pool = pool_service.build_pool(request, decision)
+    else:
+        pool = pool_builder.build(
+            request,
+            decision,
+            nexus_suggestion=nexus_suggestion,
+            local_suggestion=local_suggestion,
+        )
     result = policy.arbitrate(pool, request, decision, config=config)
 
     # Provenance source-of-record: the primary generator this round, plus the
