@@ -35,6 +35,7 @@ class PolicyEvolutionPlanStatus(StrEnum):
     CANARY_ELIGIBLE = "canary_eligible"
     PROMOTION_ELIGIBLE = "promotion_eligible"
     WEIGHT_TUNING_ELIGIBLE = "weight_tuning_eligible"
+    STRUCTURE_REVIEW_ELIGIBLE = "structure_review_eligible"
     PROMOTED = "promoted"
     REJECTED = "rejected"
     ROLLED_BACK = "rolled_back"
@@ -52,6 +53,7 @@ class PolicyEvolutionRecommendation(StrEnum):
     PROPOSE_PROMOTION = "propose_promotion"
     APPROVE_PROMOTION = "approve_promotion"
     APPROVE_WEIGHT_TUNING = "approve_weight_tuning"
+    REVIEW_STRUCTURE_PROPOSAL = "review_structure_proposal"
     PROMOTE = "promote"
     ROLLBACK = "rollback"
     REJECT = "reject"
@@ -208,6 +210,53 @@ class PolicyWeightTuningRiskLevel(StrEnum):
 
 class PolicyWeightTuningProposalStatus(StrEnum):
     """Lifecycle state for a policy weight tuning proposal."""
+
+    PROPOSED = "proposed"
+    ELIGIBLE = "eligible"
+    BLOCKED = "blocked"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+
+
+class PolicyStructureProposalType(StrEnum):
+    """Structural policy/controller changes that can be proposed for review."""
+
+    NEW_ACTION_MODE = "new_action_mode"
+    NEW_CAMPAIGN_INTENT = "new_campaign_intent"
+    NEW_CONTEXT_FEATURE = "new_context_feature"
+    NEW_FAILURE_SUBTYPE = "new_failure_subtype"
+    NEW_POLICY_RULE = "new_policy_rule"
+    MODIFY_POLICY_RULE = "modify_policy_rule"
+    DEPRECATE_POLICY_RULE = "deprecate_policy_rule"
+    NEW_TRANSITION_GUARD_RULE = "new_transition_guard_rule"
+    MODIFY_BACKEND_PRIOR_RULE = "modify_backend_prior_rule"
+    REWARD_FEATURE_CHANGE = "reward_feature_change"
+
+
+class PolicyStructureEvidenceSource(StrEnum):
+    """Evidence source for policy structure proposals."""
+
+    TRACE_ANALYSIS = "trace_analysis"
+    REPLAY_EVALUATION = "replay_evaluation"
+    SHADOW_RUN = "shadow_run"
+    CANARY_RUN = "canary_run"
+    REWARD_REPORT = "reward_report"
+    FAILURE_REPORT = "failure_report"
+    ABLATION_REPORT = "ablation_report"
+    HUMAN_OBSERVATION = "human_observation"
+
+
+class PolicyStructureRiskLevel(StrEnum):
+    """Risk label for structural policy proposals."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
+class PolicyStructureProposalStatus(StrEnum):
+    """Lifecycle state for structural policy proposals."""
 
     PROPOSED = "proposed"
     ELIGIBLE = "eligible"
@@ -878,6 +927,89 @@ class PolicyWeightTuningProposal:
 
 
 @dataclass(frozen=True)
+class PolicyStructureEvidence:
+    """Evidence used to justify structural policy/controller proposals."""
+
+    evidence_id: str
+    source_type: PolicyStructureEvidenceSource | str
+    metric_name: str
+    baseline_value: float | None = None
+    candidate_value: float | None = None
+    delta: float | None = None
+    confidence: float = 0.0
+    counterfactual_label: str = "observed_outcome"
+    supporting_trace_ids: tuple[str, ...] = ()
+    notes: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> PolicyStructureEvidence:
+        return cls(
+            evidence_id=str(raw.get("evidence_id", "")),
+            source_type=raw.get("source_type", PolicyStructureEvidenceSource.TRACE_ANALYSIS),
+            metric_name=str(raw.get("metric_name", "")),
+            baseline_value=_optional_float(raw.get("baseline_value")),
+            candidate_value=_optional_float(raw.get("candidate_value")),
+            delta=_optional_float(raw.get("delta")),
+            confidence=float(raw.get("confidence") or 0.0),
+            counterfactual_label=str(raw.get("counterfactual_label") or "observed_outcome"),
+            supporting_trace_ids=tuple(raw.get("supporting_trace_ids") or ()),
+            notes=str(raw.get("notes") or ""),
+        )
+
+
+@dataclass(frozen=True)
+class PolicyStructureProposal:
+    """Proposal-only review record for policy/controller structure changes."""
+
+    proposal_id: str
+    proposal_type: PolicyStructureProposalType | str
+    title: str
+    description: str
+    current_behavior: str
+    proposed_behavior: str
+    evidence: tuple[PolicyStructureEvidence, ...] = ()
+    evidence_summary: dict[str, Any] = field(default_factory=dict)
+    affected_components: tuple[str, ...] = ()
+    risk_level: PolicyStructureRiskLevel | str = PolicyStructureRiskLevel.MEDIUM
+    requires_human_approval: bool = True
+    eligible: bool = False
+    eligibility_reasons: tuple[str, ...] = ()
+    status: PolicyStructureProposalStatus | str = PolicyStructureProposalStatus.PROPOSED
+    created_at: str = field(default_factory=lambda: _now_iso())
+    updated_at: str = field(default_factory=lambda: _now_iso())
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> PolicyStructureProposal:
+        return cls(
+            proposal_id=str(raw.get("proposal_id", "")),
+            proposal_type=raw.get("proposal_type", PolicyStructureProposalType.NEW_POLICY_RULE),
+            title=str(raw.get("title", "")),
+            description=str(raw.get("description", "")),
+            current_behavior=str(raw.get("current_behavior", "")),
+            proposed_behavior=str(raw.get("proposed_behavior", "")),
+            evidence=tuple(
+                item if isinstance(item, PolicyStructureEvidence) else PolicyStructureEvidence.from_dict(dict(item))
+                for item in (raw.get("evidence") or ())
+            ),
+            evidence_summary=dict(raw.get("evidence_summary") or {}),
+            affected_components=tuple(raw.get("affected_components") or ()),
+            risk_level=raw.get("risk_level", PolicyStructureRiskLevel.MEDIUM),
+            requires_human_approval=bool(raw.get("requires_human_approval", True)),
+            eligible=bool(raw.get("eligible", False)),
+            eligibility_reasons=tuple(raw.get("eligibility_reasons") or ()),
+            status=raw.get("status", PolicyStructureProposalStatus.PROPOSED),
+            created_at=str(raw.get("created_at") or _now_iso()),
+            updated_at=str(raw.get("updated_at") or _now_iso()),
+        )
+
+
+@dataclass(frozen=True)
 class PolicyVersionRegistryEntry:
     """Registered policy version metadata and lineage."""
 
@@ -924,6 +1056,11 @@ class PolicyVersionRegistryEntry:
     current_weights: dict[str, float] = field(default_factory=dict)
     recommended_weights: dict[str, float] = field(default_factory=dict)
     tuning_eligibility_summary: dict[str, Any] = field(default_factory=dict)
+    structure_proposal_id: str | None = None
+    structure_proposal_status: str | None = None
+    structure_proposal_type: str | None = None
+    structure_proposal_summary: dict[str, Any] = field(default_factory=dict)
+    structure_affected_components: tuple[str, ...] = ()
     registered_at: str = field(default_factory=lambda: _now_iso())
 
 
@@ -1253,6 +1390,31 @@ class PolicyVersionRegistry:
                 "risk_level": str(getattr(proposal.risk_level, "value", proposal.risk_level)),
                 "requires_human_approval": proposal.requires_human_approval,
             },
+        )
+        return self._replace_entry(updated)
+
+    def register_policy_structure_proposal(
+        self,
+        policy_id: str,
+        policy_version: str,
+        proposal: PolicyStructureProposal,
+    ) -> PolicyVersionRegistry:
+        entry = self.get(policy_id, policy_version)
+        if entry is None:
+            return self
+        updated = replace(
+            entry,
+            structure_proposal_id=proposal.proposal_id,
+            structure_proposal_status=str(getattr(proposal.status, "value", proposal.status)),
+            structure_proposal_type=str(getattr(proposal.proposal_type, "value", proposal.proposal_type)),
+            structure_proposal_summary={
+                "title": proposal.title,
+                "eligible": proposal.eligible,
+                "eligibility_reasons": proposal.eligibility_reasons,
+                "risk_level": str(getattr(proposal.risk_level, "value", proposal.risk_level)),
+                "requires_human_approval": proposal.requires_human_approval,
+            },
+            structure_affected_components=proposal.affected_components,
         )
         return self._replace_entry(updated)
 
@@ -2124,6 +2286,77 @@ class PolicyWeightTuningGuard:
 
 
 @dataclass(frozen=True)
+class PolicyStructureProposalGuardResult:
+    """Guardrail result for structural policy proposals."""
+
+    allowed: bool
+    violations: tuple[dict[str, Any], ...] = ()
+    warnings: tuple[dict[str, Any], ...] = ()
+    required_human_approval: bool = True
+    recommended_reviewers: tuple[str, ...] = ()
+
+
+class PolicyStructureProposalGuard:
+    """Validate policy structure proposals without modifying live behavior."""
+
+    DEFAULT_BACKEND_REGISTRY = (
+        "built_in",
+        "nexus_gp_bo",
+        "nexus_turbo",
+        "nexus_tpe",
+        "bomcp",
+        "random",
+        "sobol",
+        "lhs",
+    )
+
+    def __init__(self, *, backend_registry: tuple[str, ...] | None = None) -> None:
+        self.backend_registry = tuple(backend_registry or self.DEFAULT_BACKEND_REGISTRY)
+
+    def evaluate(self, proposal: PolicyStructureProposal) -> PolicyStructureProposalGuardResult:
+        summary = dict(proposal.evidence_summary or {})
+        violations: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+
+        if summary.get("lower_safety_gates"):
+            violations.append(_violation("lower_safety_gates", "Structure proposals cannot lower safety gates"))
+        if summary.get("lower_approval_requirements"):
+            violations.append(_violation("lower_approval_requirements", "Structure proposals cannot lower approval requirements"))
+        if summary.get("auto_apply_space_revision"):
+            violations.append(_violation("auto_apply_space_revision", "Space revisions remain approval-only"))
+        if summary.get("unknown_counterfactual_as_ground_truth") or _structure_unknown_counterfactual_ground_truth(proposal):
+            violations.append(_violation("unknown_counterfactual_as_ground_truth", "Unknown counterfactual cannot be ground truth"))
+        if summary.get("penalize_scientific_negative_backend"):
+            violations.append(_violation("penalize_scientific_negative_backend", "Scientific negative outcomes are evidence, not backend failures"))
+        if summary.get("enable_live_hard_veto"):
+            violations.append(_violation("enable_live_hard_veto", "Structure proposals cannot introduce live hard vetoes"))
+        for backend in tuple(summary.get("added_backends") or ()):
+            if backend not in self.backend_registry:
+                violations.append(_violation(
+                    "backend_outside_registry",
+                    "Structure proposal references backend outside registry",
+                    {"backend": backend},
+                ))
+        proposal_type = str(getattr(proposal.proposal_type, "value", proposal.proposal_type))
+        reward_change = proposal_type == PolicyStructureProposalType.REWARD_FEATURE_CHANGE.value
+        if (reward_change or summary.get("changes_reward_semantics")) and not summary.get("reward_version_bump"):
+            violations.append(_violation("reward_semantics_without_version_bump", "Reward semantic changes require reward_version bump metadata"))
+        if summary.get("bypass_shadow_canary_promotion_lifecycle"):
+            violations.append(_violation("bypass_lifecycle", "Structure proposals cannot bypass shadow/canary/promotion lifecycle"))
+
+        if not proposal.evidence:
+            warnings.append(_warning("missing_evidence", "Structure proposal has no supporting evidence"))
+        reviewers = _structure_recommended_reviewers(proposal)
+        return PolicyStructureProposalGuardResult(
+            allowed=not violations,
+            violations=tuple(violations),
+            warnings=tuple(warnings),
+            required_human_approval=True,
+            recommended_reviewers=reviewers,
+        )
+
+
+@dataclass(frozen=True)
 class PolicyEvolutionReport:
     """Review report for one policy-evolution plan."""
 
@@ -2164,6 +2397,7 @@ class PolicyEvolutionManager:
         final_promotion_guard: FinalPromotionGuard | None = None,
         final_approval_guard: FinalApprovalGuard | None = None,
         weight_tuning_guard: PolicyWeightTuningGuard | None = None,
+        structure_proposal_guard: PolicyStructureProposalGuard | None = None,
     ) -> None:
         self.guard = guard or EvolutionGuard()
         self.shadow_promotion_guard = shadow_promotion_guard or ShadowPromotionGuard()
@@ -2173,6 +2407,7 @@ class PolicyEvolutionManager:
         self.final_promotion_guard = final_promotion_guard or FinalPromotionGuard()
         self.final_approval_guard = final_approval_guard or FinalApprovalGuard()
         self.weight_tuning_guard = weight_tuning_guard or PolicyWeightTuningGuard()
+        self.structure_proposal_guard = structure_proposal_guard or PolicyStructureProposalGuard()
 
     def create_evolution_plan(
         self,
@@ -2875,6 +3110,75 @@ class PolicyEvolutionManager:
             f"weight tuning proposal blocked:{proposal.proposal_id}",
         )
 
+    def create_policy_structure_proposal(
+        self,
+        proposal_type: PolicyStructureProposalType | str,
+        title: str,
+        description: str,
+        current_behavior: str,
+        proposed_behavior: str,
+        evidence: tuple[PolicyStructureEvidence, ...] | list[PolicyStructureEvidence],
+        *,
+        affected_components: tuple[str, ...] = (),
+        evidence_summary: dict[str, Any] | None = None,
+        risk_level: PolicyStructureRiskLevel | str | None = None,
+    ) -> PolicyStructureProposal:
+        evidence_tuple = tuple(evidence or ())
+        proposal_type_value = str(getattr(proposal_type, "value", proposal_type))
+        proposal = PolicyStructureProposal(
+            proposal_id=f"structure-{_compact_timestamp()}-{proposal_type_value}",
+            proposal_type=proposal_type_value,
+            title=title,
+            description=description,
+            current_behavior=current_behavior,
+            proposed_behavior=proposed_behavior,
+            evidence=evidence_tuple,
+            evidence_summary=dict(evidence_summary or _structure_evidence_summary(evidence_tuple)),
+            affected_components=tuple(affected_components),
+            risk_level=str(getattr(risk_level, "value", risk_level)) if risk_level else _structure_risk_level(affected_components),
+            requires_human_approval=True,
+            eligible=bool(evidence_tuple),
+            eligibility_reasons=("evidence available; proposal requires explicit review",) if evidence_tuple else (),
+        )
+        guard = self.evaluate_policy_structure_guard(proposal)
+        return replace(
+            proposal,
+            status=(
+                PolicyStructureProposalStatus.ELIGIBLE.value
+                if guard.allowed else PolicyStructureProposalStatus.BLOCKED.value
+            ),
+            eligible=guard.allowed and proposal.eligible,
+            eligibility_reasons=tuple((
+                *proposal.eligibility_reasons,
+                *tuple(v["check"] for v in guard.violations),
+            )),
+            updated_at=_now_iso(),
+        )
+
+    def evaluate_policy_structure_guard(
+        self,
+        proposal: PolicyStructureProposal,
+    ) -> PolicyStructureProposalGuardResult:
+        return self.structure_proposal_guard.evaluate(proposal)
+
+    def attach_policy_structure_proposal(
+        self,
+        plan: PolicyEvolutionPlan,
+        proposal: PolicyStructureProposal,
+    ) -> PolicyEvolutionPlan:
+        status = str(getattr(proposal.status, "value", proposal.status))
+        if status == PolicyStructureProposalStatus.ELIGIBLE.value and proposal.eligible:
+            return self.update_plan_status(
+                plan,
+                PolicyEvolutionPlanStatus.STRUCTURE_REVIEW_ELIGIBLE,
+                f"policy structure proposal eligible:{proposal.proposal_id}",
+            )
+        return self.update_plan_status(
+            plan,
+            plan.status,
+            f"policy structure proposal blocked:{proposal.proposal_id}",
+        )
+
     def attach_shadow_proposal(
         self,
         plan: PolicyEvolutionPlan,
@@ -2934,6 +3238,8 @@ class PolicyEvolutionManager:
             return PolicyEvolutionRecommendation.APPROVE_PROMOTION
         if str(plan.status) == PolicyEvolutionPlanStatus.WEIGHT_TUNING_ELIGIBLE.value:
             return PolicyEvolutionRecommendation.APPROVE_WEIGHT_TUNING
+        if str(plan.status) == PolicyEvolutionPlanStatus.STRUCTURE_REVIEW_ELIGIBLE.value:
+            return PolicyEvolutionRecommendation.REVIEW_STRUCTURE_PROPOSAL
         if str(plan.status) == PolicyEvolutionPlanStatus.PROMOTED.value:
             return PolicyEvolutionRecommendation.KEEP_CURRENT
         return PolicyEvolutionRecommendation.KEEP_CURRENT
@@ -3380,6 +3686,43 @@ def _weight_unknown_counterfactual_primary_evidence(proposal: PolicyWeightTuning
     if primary == "unknown_counterfactual":
         return True
     return any(item.counterfactual_label == "unknown_counterfactual" and item.confidence >= 0.8 for item in proposal.evidence)
+
+
+def _structure_evidence_summary(evidence: tuple[PolicyStructureEvidence, ...]) -> dict[str, Any]:
+    return {
+        "evidence_count": len(evidence),
+        "source_types": tuple(str(getattr(item.source_type, "value", item.source_type)) for item in evidence),
+        "metric_names": tuple(item.metric_name for item in evidence),
+        "primary_improvement_evidence": "observed_or_replay_reward",
+    }
+
+
+def _structure_risk_level(affected_components: tuple[str, ...]) -> str:
+    high_risk = {"reward", "safety", "transition_guard", "backend_prior"}
+    if any(component in high_risk for component in affected_components):
+        return PolicyStructureRiskLevel.HIGH.value
+    if affected_components:
+        return PolicyStructureRiskLevel.MEDIUM.value
+    return PolicyStructureRiskLevel.LOW.value
+
+
+def _structure_unknown_counterfactual_ground_truth(proposal: PolicyStructureProposal) -> bool:
+    if str(proposal.evidence_summary.get("primary_improvement_evidence") or "") == "unknown_counterfactual":
+        return True
+    return any(item.counterfactual_label == "unknown_counterfactual" and item.confidence >= 0.8 for item in proposal.evidence)
+
+
+def _structure_recommended_reviewers(proposal: PolicyStructureProposal) -> tuple[str, ...]:
+    reviewers = {"policy_owner"}
+    components = set(proposal.affected_components)
+    proposal_type = str(getattr(proposal.proposal_type, "value", proposal.proposal_type))
+    if "reward" in components or proposal_type == PolicyStructureProposalType.REWARD_FEATURE_CHANGE.value:
+        reviewers.add("reward_owner")
+    if "safety" in components or "transition_guard" in components:
+        reviewers.add("safety_reviewer")
+    if "backend_prior" in components:
+        reviewers.add("optimization_owner")
+    return tuple(sorted(reviewers))
 
 
 def _canary_result_passes_promotion_thresholds(result: CanaryRunResult) -> bool:

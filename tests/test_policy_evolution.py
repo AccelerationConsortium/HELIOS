@@ -33,6 +33,11 @@ from app.services.policy_evolution import (
     PolicyEvolutionTrigger,
     PolicyEvolutionTriggerType,
     PolicyAutoTrainer,
+    PolicyStructureEvidence,
+    PolicyStructureEvidenceSource,
+    PolicyStructureProposal,
+    PolicyStructureProposalGuard,
+    PolicyStructureProposalType,
     PolicyVersionRegistry,
     PolicyVersionRegistryEntry,
     ShadowApprovalGuard,
@@ -2207,3 +2212,195 @@ def test_default_backend_behavior_remains_unchanged_after_weight_tuning_proposal
     assert after.backend_name == before.backend_name
     assert after.strategy_trace.selected_backend == before.strategy_trace.selected_backend
     assert manager.evaluate_weight_tuning_guard(proposal, registry=registry).allowed is True
+
+
+def _structure_evidence(metric_name="transition_warning_rate", delta=-0.1, confidence=0.8):
+    return PolicyStructureEvidence(
+        evidence_id=f"structure-evidence-{metric_name}",
+        source_type=PolicyStructureEvidenceSource.TRACE_ANALYSIS,
+        metric_name=metric_name,
+        baseline_value=0.2,
+        candidate_value=0.1,
+        delta=delta,
+        confidence=confidence,
+        counterfactual_label="observed_outcome",
+        supporting_trace_ids=("trace-a", "trace-b"),
+        notes="test structure evidence",
+    )
+
+
+def _structure_proposal(**kwargs):
+    manager = PolicyEvolutionManager()
+    proposal = manager.create_policy_structure_proposal(
+        kwargs.pop("proposal_type", PolicyStructureProposalType.NEW_POLICY_RULE),
+        kwargs.pop("title", "Add plateau validation rule"),
+        kwargs.pop("description", "Suggest a review-only policy rule for plateau contexts"),
+        kwargs.pop("current_behavior", "Plateau handling relies on existing pivot evidence"),
+        kwargs.pop("proposed_behavior", "Add a proposed validation rule for plateau review"),
+        kwargs.pop("evidence", (_structure_evidence(),)),
+        affected_components=kwargs.pop("affected_components", ("policy_rule",)),
+        evidence_summary=kwargs.pop("evidence_summary", None),
+        risk_level=kwargs.pop("risk_level", None),
+    )
+    return manager, proposal
+
+
+def test_structure_proposal_round_trip_serialization():
+    _manager, proposal = _structure_proposal()
+
+    restored = PolicyStructureProposal.from_dict(proposal.to_dict())
+
+    assert proposal.status == "eligible"
+    assert restored.proposal_id == proposal.proposal_id
+    assert restored.proposal_type == "new_policy_rule"
+    assert restored.evidence[0].supporting_trace_ids == ("trace-a", "trace-b")
+    assert restored.requires_human_approval is True
+
+
+def test_structure_guard_blocks_lowering_safety_gates():
+    _manager, proposal = _structure_proposal(evidence_summary={"lower_safety_gates": True})
+
+    guard = PolicyStructureProposalGuard().evaluate(proposal)
+
+    assert guard.allowed is False
+    assert "lower_safety_gates" in {violation["check"] for violation in guard.violations}
+
+
+def test_structure_guard_blocks_lowering_approval_requirements():
+    _manager, proposal = _structure_proposal(evidence_summary={"lower_approval_requirements": True})
+
+    guard = PolicyStructureProposalGuard().evaluate(proposal)
+
+    assert guard.allowed is False
+    assert "lower_approval_requirements" in {violation["check"] for violation in guard.violations}
+
+
+def test_structure_guard_blocks_space_revision_auto_apply():
+    _manager, proposal = _structure_proposal(evidence_summary={"auto_apply_space_revision": True})
+
+    guard = PolicyStructureProposalGuard().evaluate(proposal)
+
+    assert guard.allowed is False
+    assert "auto_apply_space_revision" in {violation["check"] for violation in guard.violations}
+
+
+def test_structure_guard_blocks_unknown_counterfactual_as_ground_truth():
+    _manager, proposal = _structure_proposal(evidence_summary={"unknown_counterfactual_as_ground_truth": True})
+
+    guard = PolicyStructureProposalGuard().evaluate(proposal)
+
+    assert guard.allowed is False
+    assert "unknown_counterfactual_as_ground_truth" in {violation["check"] for violation in guard.violations}
+
+
+def test_structure_guard_blocks_scientific_negative_backend_penalty():
+    _manager, proposal = _structure_proposal(evidence_summary={"penalize_scientific_negative_backend": True})
+
+    guard = PolicyStructureProposalGuard().evaluate(proposal)
+
+    assert guard.allowed is False
+    assert "penalize_scientific_negative_backend" in {violation["check"] for violation in guard.violations}
+
+
+def test_structure_guard_blocks_live_hard_veto_introduction():
+    _manager, proposal = _structure_proposal(evidence_summary={"enable_live_hard_veto": True})
+
+    guard = PolicyStructureProposalGuard().evaluate(proposal)
+
+    assert guard.allowed is False
+    assert "enable_live_hard_veto" in {violation["check"] for violation in guard.violations}
+
+
+def test_structure_guard_blocks_backend_addition_outside_registry():
+    _manager, proposal = _structure_proposal(evidence_summary={"added_backends": ("unknown_backend",)})
+
+    guard = PolicyStructureProposalGuard().evaluate(proposal)
+
+    assert guard.allowed is False
+    assert "backend_outside_registry" in {violation["check"] for violation in guard.violations}
+
+
+def test_structure_guard_blocks_reward_semantic_change_without_version_bump():
+    _manager, proposal = _structure_proposal(
+        proposal_type=PolicyStructureProposalType.REWARD_FEATURE_CHANGE,
+        affected_components=("reward",),
+        evidence_summary={"changes_reward_semantics": True},
+    )
+
+    guard = PolicyStructureProposalGuard().evaluate(proposal)
+
+    assert guard.allowed is False
+    assert "reward_semantics_without_version_bump" in {violation["check"] for violation in guard.violations}
+
+
+def test_structure_guard_allows_reward_semantic_change_with_version_bump_metadata():
+    _manager, proposal = _structure_proposal(
+        proposal_type=PolicyStructureProposalType.REWARD_FEATURE_CHANGE,
+        affected_components=("reward",),
+        evidence_summary={
+            "changes_reward_semantics": True,
+            "reward_version_bump": "strategy_reward_v2",
+        },
+    )
+
+    guard = PolicyStructureProposalGuard().evaluate(proposal)
+
+    assert guard.allowed is True
+    assert "reward_owner" in guard.recommended_reviewers
+
+
+def test_structure_guard_blocks_lifecycle_bypass():
+    _manager, proposal = _structure_proposal(evidence_summary={"bypass_shadow_canary_promotion_lifecycle": True})
+
+    guard = PolicyStructureProposalGuard().evaluate(proposal)
+
+    assert guard.allowed is False
+    assert "bypass_lifecycle" in {violation["check"] for violation in guard.violations}
+
+
+def test_registry_stores_structure_proposal_metadata_without_live_behavior_changes():
+    manager, proposal = _structure_proposal()
+    registry = _registry()
+    entry = registry.get("policy-a", "v2")
+    before = rank_backends(
+        "optimize",
+        ("nexus_gp_bo", "built_in"),
+        {"nexus_gp_bo": True, "built_in": True},
+    )
+
+    updated = registry.register_policy_structure_proposal(entry.policy_id, entry.policy_version, proposal)
+    after_entry = updated.get(entry.policy_id, entry.policy_version)
+    after = rank_backends(
+        "optimize",
+        ("nexus_gp_bo", "built_in"),
+        {"nexus_gp_bo": True, "built_in": True},
+    )
+
+    assert after_entry.structure_proposal_id == proposal.proposal_id
+    assert after_entry.structure_proposal_status == "eligible"
+    assert after_entry.structure_proposal_type == "new_policy_rule"
+    assert after_entry.structure_proposal_summary["title"] == proposal.title
+    assert after == before
+    assert manager.evaluate_policy_structure_guard(proposal).allowed is True
+
+
+def test_manager_recommends_review_structure_proposal_without_applying_it():
+    manager, proposal = _structure_proposal()
+    plan = _safe_plan()
+
+    updated_plan = manager.attach_policy_structure_proposal(plan, proposal)
+
+    assert updated_plan.status == "structure_review_eligible"
+    assert manager.recommend_next_step(updated_plan) == PolicyEvolutionRecommendation.REVIEW_STRUCTURE_PROPOSAL
+
+
+def test_default_backend_behavior_remains_unchanged_after_structure_proposal():
+    snapshot = all_replay_scenarios()[2]
+    before = select_strategy(snapshot, config=PhaseConfig())
+    manager, proposal = _structure_proposal()
+
+    _ = manager.attach_policy_structure_proposal(_safe_plan(), proposal)
+    after = select_strategy(snapshot, config=PhaseConfig())
+
+    assert after.backend_name == before.backend_name
+    assert after.strategy_trace.selected_backend == before.strategy_trace.selected_backend
