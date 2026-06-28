@@ -77,6 +77,170 @@ def test_safety_high_risk_overrides_strategy():
     assert plan.constraint_patch.shadow_only is True
 
 
+def test_validation_due_true_routes_to_run_validation():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            validation_summary={"validation_due": True, "confidence": 0.82},
+            strategy_selection_result={"backend": "nexus_gp_bo"},
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.RUN_VALIDATION
+    assert plan.route_target == "validation"
+    assert plan.confidence == 0.82
+    assert plan.shadow_only is True
+    assert any(e.source == "validation_summary" and e.kind == "validation_due" for e in plan.evidence)
+
+
+def test_validation_status_due_routes_to_run_validation():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            validation_summary={"status": "due"},
+            strategy_selection_result={"backend": "nexus_gp_bo"},
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.RUN_VALIDATION
+    assert plan.route_target == "validation"
+    assert plan.confidence == 0.7
+
+
+def test_high_proxy_gap_level_routes_to_revise_objective():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            objective_summary={"proxy_gap_level": "high", "confidence": 0.74},
+            strategy_selection_result={"backend": "nexus_gp_bo"},
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.REVISE_OBJECTIVE
+    assert plan.route_target == "objective_revision"
+    assert plan.confidence == 0.74
+    assert plan.objective_patch is not None
+    assert plan.objective_patch.shadow_only is True
+    assert any(e.source == "objective_summary" and e.kind == "proxy_gap" for e in plan.evidence)
+
+
+def test_high_proxy_gap_score_routes_to_revise_objective():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            objective_summary={"proxy_gap_score": 0.67},
+            strategy_selection_result={"backend": "nexus_gp_bo"},
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.REVISE_OBJECTIVE
+    assert plan.confidence == 0.67
+
+
+def test_nested_proxy_gap_assessment_routes_to_revise_objective():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            objective_summary={
+                "proxy_gap_assessment": {
+                    "level": "high",
+                    "score": 0.45,
+                }
+            },
+            strategy_selection_result={"backend": "nexus_gp_bo"},
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.REVISE_OBJECTIVE
+    assert plan.confidence == 0.45
+
+
+def test_nested_proxy_gap_level_without_score_uses_default_confidence():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            objective_summary={
+                "proxy_gap_assessment": {
+                    "level": "high",
+                }
+            },
+            strategy_selection_result={"backend": "nexus_gp_bo"},
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.REVISE_OBJECTIVE
+    assert plan.confidence == 0.65
+
+
+def test_validation_overrides_proxy_gap():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            validation_summary={"requires_validation": True},
+            objective_summary={"proxy_gap_level": "high"},
+            strategy_selection_result={"backend": "nexus_gp_bo"},
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.RUN_VALIDATION
+
+
+def test_stop_failure_safety_override_validation_and_proxy_gap():
+    validation_summary = {"validation_due": True}
+    objective_summary = {"proxy_gap_level": "high"}
+
+    stop_plan = CampaignDecisionLayer().decide(
+        _context(
+            stop_requested=True,
+            validation_summary=validation_summary,
+            objective_summary=objective_summary,
+        )
+    )
+    failure_plan = CampaignDecisionLayer().decide(
+        _context(
+            failure_summary={"requires_recovery": True},
+            validation_summary=validation_summary,
+            objective_summary=objective_summary,
+        )
+    )
+    safety_plan = CampaignDecisionLayer().decide(
+        _context(
+            safety_summary={"risk_level": "critical"},
+            validation_summary=validation_summary,
+            objective_summary=objective_summary,
+        )
+    )
+
+    assert stop_plan.action_type == CampaignDecisionAction.STOP_CAMPAIGN
+    assert failure_plan.action_type == CampaignDecisionAction.RECOVER_FAILURE
+    assert safety_plan.action_type == CampaignDecisionAction.TIGHTEN_CONSTRAINTS
+
+
+def test_objective_patch_is_shadow_only():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            objective_summary={"proxy_gap": "high"},
+            strategy_selection_result={"backend": "nexus_gp_bo"},
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.REVISE_OBJECTIVE
+    assert plan.shadow_only is True
+    assert plan.objective_patch is not None
+    assert plan.objective_patch.shadow_only is True
+    assert "functional scientific performance" in plan.objective_patch.reason
+
+
+def test_propose_candidates_still_default_when_no_validation_or_proxy_gap():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            validation_summary={"status": "passed"},
+            objective_summary={"proxy_gap_level": "medium", "proxy_gap_score": 0.4},
+            strategy_selection_result={
+                "candidate_generation_backend": "bo_mcp",
+                "confidence": 0.61,
+            },
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.PROPOSE_CANDIDATES
+    assert plan.candidate_generation_backend == "bo_mcp"
+    assert plan.confidence == 0.61
+
+
 def test_stop_requested_overrides_everything():
     plan = CampaignDecisionLayer().decide(
         _context(
