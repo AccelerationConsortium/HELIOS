@@ -266,6 +266,69 @@ class PolicyStructureProposalStatus(StrEnum):
     EXPIRED = "expired"
 
 
+class PolicyEvolutionStage(StrEnum):
+    """Auditable stages in the human-approved policy evolution workflow."""
+
+    TRIGGERED = "triggered"
+    PLANNED = "planned"
+    TRAINING_REQUESTED = "training_requested"
+    CANDIDATE_TRAINED = "candidate_trained"
+    OFFLINE_EVALUATED = "offline_evaluated"
+    SHADOW_PROPOSED = "shadow_proposed"
+    SHADOW_APPROVED = "shadow_approved"
+    SHADOW_RUNNING = "shadow_running"
+    SHADOW_COMPLETED = "shadow_completed"
+    CANARY_PROPOSED = "canary_proposed"
+    CANARY_APPROVED = "canary_approved"
+    CANARY_RUNNING = "canary_running"
+    CANARY_COMPLETED = "canary_completed"
+    PROMOTION_PROPOSED = "promotion_proposed"
+    FINAL_APPROVED = "final_approved"
+    WEIGHT_TUNING_PROPOSED = "weight_tuning_proposed"
+    STRUCTURE_REVIEW_PROPOSED = "structure_review_proposed"
+    COMPLETED = "completed"
+    REJECTED = "rejected"
+    ROLLED_BACK = "rolled_back"
+    CANCELLED = "cancelled"
+
+
+class PolicyEvolutionWorkflowStatus(StrEnum):
+    """High-level workflow status."""
+
+    ACTIVE = "active"
+    WAITING_FOR_APPROVAL = "waiting_for_approval"
+    BLOCKED = "blocked"
+    COMPLETED = "completed"
+    REJECTED = "rejected"
+    ROLLED_BACK = "rolled_back"
+    CANCELLED = "cancelled"
+
+
+class PolicyEvolutionAuditActorType(StrEnum):
+    """Actor types accepted in workflow audit logs."""
+
+    SYSTEM = "system"
+    HUMAN = "human"
+    CONFIG = "config"
+    TEST = "test"
+
+
+class PolicyEvolutionWorkflowRecommendation(StrEnum):
+    """Recommended next workflow action."""
+
+    CONTINUE_WORKFLOW = "continue_workflow"
+    WAIT_FOR_APPROVAL = "wait_for_approval"
+    RUN_TRAINING = "run_training"
+    RUN_SHADOW = "run_shadow"
+    RUN_CANARY = "run_canary"
+    APPROVE_PROMOTION = "approve_promotion"
+    REVIEW_WEIGHT_TUNING = "review_weight_tuning"
+    REVIEW_STRUCTURE_PROPOSAL = "review_structure_proposal"
+    ROLLBACK = "rollback"
+    REJECT = "reject"
+    COMPLETE = "complete"
+
+
 @dataclass(frozen=True)
 class PolicyEvolutionTrigger:
     """Structured reason to start a policy-evolution review."""
@@ -352,6 +415,95 @@ class PolicyEvolutionPlan:
             updated_at=str(raw.get("updated_at") or _now_iso()),
             proposed_changes=dict(raw.get("proposed_changes") or {}),
         )
+
+
+@dataclass(frozen=True)
+class PolicyEvolutionWorkflow:
+    """Single auditable workflow tying together policy evolution artifacts."""
+
+    workflow_id: str
+    trigger_id: str
+    plan_id: str
+    source_policy_id: str
+    source_policy_version: str
+    candidate_policy_id: str
+    candidate_policy_version: str
+    training_job_id: str | None = None
+    candidate_artifact_id: str | None = None
+    shadow_proposal_id: str | None = None
+    shadow_approval_id: str | None = None
+    shadow_schedule_id: str | None = None
+    shadow_result_id: str | None = None
+    canary_proposal_id: str | None = None
+    canary_approval_id: str | None = None
+    canary_schedule_id: str | None = None
+    canary_result_id: str | None = None
+    final_promotion_proposal_id: str | None = None
+    final_approval_id: str | None = None
+    weight_tuning_proposal_ids: tuple[str, ...] = ()
+    structure_proposal_ids: tuple[str, ...] = ()
+    current_stage: PolicyEvolutionStage | str = PolicyEvolutionStage.TRIGGERED
+    status: PolicyEvolutionWorkflowStatus | str = PolicyEvolutionWorkflowStatus.ACTIVE
+    rollback_policy_id: str | None = None
+    rollback_policy_version: str | None = None
+    created_at: str = field(default_factory=lambda: _now_iso())
+    updated_at: str = field(default_factory=lambda: _now_iso())
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> PolicyEvolutionWorkflow:
+        return cls(
+            workflow_id=str(raw.get("workflow_id", "")),
+            trigger_id=str(raw.get("trigger_id", "")),
+            plan_id=str(raw.get("plan_id", "")),
+            source_policy_id=str(raw.get("source_policy_id", "")),
+            source_policy_version=str(raw.get("source_policy_version", "")),
+            candidate_policy_id=str(raw.get("candidate_policy_id", "")),
+            candidate_policy_version=str(raw.get("candidate_policy_version", "")),
+            training_job_id=raw.get("training_job_id"),
+            candidate_artifact_id=raw.get("candidate_artifact_id"),
+            shadow_proposal_id=raw.get("shadow_proposal_id"),
+            shadow_approval_id=raw.get("shadow_approval_id"),
+            shadow_schedule_id=raw.get("shadow_schedule_id"),
+            shadow_result_id=raw.get("shadow_result_id"),
+            canary_proposal_id=raw.get("canary_proposal_id"),
+            canary_approval_id=raw.get("canary_approval_id"),
+            canary_schedule_id=raw.get("canary_schedule_id"),
+            canary_result_id=raw.get("canary_result_id"),
+            final_promotion_proposal_id=raw.get("final_promotion_proposal_id"),
+            final_approval_id=raw.get("final_approval_id"),
+            weight_tuning_proposal_ids=tuple(raw.get("weight_tuning_proposal_ids") or ()),
+            structure_proposal_ids=tuple(raw.get("structure_proposal_ids") or ()),
+            current_stage=raw.get("current_stage", PolicyEvolutionStage.TRIGGERED),
+            status=raw.get("status", PolicyEvolutionWorkflowStatus.ACTIVE),
+            rollback_policy_id=raw.get("rollback_policy_id"),
+            rollback_policy_version=raw.get("rollback_policy_version"),
+            created_at=str(raw.get("created_at") or _now_iso()),
+            updated_at=str(raw.get("updated_at") or _now_iso()),
+        )
+
+
+@dataclass(frozen=True)
+class PolicyEvolutionAuditLogEntry:
+    """Append-only audit record for workflow transitions and attachments."""
+
+    entry_id: str
+    workflow_id: str
+    actor_type: PolicyEvolutionAuditActorType | str
+    action: str
+    from_stage: PolicyEvolutionStage | str
+    to_stage: PolicyEvolutionStage | str
+    reason: str
+    guard_allowed: bool
+    guard_violations: tuple[dict[str, Any], ...] = ()
+    guard_warnings: tuple[dict[str, Any], ...] = ()
+    timestamp: str = field(default_factory=lambda: _now_iso())
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
 
 
 @dataclass(frozen=True)
@@ -1061,6 +1213,9 @@ class PolicyVersionRegistryEntry:
     structure_proposal_type: str | None = None
     structure_proposal_summary: dict[str, Any] = field(default_factory=dict)
     structure_affected_components: tuple[str, ...] = ()
+    latest_workflow_id: str | None = None
+    workflow_status_summary: dict[str, Any] = field(default_factory=dict)
+    latest_workflow_report_summary: dict[str, Any] = field(default_factory=dict)
     registered_at: str = field(default_factory=lambda: _now_iso())
 
 
@@ -1415,6 +1570,29 @@ class PolicyVersionRegistry:
                 "requires_human_approval": proposal.requires_human_approval,
             },
             structure_affected_components=proposal.affected_components,
+        )
+        return self._replace_entry(updated)
+
+    def register_workflow_metadata(
+        self,
+        policy_id: str,
+        policy_version: str,
+        workflow: PolicyEvolutionWorkflow,
+        report: Any | None = None,
+    ) -> PolicyVersionRegistry:
+        entry = self.get(policy_id, policy_version)
+        if entry is None:
+            return self
+        updated = replace(
+            entry,
+            latest_workflow_id=workflow.workflow_id,
+            workflow_status_summary={
+                "workflow_id": workflow.workflow_id,
+                "current_stage": str(getattr(workflow.current_stage, "value", workflow.current_stage)),
+                "status": str(getattr(workflow.status, "value", workflow.status)),
+                "updated_at": workflow.updated_at,
+            },
+            latest_workflow_report_summary=_plain_dict(report) if report is not None else entry.latest_workflow_report_summary,
         )
         return self._replace_entry(updated)
 
@@ -2357,6 +2535,117 @@ class PolicyStructureProposalGuard:
 
 
 @dataclass(frozen=True)
+class PolicyEvolutionWorkflowGuardResult:
+    """Guardrail result for workflow stage transitions."""
+
+    allowed: bool
+    violations: tuple[dict[str, Any], ...] = ()
+    warnings: tuple[dict[str, Any], ...] = ()
+    required_human_approval: bool = False
+
+
+class PolicyEvolutionWorkflowGuard:
+    """Validate workflow transitions without touching live runtime behavior."""
+
+    def evaluate(
+        self,
+        workflow: PolicyEvolutionWorkflow,
+        target_stage: PolicyEvolutionStage | str,
+        *,
+        actor: PolicyEvolutionAuditActorType | str = PolicyEvolutionAuditActorType.SYSTEM,
+        metadata: dict[str, Any] | None = None,
+    ) -> PolicyEvolutionWorkflowGuardResult:
+        target = str(getattr(target_stage, "value", target_stage))
+        actor_value = str(getattr(actor, "value", actor))
+        data = dict(metadata or {})
+        violations: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = []
+
+        if target == PolicyEvolutionStage.SHADOW_PROPOSED.value and not workflow.candidate_artifact_id:
+            violations.append(_violation("shadow_before_offline_evaluated", "Shadow proposal requires offline-evaluated candidate artifact"))
+        if target == PolicyEvolutionStage.SHADOW_APPROVED.value and not data.get("shadow_approval_id", workflow.shadow_approval_id):
+            violations.append(_violation("missing_shadow_approval", "Shadow approval requires explicit ShadowApprovalRecord"))
+        if target == PolicyEvolutionStage.SHADOW_RUNNING.value and not data.get("shadow_schedule_id", workflow.shadow_schedule_id):
+            violations.append(_violation("missing_shadow_schedule", "Shadow running requires ShadowRunSchedule"))
+        if target == PolicyEvolutionStage.CANARY_PROPOSED.value and not workflow.shadow_result_id:
+            violations.append(_violation("canary_before_shadow_completed", "Canary proposal requires completed shadow result"))
+        if target == PolicyEvolutionStage.CANARY_APPROVED.value and not data.get("canary_approval_id", workflow.canary_approval_id):
+            violations.append(_violation("missing_canary_approval", "Canary approval requires explicit CanaryApprovalRecord"))
+        if target == PolicyEvolutionStage.CANARY_RUNNING.value and not data.get("canary_schedule_id", workflow.canary_schedule_id):
+            violations.append(_violation("missing_canary_schedule", "Canary running requires CanaryRunSchedule"))
+        if target == PolicyEvolutionStage.PROMOTION_PROPOSED.value and not workflow.canary_result_id:
+            violations.append(_violation("promotion_before_canary_completed", "Final promotion proposal requires completed canary result"))
+        if target == PolicyEvolutionStage.FINAL_APPROVED.value and not data.get("final_approval_id", workflow.final_approval_id):
+            violations.append(_violation("missing_final_approval", "Final approval requires explicit FinalApprovalRecord"))
+        if target == PolicyEvolutionStage.COMPLETED.value:
+            missing = tuple(
+                stage for stage, value in (
+                    ("shadow_approval", workflow.shadow_approval_id),
+                    ("canary_approval", workflow.canary_approval_id),
+                    ("final_approval", workflow.final_approval_id),
+                )
+                if not value
+            )
+            if missing:
+                violations.append(_violation("missing_required_approval_stages", "Completed workflow requires approval stages", {"missing": missing}))
+        if target == PolicyEvolutionStage.WEIGHT_TUNING_PROPOSED.value and data.get("apply_weight_tuning"):
+            violations.append(_violation("auto_apply_weight_tuning", "Weight tuning proposals must not auto-apply"))
+        if target == PolicyEvolutionStage.STRUCTURE_REVIEW_PROPOSED.value and data.get("apply_structure_proposal"):
+            violations.append(_violation("auto_apply_structure_proposal", "Structure proposals must not auto-apply"))
+        if data.get("auto_apply_space_revision"):
+            violations.append(_violation("auto_apply_space_revision", "Space revisions remain approval-only"))
+        if data.get("enable_live_influence") or data.get("enable_learned_online_influence"):
+            violations.append(_violation("auto_enable_live_influence", "Workflow transitions cannot enable live influence automatically"))
+        if data.get("modify_safety_gates") or data.get("lower_approval_requirements"):
+            violations.append(_violation("safety_or_approval_gate_change", "Workflow cannot modify safety gates or approval requirements"))
+
+        approval_targets = {
+            PolicyEvolutionStage.SHADOW_APPROVED.value,
+            PolicyEvolutionStage.CANARY_APPROVED.value,
+            PolicyEvolutionStage.FINAL_APPROVED.value,
+        }
+        required_human = target in approval_targets and actor_value not in {
+            PolicyEvolutionAuditActorType.HUMAN.value,
+            PolicyEvolutionAuditActorType.CONFIG.value,
+            PolicyEvolutionAuditActorType.TEST.value,
+        }
+        if required_human:
+            warnings.append(_warning("approval_actor_review", "Approval transitions should be performed by human/config/test actors"))
+        return PolicyEvolutionWorkflowGuardResult(
+            allowed=not violations,
+            violations=tuple(violations),
+            warnings=tuple(warnings),
+            required_human_approval=required_human,
+        )
+
+
+@dataclass(frozen=True)
+class PolicyEvolutionWorkflowReport:
+    """Auditable workflow summary."""
+
+    workflow_id: str
+    current_stage: PolicyEvolutionStage | str
+    status: PolicyEvolutionWorkflowStatus | str
+    completed_stages: tuple[str, ...]
+    blocked_stages: tuple[str, ...]
+    approval_history: tuple[dict[str, Any], ...]
+    training_summary: dict[str, Any]
+    offline_evaluation_summary: dict[str, Any]
+    shadow_summary: dict[str, Any]
+    canary_summary: dict[str, Any]
+    final_approval_summary: dict[str, Any]
+    weight_tuning_summary: dict[str, Any]
+    structure_proposal_summary: dict[str, Any]
+    rollback_target: tuple[str | None, str | None]
+    guard_violations: tuple[dict[str, Any], ...]
+    audit_log_count: int
+    recommendation: PolicyEvolutionWorkflowRecommendation | str
+
+    def to_dict(self) -> dict[str, Any]:
+        return _plain_dict(self)
+
+
+@dataclass(frozen=True)
 class PolicyEvolutionReport:
     """Review report for one policy-evolution plan."""
 
@@ -3272,6 +3561,161 @@ class PolicyEvolutionManager:
         )
 
 
+class PolicyEvolutionWorkflowManager:
+    """Orchestrate policy evolution artifacts as an auditable, proposal-only workflow."""
+
+    def __init__(self, *, guard: PolicyEvolutionWorkflowGuard | None = None) -> None:
+        self.guard = guard or PolicyEvolutionWorkflowGuard()
+        self.audit_log: tuple[PolicyEvolutionAuditLogEntry, ...] = ()
+
+    def create_workflow(self, trigger: PolicyEvolutionTrigger, plan: PolicyEvolutionPlan) -> PolicyEvolutionWorkflow:
+        workflow = PolicyEvolutionWorkflow(
+            workflow_id=f"workflow-{_compact_timestamp()}-{plan.candidate_policy_id}-{plan.candidate_policy_version}",
+            trigger_id=f"{str(trigger.trigger_type)}:{trigger.created_at}",
+            plan_id=plan.plan_id,
+            source_policy_id=plan.source_policy_id,
+            source_policy_version=plan.source_policy_version,
+            candidate_policy_id=plan.candidate_policy_id,
+            candidate_policy_version=plan.candidate_policy_version,
+            current_stage=PolicyEvolutionStage.TRIGGERED.value,
+            status=PolicyEvolutionWorkflowStatus.ACTIVE.value,
+            rollback_policy_id=plan.rollback_policy_id,
+            rollback_policy_version=plan.rollback_policy_version,
+        )
+        return self.transition_stage(
+            workflow,
+            PolicyEvolutionStage.PLANNED,
+            PolicyEvolutionAuditActorType.SYSTEM,
+            "workflow planned from trigger and evolution plan",
+        )
+
+    def attach_training_job(self, workflow: PolicyEvolutionWorkflow, job: CandidatePolicyTrainingJob) -> PolicyEvolutionWorkflow:
+        workflow = replace(workflow, training_job_id=job.job_id)
+        return self.transition_stage(workflow, PolicyEvolutionStage.TRAINING_REQUESTED, PolicyEvolutionAuditActorType.SYSTEM, "training job attached")
+
+    def attach_candidate_artifact(self, workflow: PolicyEvolutionWorkflow, artifact: CandidatePolicyArtifact) -> PolicyEvolutionWorkflow:
+        workflow = replace(workflow, candidate_artifact_id=f"{artifact.policy_id}:{artifact.policy_version}")
+        return self.transition_stage(workflow, PolicyEvolutionStage.OFFLINE_EVALUATED, PolicyEvolutionAuditActorType.SYSTEM, "candidate artifact attached")
+
+    def attach_shadow_proposal(self, workflow: PolicyEvolutionWorkflow, proposal: ShadowPromotionProposal) -> PolicyEvolutionWorkflow:
+        workflow = replace(workflow, shadow_proposal_id=proposal.proposal_id)
+        return self.transition_stage(workflow, PolicyEvolutionStage.SHADOW_PROPOSED, PolicyEvolutionAuditActorType.SYSTEM, "shadow proposal attached")
+
+    def attach_shadow_approval(self, workflow: PolicyEvolutionWorkflow, approval: ShadowApprovalRecord) -> PolicyEvolutionWorkflow:
+        workflow = replace(workflow, shadow_approval_id=approval.approval_id)
+        return self.transition_stage(workflow, PolicyEvolutionStage.SHADOW_APPROVED, _actor_from_approval(approval.approval_mode), "shadow approval attached", {"shadow_approval_id": approval.approval_id})
+
+    def attach_shadow_schedule(self, workflow: PolicyEvolutionWorkflow, schedule: ShadowRunSchedule) -> PolicyEvolutionWorkflow:
+        workflow = replace(workflow, shadow_schedule_id=schedule.schedule_id)
+        return self.transition_stage(workflow, PolicyEvolutionStage.SHADOW_RUNNING, PolicyEvolutionAuditActorType.SYSTEM, "shadow schedule attached", {"shadow_schedule_id": schedule.schedule_id})
+
+    def attach_shadow_result(self, workflow: PolicyEvolutionWorkflow, result: ShadowRunResult) -> PolicyEvolutionWorkflow:
+        workflow = replace(workflow, shadow_result_id=result.run_id)
+        return self.transition_stage(workflow, PolicyEvolutionStage.SHADOW_COMPLETED, PolicyEvolutionAuditActorType.SYSTEM, "shadow result attached")
+
+    def attach_canary_proposal(self, workflow: PolicyEvolutionWorkflow, proposal: CanaryPromotionProposal) -> PolicyEvolutionWorkflow:
+        workflow = replace(workflow, canary_proposal_id=proposal.proposal_id)
+        return self.transition_stage(workflow, PolicyEvolutionStage.CANARY_PROPOSED, PolicyEvolutionAuditActorType.SYSTEM, "canary proposal attached")
+
+    def attach_canary_approval(self, workflow: PolicyEvolutionWorkflow, approval: CanaryApprovalRecord) -> PolicyEvolutionWorkflow:
+        workflow = replace(workflow, canary_approval_id=approval.approval_id)
+        return self.transition_stage(workflow, PolicyEvolutionStage.CANARY_APPROVED, _actor_from_approval(approval.approval_mode), "canary approval attached", {"canary_approval_id": approval.approval_id})
+
+    def attach_canary_schedule(self, workflow: PolicyEvolutionWorkflow, schedule: CanaryRunSchedule) -> PolicyEvolutionWorkflow:
+        workflow = replace(workflow, canary_schedule_id=schedule.schedule_id)
+        return self.transition_stage(workflow, PolicyEvolutionStage.CANARY_RUNNING, PolicyEvolutionAuditActorType.SYSTEM, "canary schedule attached", {"canary_schedule_id": schedule.schedule_id})
+
+    def attach_canary_result(self, workflow: PolicyEvolutionWorkflow, result: CanaryRunResult) -> PolicyEvolutionWorkflow:
+        workflow = replace(workflow, canary_result_id=result.run_id)
+        return self.transition_stage(workflow, PolicyEvolutionStage.CANARY_COMPLETED, PolicyEvolutionAuditActorType.SYSTEM, "canary result attached")
+
+    def attach_final_promotion_proposal(self, workflow: PolicyEvolutionWorkflow, proposal: FinalPromotionProposal) -> PolicyEvolutionWorkflow:
+        workflow = replace(workflow, final_promotion_proposal_id=proposal.proposal_id)
+        return self.transition_stage(workflow, PolicyEvolutionStage.PROMOTION_PROPOSED, PolicyEvolutionAuditActorType.SYSTEM, "final promotion proposal attached")
+
+    def attach_final_approval(self, workflow: PolicyEvolutionWorkflow, approval: FinalApprovalRecord) -> PolicyEvolutionWorkflow:
+        workflow = replace(workflow, final_approval_id=approval.approval_id)
+        return self.transition_stage(workflow, PolicyEvolutionStage.FINAL_APPROVED, _actor_from_approval(approval.approval_mode), "final approval attached", {"final_approval_id": approval.approval_id})
+
+    def attach_weight_tuning_proposal(self, workflow: PolicyEvolutionWorkflow, proposal: PolicyWeightTuningProposal) -> PolicyEvolutionWorkflow:
+        workflow = replace(workflow, weight_tuning_proposal_ids=tuple((*workflow.weight_tuning_proposal_ids, proposal.proposal_id)))
+        return self.transition_stage(workflow, PolicyEvolutionStage.WEIGHT_TUNING_PROPOSED, PolicyEvolutionAuditActorType.SYSTEM, "weight tuning proposal attached")
+
+    def attach_structure_proposal(self, workflow: PolicyEvolutionWorkflow, proposal: PolicyStructureProposal) -> PolicyEvolutionWorkflow:
+        workflow = replace(workflow, structure_proposal_ids=tuple((*workflow.structure_proposal_ids, proposal.proposal_id)))
+        return self.transition_stage(workflow, PolicyEvolutionStage.STRUCTURE_REVIEW_PROPOSED, PolicyEvolutionAuditActorType.SYSTEM, "structure proposal attached")
+
+    def transition_stage(
+        self,
+        workflow: PolicyEvolutionWorkflow,
+        target_stage: PolicyEvolutionStage | str,
+        actor: PolicyEvolutionAuditActorType | str,
+        reason: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> PolicyEvolutionWorkflow:
+        from_stage = str(getattr(workflow.current_stage, "value", workflow.current_stage))
+        target = str(getattr(target_stage, "value", target_stage))
+        guard = self.guard.evaluate(workflow, target, actor=actor, metadata=metadata)
+        status = _workflow_status_for_transition(target, guard)
+        updated = workflow
+        if guard.allowed:
+            updated = replace(
+                workflow,
+                current_stage=target,
+                status=status,
+                updated_at=_now_iso(),
+            )
+        else:
+            updated = replace(workflow, status=PolicyEvolutionWorkflowStatus.BLOCKED.value, updated_at=_now_iso())
+        self.audit_log = tuple((*self.audit_log, PolicyEvolutionAuditLogEntry(
+            entry_id=f"audit-{_compact_timestamp()}-{len(self.audit_log) + 1}",
+            workflow_id=workflow.workflow_id,
+            actor_type=str(getattr(actor, "value", actor)),
+            action="transition_stage",
+            from_stage=from_stage,
+            to_stage=target,
+            reason=reason,
+            guard_allowed=guard.allowed,
+            guard_violations=guard.violations,
+            guard_warnings=guard.warnings,
+            metadata=dict(metadata or {}),
+        )))
+        return updated
+
+    def build_report(self, workflow: PolicyEvolutionWorkflow) -> PolicyEvolutionWorkflowReport:
+        log = tuple(entry for entry in self.audit_log if entry.workflow_id == workflow.workflow_id)
+        violations = tuple(v for entry in log for v in entry.guard_violations)
+        completed = tuple(dict.fromkeys(entry.to_stage for entry in log if entry.guard_allowed))
+        blocked = tuple(dict.fromkeys(entry.to_stage for entry in log if not entry.guard_allowed))
+        approvals = tuple(
+            entry.to_dict() for entry in log
+            if entry.to_stage in {
+                PolicyEvolutionStage.SHADOW_APPROVED.value,
+                PolicyEvolutionStage.CANARY_APPROVED.value,
+                PolicyEvolutionStage.FINAL_APPROVED.value,
+            }
+        )
+        return PolicyEvolutionWorkflowReport(
+            workflow_id=workflow.workflow_id,
+            current_stage=workflow.current_stage,
+            status=workflow.status,
+            completed_stages=completed,
+            blocked_stages=blocked,
+            approval_history=approvals,
+            training_summary={"training_job_id": workflow.training_job_id},
+            offline_evaluation_summary={"candidate_artifact_id": workflow.candidate_artifact_id},
+            shadow_summary={"proposal_id": workflow.shadow_proposal_id, "approval_id": workflow.shadow_approval_id, "result_id": workflow.shadow_result_id},
+            canary_summary={"proposal_id": workflow.canary_proposal_id, "approval_id": workflow.canary_approval_id, "result_id": workflow.canary_result_id},
+            final_approval_summary={"promotion_proposal_id": workflow.final_promotion_proposal_id, "final_approval_id": workflow.final_approval_id},
+            weight_tuning_summary={"proposal_ids": workflow.weight_tuning_proposal_ids},
+            structure_proposal_summary={"proposal_ids": workflow.structure_proposal_ids},
+            rollback_target=(workflow.rollback_policy_id, workflow.rollback_policy_version),
+            guard_violations=violations,
+            audit_log_count=len(log),
+            recommendation=_workflow_recommendation(workflow),
+        )
+
+
 class PolicyAutoTrainer:
     """Build offline candidate artifacts from policy evolution plans."""
 
@@ -3723,6 +4167,71 @@ def _structure_recommended_reviewers(proposal: PolicyStructureProposal) -> tuple
     if "backend_prior" in components:
         reviewers.add("optimization_owner")
     return tuple(sorted(reviewers))
+
+
+def _actor_from_approval(mode: Any) -> str:
+    value = str(getattr(mode, "value", mode))
+    if value == "manual":
+        return PolicyEvolutionAuditActorType.HUMAN.value
+    if value == "config":
+        return PolicyEvolutionAuditActorType.CONFIG.value
+    if value == "test":
+        return PolicyEvolutionAuditActorType.TEST.value
+    return PolicyEvolutionAuditActorType.SYSTEM.value
+
+
+def _workflow_status_for_transition(target: str, guard: PolicyEvolutionWorkflowGuardResult) -> str:
+    if not guard.allowed:
+        return PolicyEvolutionWorkflowStatus.BLOCKED.value
+    if target == PolicyEvolutionStage.COMPLETED.value:
+        return PolicyEvolutionWorkflowStatus.COMPLETED.value
+    if target == PolicyEvolutionStage.REJECTED.value:
+        return PolicyEvolutionWorkflowStatus.REJECTED.value
+    if target == PolicyEvolutionStage.ROLLED_BACK.value:
+        return PolicyEvolutionWorkflowStatus.ROLLED_BACK.value
+    if target == PolicyEvolutionStage.CANCELLED.value:
+        return PolicyEvolutionWorkflowStatus.CANCELLED.value
+    if target in {
+        PolicyEvolutionStage.SHADOW_PROPOSED.value,
+        PolicyEvolutionStage.CANARY_PROPOSED.value,
+        PolicyEvolutionStage.PROMOTION_PROPOSED.value,
+        PolicyEvolutionStage.WEIGHT_TUNING_PROPOSED.value,
+        PolicyEvolutionStage.STRUCTURE_REVIEW_PROPOSED.value,
+    }:
+        return PolicyEvolutionWorkflowStatus.WAITING_FOR_APPROVAL.value
+    return PolicyEvolutionWorkflowStatus.ACTIVE.value
+
+
+def _workflow_recommendation(workflow: PolicyEvolutionWorkflow) -> str:
+    stage = str(getattr(workflow.current_stage, "value", workflow.current_stage))
+    status = str(getattr(workflow.status, "value", workflow.status))
+    if status == PolicyEvolutionWorkflowStatus.BLOCKED.value:
+        return PolicyEvolutionWorkflowRecommendation.REJECT.value
+    if stage in {PolicyEvolutionStage.PLANNED.value, PolicyEvolutionStage.TRAINING_REQUESTED.value}:
+        return PolicyEvolutionWorkflowRecommendation.RUN_TRAINING.value
+    if stage == PolicyEvolutionStage.SHADOW_PROPOSED.value:
+        return PolicyEvolutionWorkflowRecommendation.WAIT_FOR_APPROVAL.value
+    if stage == PolicyEvolutionStage.SHADOW_APPROVED.value:
+        return PolicyEvolutionWorkflowRecommendation.RUN_SHADOW.value
+    if stage == PolicyEvolutionStage.CANARY_PROPOSED.value:
+        return PolicyEvolutionWorkflowRecommendation.WAIT_FOR_APPROVAL.value
+    if stage == PolicyEvolutionStage.CANARY_APPROVED.value:
+        return PolicyEvolutionWorkflowRecommendation.RUN_CANARY.value
+    if stage == PolicyEvolutionStage.PROMOTION_PROPOSED.value:
+        return PolicyEvolutionWorkflowRecommendation.APPROVE_PROMOTION.value
+    if stage == PolicyEvolutionStage.WEIGHT_TUNING_PROPOSED.value:
+        return PolicyEvolutionWorkflowRecommendation.REVIEW_WEIGHT_TUNING.value
+    if stage == PolicyEvolutionStage.STRUCTURE_REVIEW_PROPOSED.value:
+        return PolicyEvolutionWorkflowRecommendation.REVIEW_STRUCTURE_PROPOSAL.value
+    if stage == PolicyEvolutionStage.FINAL_APPROVED.value:
+        return PolicyEvolutionWorkflowRecommendation.COMPLETE.value
+    if stage == PolicyEvolutionStage.ROLLED_BACK.value:
+        return PolicyEvolutionWorkflowRecommendation.ROLLBACK.value
+    if stage == PolicyEvolutionStage.REJECTED.value:
+        return PolicyEvolutionWorkflowRecommendation.REJECT.value
+    if stage == PolicyEvolutionStage.COMPLETED.value:
+        return PolicyEvolutionWorkflowRecommendation.COMPLETE.value
+    return PolicyEvolutionWorkflowRecommendation.CONTINUE_WORKFLOW.value
 
 
 def _canary_result_passes_promotion_thresholds(result: CanaryRunResult) -> bool:

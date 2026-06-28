@@ -38,6 +38,12 @@ from app.services.policy_evolution import (
     PolicyStructureProposal,
     PolicyStructureProposalGuard,
     PolicyStructureProposalType,
+    PolicyEvolutionAuditActorType,
+    PolicyEvolutionStage,
+    PolicyEvolutionWorkflow,
+    PolicyEvolutionWorkflowGuard,
+    PolicyEvolutionWorkflowManager,
+    PolicyEvolutionWorkflowRecommendation,
     PolicyVersionRegistry,
     PolicyVersionRegistryEntry,
     ShadowApprovalGuard,
@@ -2400,6 +2406,216 @@ def test_default_backend_behavior_remains_unchanged_after_structure_proposal():
     manager, proposal = _structure_proposal()
 
     _ = manager.attach_policy_structure_proposal(_safe_plan(), proposal)
+    after = select_strategy(snapshot, config=PhaseConfig())
+
+    assert after.backend_name == before.backend_name
+    assert after.strategy_trace.selected_backend == before.strategy_trace.selected_backend
+
+
+def _workflow_base():
+    trigger = _trigger()
+    plan = _safe_plan()
+    manager = PolicyEvolutionWorkflowManager()
+    workflow = manager.create_workflow(trigger, plan)
+    return manager, trigger, plan, workflow
+
+
+def test_workflow_round_trip_serialization():
+    _manager, _trigger_obj, _plan, workflow = _workflow_base()
+
+    restored = PolicyEvolutionWorkflow.from_dict(workflow.to_dict())
+
+    assert restored.workflow_id == workflow.workflow_id
+    assert restored.current_stage == "planned"
+    assert restored.status == "active"
+    assert restored.rollback_policy_id == "policy-a"
+
+
+def test_valid_workflow_stage_transitions():
+    wf_manager, plan, job, artifact, registry = _trained_candidate()
+    trigger = _trigger()
+    workflow = wf_manager.create_workflow(trigger, plan) if isinstance(wf_manager, PolicyEvolutionWorkflowManager) else None
+
+    manager = PolicyEvolutionWorkflowManager()
+    workflow = manager.create_workflow(trigger, plan)
+    workflow = manager.attach_training_job(workflow, job)
+    workflow = manager.attach_candidate_artifact(workflow, artifact)
+    proposal = PolicyEvolutionManager().create_shadow_promotion_proposal(plan, job, artifact)
+    workflow = manager.attach_shadow_proposal(workflow, proposal)
+    approval = _approval_record(proposal)
+    workflow = manager.attach_shadow_approval(workflow, approval)
+    schedule = PolicyEvolutionManager().schedule_shadow_run(approval)
+    workflow = manager.attach_shadow_schedule(workflow, schedule)
+    result = ShadowRunResult(
+        run_id="workflow-shadow-result",
+        schedule_id=schedule.schedule_id,
+        policy_id=artifact.policy_id,
+        policy_version=artifact.policy_version,
+        round_count=12,
+        backend_agreement_rate=0.9,
+        invalid_suggestion_rate=0.0,
+        safety_warning_count=0,
+        recommendation=ShadowRunRecommendation.PROPOSE_CANARY,
+    )
+    workflow = manager.attach_shadow_result(workflow, result)
+
+    assert workflow.current_stage == "shadow_completed"
+    assert workflow.shadow_result_id == "workflow-shadow-result"
+    assert len(manager.audit_log) >= 7
+
+
+def test_workflow_guard_blocks_shadow_before_offline_evaluation():
+    _manager, _trigger_obj, _plan, workflow = _workflow_base()
+
+    result = PolicyEvolutionWorkflowGuard().evaluate(workflow, PolicyEvolutionStage.SHADOW_PROPOSED)
+
+    assert result.allowed is False
+    assert "shadow_before_offline_evaluated" in {violation["check"] for violation in result.violations}
+
+
+def test_workflow_guard_blocks_shadow_approval_without_explicit_record():
+    _manager, _trigger_obj, _plan, workflow = _workflow_base()
+    workflow = dataclasses.replace(workflow, candidate_artifact_id="policy-a:v2", shadow_proposal_id="shadow-a")
+
+    result = PolicyEvolutionWorkflowGuard().evaluate(workflow, PolicyEvolutionStage.SHADOW_APPROVED)
+
+    assert result.allowed is False
+    assert "missing_shadow_approval" in {violation["check"] for violation in result.violations}
+
+
+def test_workflow_guard_blocks_canary_before_shadow_completion():
+    _manager, _trigger_obj, _plan, workflow = _workflow_base()
+    workflow = dataclasses.replace(workflow, candidate_artifact_id="policy-a:v2", shadow_proposal_id="shadow-a")
+
+    result = PolicyEvolutionWorkflowGuard().evaluate(workflow, PolicyEvolutionStage.CANARY_PROPOSED)
+
+    assert result.allowed is False
+    assert "canary_before_shadow_completed" in {violation["check"] for violation in result.violations}
+
+
+def test_workflow_guard_blocks_final_approval_without_record():
+    _manager, _trigger_obj, _plan, workflow = _workflow_base()
+    workflow = dataclasses.replace(
+        workflow,
+        canary_result_id="canary-result",
+        final_promotion_proposal_id="promotion-a",
+    )
+
+    result = PolicyEvolutionWorkflowGuard().evaluate(workflow, PolicyEvolutionStage.FINAL_APPROVED)
+
+    assert result.allowed is False
+    assert "missing_final_approval" in {violation["check"] for violation in result.violations}
+
+
+def test_workflow_guard_blocks_completed_if_required_approvals_missing():
+    _manager, _trigger_obj, _plan, workflow = _workflow_base()
+    workflow = dataclasses.replace(workflow, shadow_approval_id="shadow-approval")
+
+    result = PolicyEvolutionWorkflowGuard().evaluate(workflow, PolicyEvolutionStage.COMPLETED)
+
+    assert result.allowed is False
+    assert "missing_required_approval_stages" in {violation["check"] for violation in result.violations}
+
+
+def test_workflow_guard_blocks_automatic_live_influence_enablement():
+    _manager, _trigger_obj, _plan, workflow = _workflow_base()
+
+    result = PolicyEvolutionWorkflowGuard().evaluate(
+        workflow,
+        PolicyEvolutionStage.WEIGHT_TUNING_PROPOSED,
+        metadata={"enable_live_influence": True, "apply_weight_tuning": True},
+    )
+
+    checks = {violation["check"] for violation in result.violations}
+    assert result.allowed is False
+    assert {"auto_enable_live_influence", "auto_apply_weight_tuning"} <= checks
+
+
+def test_workflow_audit_log_is_appended_on_every_transition():
+    manager, _trigger_obj, _plan, workflow = _workflow_base()
+
+    first_count = len(manager.audit_log)
+    workflow = manager.transition_stage(workflow, PolicyEvolutionStage.TRAINING_REQUESTED, PolicyEvolutionAuditActorType.SYSTEM, "request training")
+    second_count = len(manager.audit_log)
+
+    assert first_count == 1
+    assert second_count == 2
+    assert manager.audit_log[-1].from_stage == "planned"
+    assert manager.audit_log[-1].to_stage == "training_requested"
+    assert workflow.current_stage == "training_requested"
+
+
+def test_workflow_report_summarizes_attached_artifacts():
+    manager, _trigger_obj, _plan, workflow = _workflow_base()
+    workflow = dataclasses.replace(
+        workflow,
+        training_job_id="train-a",
+        candidate_artifact_id="policy-a:v2",
+        shadow_proposal_id="shadow-a",
+        shadow_approval_id="shadow-approval-a",
+        shadow_result_id="shadow-result-a",
+        canary_proposal_id="canary-a",
+        canary_approval_id="canary-approval-a",
+        canary_result_id="canary-result-a",
+        final_promotion_proposal_id="promotion-a",
+        final_approval_id="final-approval-a",
+        weight_tuning_proposal_ids=("weight-a",),
+        structure_proposal_ids=("structure-a",),
+        current_stage=PolicyEvolutionStage.FINAL_APPROVED.value,
+    )
+
+    report = manager.build_report(workflow)
+
+    assert report.training_summary["training_job_id"] == "train-a"
+    assert report.offline_evaluation_summary["candidate_artifact_id"] == "policy-a:v2"
+    assert report.shadow_summary["result_id"] == "shadow-result-a"
+    assert report.canary_summary["result_id"] == "canary-result-a"
+    assert report.final_approval_summary["final_approval_id"] == "final-approval-a"
+    assert report.weight_tuning_summary["proposal_ids"] == ("weight-a",)
+    assert report.structure_proposal_summary["proposal_ids"] == ("structure-a",)
+    assert report.recommendation == PolicyEvolutionWorkflowRecommendation.COMPLETE
+
+
+def test_registry_stores_workflow_metadata_without_live_behavior_changes():
+    registry = _registry()
+    manager, _trigger_obj, _plan, workflow = _workflow_base()
+    report = manager.build_report(workflow)
+    before = rank_backends(
+        "optimize",
+        ("nexus_gp_bo", "built_in"),
+        {"nexus_gp_bo": True, "built_in": True},
+    )
+
+    updated = registry.register_workflow_metadata("policy-a", "v2", workflow, report)
+    entry = updated.get("policy-a", "v2")
+    after = rank_backends(
+        "optimize",
+        ("nexus_gp_bo", "built_in"),
+        {"nexus_gp_bo": True, "built_in": True},
+    )
+
+    assert entry.latest_workflow_id == workflow.workflow_id
+    assert entry.workflow_status_summary["current_stage"] == "planned"
+    assert entry.latest_workflow_report_summary["workflow_id"] == workflow.workflow_id
+    assert after == before
+
+
+def test_workflow_manager_does_not_import_or_modify_live_selector():
+    source = inspect.getsource(policy_evolution)
+
+    assert "from app.services.strategy_selector" not in source
+    assert "import app.services.strategy_selector" not in source
+    assert "rank_backends(" not in source
+    assert "PolicyInfluenceConfig(" not in source
+    assert "OnlineInfluenceRolloutConfig(" not in source
+
+
+def test_default_backend_behavior_remains_unchanged_after_workflow_operations():
+    snapshot = all_replay_scenarios()[2]
+    before = select_strategy(snapshot, config=PhaseConfig())
+    manager, _trigger_obj, _plan, workflow = _workflow_base()
+
+    _ = manager.transition_stage(workflow, PolicyEvolutionStage.TRAINING_REQUESTED, PolicyEvolutionAuditActorType.SYSTEM, "request training")
     after = select_strategy(snapshot, config=PhaseConfig())
 
     assert after.backend_name == before.backend_name
