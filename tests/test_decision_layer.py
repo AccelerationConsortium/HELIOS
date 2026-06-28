@@ -241,6 +241,148 @@ def test_propose_candidates_still_default_when_no_validation_or_proxy_gap():
     assert plan.confidence == 0.61
 
 
+def test_plateau_with_missing_literature_routes_to_query_literature():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            nexus_diagnostics={
+                "convergence_status": "plateau",
+                "convergence_confidence": 0.78,
+            },
+            literature_summary={},
+            strategy_selection_result={"backend": "bo_mcp"},
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.QUERY_LITERATURE
+    assert plan.route_target == "literature"
+    assert plan.confidence == 0.78
+    assert plan.shadow_only is True
+    assert plan.context_requests[0].request_type == "literature_context"
+    assert any(e.kind == "plateau_literature_missing" for e in plan.evidence)
+
+
+def test_low_failure_attribution_confidence_requests_human_observation():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            failure_summary={
+                "events": [{"failure_type": "measurement"}],
+                "attribution_confidence": 0.31,
+            },
+            strategy_selection_result={"backend": "bo_mcp"},
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.REQUEST_HUMAN_OBSERVATION
+    assert plan.route_target == "human_observation"
+    assert plan.confidence == 0.69
+    assert plan.shadow_only is True
+    assert plan.context_requests[0].request_type == "failure_attribution"
+    assert any(e.kind == "low_failure_attribution_confidence" for e in plan.evidence)
+
+
+def test_conflicting_objective_signals_request_human_observation():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            objective_summary={
+                "conflicting_signals": True,
+                "confidence": 0.73,
+                "signals": ["proxy high", "device metric improving"],
+            },
+            strategy_selection_result={"backend": "bo_mcp"},
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.REQUEST_HUMAN_OBSERVATION
+    assert plan.route_target == "human_observation"
+    assert plan.confidence == 0.73
+    assert plan.context_requests[0].request_type == "objective_disambiguation"
+    assert any(e.kind == "objective_signal_conflict" for e in plan.evidence)
+
+
+def test_backend_memory_missing_with_repeated_failure_enriches_strategy_decision():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            failure_summary={
+                "events": [
+                    {"failure_type": "backend"},
+                    {"failure_type": "backend"},
+                ],
+            },
+            backend_memory_summary={},
+            strategy_selection_result={
+                "candidate_generation_backend": "bo_mcp",
+                "confidence": 0.62,
+            },
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.PROPOSE_CANDIDATES
+    assert plan.candidate_generation_backend == "bo_mcp"
+    assert plan.confidence == 0.62
+    assert plan.shadow_only is True
+    assert plan.metadata["context_enriched"] is True
+    assert plan.context_requests[0].request_type == "backend_memory"
+    assert any(
+        e.kind == "backend_memory_missing_repeated_failure" for e in plan.evidence
+    )
+
+
+def test_validation_overrides_context_seeking_rules():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            validation_summary={"validation_due": True},
+            objective_summary={"conflicting_signals": True},
+            nexus_diagnostics={"convergence_status": "plateau"},
+            literature_summary={},
+            failure_summary={
+                "events": [{"failure_type": "measurement"}],
+                "attribution_confidence": 0.1,
+            },
+            strategy_selection_result={"backend": "bo_mcp"},
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.RUN_VALIDATION
+
+
+def test_objective_conflict_overrides_high_proxy_gap():
+    plan = CampaignDecisionLayer().decide(
+        _context(
+            objective_summary={
+                "conflicts": [{"metric": "stability"}],
+                "proxy_gap_level": "high",
+            },
+            strategy_selection_result={"backend": "bo_mcp"},
+        )
+    )
+
+    assert plan.action_type == CampaignDecisionAction.REQUEST_HUMAN_OBSERVATION
+
+
+def test_existing_guards_override_context_seeking_rules():
+    noisy_context = {
+        "validation_summary": {"validation_due": False},
+        "objective_summary": {"conflicting_signals": True},
+        "nexus_diagnostics": {"convergence_status": "plateau"},
+        "literature_summary": {},
+        "strategy_selection_result": {"backend": "bo_mcp"},
+    }
+
+    stop_plan = CampaignDecisionLayer().decide(
+        _context(stop_requested=True, **noisy_context)
+    )
+    failure_plan = CampaignDecisionLayer().decide(
+        _context(failure_summary={"blocking": True}, **noisy_context)
+    )
+    safety_plan = CampaignDecisionLayer().decide(
+        _context(safety_summary={"risk_level": "critical"}, **noisy_context)
+    )
+
+    assert stop_plan.action_type == CampaignDecisionAction.STOP_CAMPAIGN
+    assert failure_plan.action_type == CampaignDecisionAction.RECOVER_FAILURE
+    assert safety_plan.action_type == CampaignDecisionAction.TIGHTEN_CONSTRAINTS
+
+
 def test_stop_requested_overrides_everything():
     plan = CampaignDecisionLayer().decide(
         _context(

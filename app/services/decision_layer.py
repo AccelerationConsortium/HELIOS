@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from app.services.decision_models import (
+    CampaignContextRequest,
     CampaignDecisionAction,
     CampaignDecisionEvidence,
     CampaignDecisionPlan,
@@ -76,6 +77,38 @@ class CampaignDecisionLayer:
                 ],
             )
 
+        if _has_conflicting_objective_signals(context.objective_summary):
+            return CampaignDecisionPlan(
+                action_type=CampaignDecisionAction.REQUEST_HUMAN_OBSERVATION,
+                route_target="human_observation",
+                context_requests=[
+                    CampaignContextRequest(
+                        request_type="objective_disambiguation",
+                        reason=(
+                            "Objective summary contains conflicting signals; "
+                            "human observation is needed before objective routing."
+                        ),
+                        priority="high",
+                        target="objective_summary",
+                        payload=dict(context.objective_summary),
+                    )
+                ],
+                rationale=(
+                    "Conflicting objective signals make campaign-level routing "
+                    "unreliable without human context."
+                ),
+                confidence=_confidence_with_default(context.objective_summary, 0.65),
+                shadow_only=True,
+                evidence=[
+                    CampaignDecisionEvidence(
+                        source="objective_summary",
+                        kind="objective_signal_conflict",
+                        summary="Objective summary indicated conflicting signals.",
+                        payload=dict(context.objective_summary),
+                    )
+                ],
+            )
+
         proxy_gap_score = _objective_proxy_gap_score(context.objective_summary)
         if _is_high_objective_proxy_gap(context.objective_summary, proxy_gap_score):
             return CampaignDecisionPlan(
@@ -110,7 +143,84 @@ class CampaignDecisionLayer:
                 ],
             )
 
-        return self._wrap_strategy_result(context.strategy_selection_result)
+        if _has_plateau_with_missing_literature(context):
+            return CampaignDecisionPlan(
+                action_type=CampaignDecisionAction.QUERY_LITERATURE,
+                route_target="literature",
+                context_requests=[
+                    CampaignContextRequest(
+                        request_type="literature_context",
+                        reason=(
+                            "Campaign appears plateaued and literature context "
+                            "is missing."
+                        ),
+                        priority="high",
+                        target="literature_summary",
+                        payload={
+                            "nexus_diagnostics": dict(context.nexus_diagnostics),
+                            "objective_summary": dict(context.objective_summary),
+                            "literature_summary": dict(context.literature_summary),
+                        },
+                    )
+                ],
+                rationale=(
+                    "Plateau with missing literature context should request "
+                    "literature before more candidate generation."
+                ),
+                confidence=_plateau_confidence(context),
+                shadow_only=True,
+                evidence=[
+                    CampaignDecisionEvidence(
+                        source="contextual_decision_layer",
+                        kind="plateau_literature_missing",
+                        summary="Plateau signal was present while literature context was missing.",
+                        payload={
+                            "nexus_diagnostics": dict(context.nexus_diagnostics),
+                            "objective_summary": dict(context.objective_summary),
+                            "literature_summary": dict(context.literature_summary),
+                        },
+                    )
+                ],
+            )
+
+        if _has_low_failure_attribution_confidence(context.failure_summary):
+            return CampaignDecisionPlan(
+                action_type=CampaignDecisionAction.REQUEST_HUMAN_OBSERVATION,
+                route_target="human_observation",
+                context_requests=[
+                    CampaignContextRequest(
+                        request_type="failure_attribution",
+                        reason=(
+                            "Failure attribution confidence is low; human "
+                            "observation is needed before routing."
+                        ),
+                        priority="high",
+                        target="failure_summary",
+                        payload=dict(context.failure_summary),
+                    )
+                ],
+                rationale=(
+                    "Low failure-attribution confidence makes the next campaign "
+                    "route unreliable without human observation."
+                ),
+                confidence=_failure_attribution_request_confidence(
+                    context.failure_summary
+                ),
+                shadow_only=True,
+                evidence=[
+                    CampaignDecisionEvidence(
+                        source="failure_summary",
+                        kind="low_failure_attribution_confidence",
+                        summary="Failure summary had low attribution confidence.",
+                        payload=dict(context.failure_summary),
+                    )
+                ],
+            )
+
+        plan = self._wrap_strategy_result(context.strategy_selection_result)
+        if _needs_backend_memory_context(context):
+            _add_backend_memory_context_request(plan, context)
+        return plan
 
     def _wrap_strategy_result(self, result: dict[str, Any]) -> CampaignDecisionPlan:
         evidence = _strategy_evidence(result.get("evidence"))
@@ -216,6 +326,189 @@ def _is_high_objective_proxy_gap(
     )
 
 
+def _has_conflicting_objective_signals(summary: dict[str, Any]) -> bool:
+    return (
+        summary.get("conflicting_signals") is True
+        or summary.get("objective_conflict") is True
+        or summary.get("conflict") is True
+        or _has_items(summary.get("conflicts"))
+        or _has_items(summary.get("signal_conflicts"))
+    )
+
+
+def _has_plateau_with_missing_literature(context: CampaignRoundContext) -> bool:
+    return _has_plateau_signal(context) and _is_literature_missing(
+        context.literature_summary
+    )
+
+
+def _has_plateau_signal(context: CampaignRoundContext) -> bool:
+    summaries = (
+        context.nexus_diagnostics,
+        context.objective_summary,
+        context.strategy_selection_result,
+        context.metadata,
+    )
+    return any(_summary_has_plateau(summary) for summary in summaries)
+
+
+def _summary_has_plateau(summary: dict[str, Any]) -> bool:
+    return (
+        summary.get("plateau") is True
+        or summary.get("is_plateau") is True
+        or _lower(summary.get("status")) == "plateau"
+        or _lower(summary.get("convergence_status")) == "plateau"
+        or _lower(summary.get("trend")) == "plateau"
+    )
+
+
+def _is_literature_missing(summary: dict[str, Any]) -> bool:
+    if not summary:
+        return True
+    if summary.get("missing") is True or summary.get("available") is False:
+        return True
+    if summary.get("literature_missing") is True:
+        return True
+    for key in ("count", "n_papers", "papers"):
+        value = summary.get(key)
+        if isinstance(value, int | float) and value <= 0:
+            return True
+        if isinstance(value, list | tuple | set) and len(value) == 0:
+            return True
+    return False
+
+
+def _plateau_confidence(context: CampaignRoundContext) -> float:
+    for summary in (
+        context.nexus_diagnostics,
+        context.objective_summary,
+        context.strategy_selection_result,
+    ):
+        value = _as_float(
+            summary.get(
+                "plateau_confidence",
+                summary.get("convergence_confidence", summary.get("confidence")),
+            )
+        )
+        if value is not None:
+            return _clamp_confidence(value)
+    return 0.7
+
+
+def _has_low_failure_attribution_confidence(summary: dict[str, Any]) -> bool:
+    confidence = _failure_attribution_confidence(summary)
+    if confidence is None:
+        return False
+    return _has_failure_signal(summary) and confidence < 0.5
+
+
+def _failure_attribution_confidence(summary: dict[str, Any]) -> float | None:
+    for key in (
+        "attribution_confidence",
+        "failure_attribution_confidence",
+        "confidence",
+    ):
+        value = _as_float(summary.get(key))
+        if value is not None:
+            return value
+    attribution = summary.get("attribution")
+    if isinstance(attribution, dict):
+        return _as_float(attribution.get("confidence"))
+    return None
+
+
+def _has_failure_signal(summary: dict[str, Any]) -> bool:
+    return (
+        summary.get("has_failure") is True
+        or summary.get("failure") is True
+        or _has_items(summary.get("events"))
+        or _as_float(summary.get("failure_count")) not in (None, 0.0)
+    )
+
+
+def _failure_attribution_request_confidence(summary: dict[str, Any]) -> float:
+    confidence = _failure_attribution_confidence(summary)
+    if confidence is None:
+        return 0.65
+    return _clamp_confidence(1.0 - confidence)
+
+
+def _needs_backend_memory_context(context: CampaignRoundContext) -> bool:
+    return _is_backend_memory_missing(
+        context.backend_memory_summary
+    ) and _has_repeated_failure(context.failure_summary)
+
+
+def _is_backend_memory_missing(summary: dict[str, Any]) -> bool:
+    if not summary:
+        return True
+    if summary.get("missing") is True or summary.get("available") is False:
+        return True
+    if summary.get("backend_memory_missing") is True:
+        return True
+    for key in ("record_count", "n_records", "records", "history"):
+        value = summary.get(key)
+        if isinstance(value, int | float) and value <= 0:
+            return True
+        if isinstance(value, list | tuple | set) and len(value) == 0:
+            return True
+    return False
+
+
+def _has_repeated_failure(summary: dict[str, Any]) -> bool:
+    if summary.get("repeated_failure") is True or summary.get("repeated_failures") is True:
+        return True
+    for key in ("repeated_failure_count", "failure_count", "n_failures"):
+        value = _as_float(summary.get(key))
+        if value is not None and value >= 2:
+            return True
+    events = summary.get("events")
+    return isinstance(events, list | tuple) and len(events) >= 2
+
+
+def _add_backend_memory_context_request(
+    plan: CampaignDecisionPlan,
+    context: CampaignRoundContext,
+) -> None:
+    plan.context_requests.append(
+        CampaignContextRequest(
+            request_type="backend_memory",
+            reason=(
+                "Backend memory is missing while failures repeat; backend "
+                "history is needed to interpret the strategy route."
+            ),
+            priority="high",
+            target="backend_memory_summary",
+            payload={
+                "backend_memory_summary": dict(context.backend_memory_summary),
+                "failure_summary": dict(context.failure_summary),
+            },
+        )
+    )
+    plan.evidence.append(
+        CampaignDecisionEvidence(
+            source="contextual_decision_layer",
+            kind="backend_memory_missing_repeated_failure",
+            summary=(
+                "Backend memory was missing while repeated failures were present."
+            ),
+            payload={
+                "backend_memory_summary": dict(context.backend_memory_summary),
+                "failure_summary": dict(context.failure_summary),
+            },
+        )
+    )
+    plan.rationale = (
+        f"{plan.rationale} Backend memory is missing for repeated failures, "
+        "so this shadow plan requests additional context."
+    )
+    plan.metadata = {
+        **dict(plan.metadata),
+        "context_enriched": True,
+        "context_request_reason": "backend_memory_missing_repeated_failure",
+    }
+
+
 def _objective_proxy_gap_score(summary: dict[str, Any]) -> float | None:
     score = _as_float(summary.get("proxy_gap_score"))
     if score is not None:
@@ -291,6 +584,10 @@ def _lower(value: Any) -> str | None:
     if value is None:
         return None
     return str(value).lower()
+
+
+def _has_items(value: Any) -> bool:
+    return isinstance(value, list | tuple | set) and len(value) > 0
 
 
 def _fallback_action(value: Any) -> CampaignDecisionAction | None:
