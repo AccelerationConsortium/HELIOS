@@ -428,6 +428,67 @@ def is_candidate_done(
     return False
 
 
+def load_all_candidates(campaign_id: str) -> list[dict[str, Any]]:
+    """Load every persisted candidate row for a campaign (executed pool memory).
+
+    Returns one dict per ``campaign_candidates`` row with ``params`` deserialised,
+    ordered by (round_number, candidate_index). Empty list if none — callers must
+    treat absence of history as a no-op (fail-open).
+    """
+    with connection() as conn:
+        rows = conn.execute(
+            """SELECT round_number, candidate_index, status, params_json,
+                      run_id, kpi_value, qc_quality, error
+               FROM campaign_candidates
+               WHERE campaign_id = ?
+               ORDER BY round_number, candidate_index""",
+            (campaign_id,),
+        ).fetchall()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        d = row_to_dict(row)
+        if d is None:
+            continue
+        d["params"] = parse_json(d.pop("params_json"), {})
+        out.append(d)
+    return out
+
+
+def load_failed_candidates(
+    exclude_campaign_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Load failed candidate rows across all campaigns (failure-zone memory).
+
+    Returns one dict per ``campaign_candidates`` row with ``status = 'failed'``,
+    ``params`` deserialised, ``campaign_id`` included, ordered by
+    (campaign_id, round_number, candidate_index). ``exclude_campaign_id`` drops
+    one campaign (typically the current one). Empty list if none — callers must
+    treat absence of history as a no-op (fail-open).
+    """
+    query = (
+        """SELECT campaign_id, round_number, candidate_index, status,
+                  params_json, run_id, kpi_value, qc_quality, error
+           FROM campaign_candidates
+           WHERE status = 'failed'"""
+    )
+    params: list[Any] = []
+    if exclude_campaign_id is not None:
+        query += " AND campaign_id != ?"
+        params.append(exclude_campaign_id)
+    query += " ORDER BY campaign_id, round_number, candidate_index"
+
+    with connection() as conn:
+        rows = conn.execute(query, params).fetchall()
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        d = row_to_dict(row)
+        if d is None:
+            continue
+        d["params"] = parse_json(d.pop("params_json"), {})
+        out.append(d)
+    return out
+
+
 def update_candidate_graph_hash(
     campaign_id: str,
     round_num: int,
