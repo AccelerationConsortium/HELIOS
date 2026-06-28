@@ -27,6 +27,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from app.optimization.decision_evidence import evidence_for_decision
 from app.optimization.decision_policy import OptimizationDecisionPolicy
 from app.optimization.local_fallback import LocalFallbackProvider
 from app.optimization.nexus_provider import NexusOptimizationProvider
@@ -75,6 +76,7 @@ def suggest_next(
     fallback: OptimizationProvider | None = None,
     policy: OptimizationDecisionPolicy | None = None,
     provenance: ProvenanceLogger | None = None,
+    attach_evidence: bool = True,
 ) -> OptimizationOutcome:
     """Propose, validate, and record the next experiment(s) for a campaign."""
     provider = provider if provider is not None else NexusOptimizationProvider()
@@ -84,6 +86,17 @@ def suggest_next(
 
     suggestion = _suggest_with_fallback(request, provider, fallback)
     decision = policy.evaluate(suggestion, request)
-    record = provenance.record(request, suggestion, decision)
+
+    # Evidence is computed from the *already-decided* result, so it cannot
+    # change the decision. Fail-open: memory recall must never stop a round.
+    evidence = None
+    if attach_evidence:
+        try:
+            evidence = evidence_for_decision(request, decision)
+        except Exception:
+            logger.warning("decision evidence recall failed; continuing", exc_info=True)
+            evidence = None
+
+    record = provenance.record(request, suggestion, decision, evidence=evidence)
 
     return OptimizationOutcome(suggestion=suggestion, decision=decision, provenance=record)

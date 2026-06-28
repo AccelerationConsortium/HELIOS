@@ -30,8 +30,9 @@ class ProvenanceLogger:
         request: OptimizationRequest,
         suggestion: CandidateSuggestion,
         decision: DecisionResult,
+        evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        rec: dict[str, Any] = {
             "campaign_id": request.campaign_id,
             "round_index": request.round_index,
             "seed": request.seed,
@@ -49,14 +50,20 @@ class ProvenanceLogger:
             "requires_human_review": decision.requires_human_review,
             "decision_trace": list(decision.decision_trace),
         }
+        # Evidence is additive: attached only when memory recall produced
+        # something, so the record shape is unchanged when there is no history.
+        if evidence is not None:
+            rec["evidence"] = evidence
+        return rec
 
     def record(
         self,
         request: OptimizationRequest,
         suggestion: CandidateSuggestion,
         decision: DecisionResult,
+        evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        rec = self.build(request, suggestion, decision)
+        rec = self.build(request, suggestion, decision, evidence=evidence)
         self.records.append(rec)
         if self._sink is not None:
             self._sink(rec)
