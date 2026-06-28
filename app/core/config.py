@@ -85,6 +85,13 @@ class Settings:
             "NEXUS_ADVISOR_ENABLED", "false"
         ).lower() in ("true", "1", "yes")
 
+        # ---- Contextual SDL decision layer ----
+        # Shadow-only by default. When enabled, orchestrator records contextual
+        # decision traces but never changes the live campaign route.
+        self.contextual_decision_shadow_enabled: bool = os.getenv(
+            "CONTEXTUAL_DECISION_SHADOW_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+
     @staticmethod
     def _load_puda_machine_map(raw: str) -> dict[str, str]:
         try:

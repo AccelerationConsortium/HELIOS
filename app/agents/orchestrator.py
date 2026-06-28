@@ -10,6 +10,7 @@ and handles the flow of contracts between layers.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from typing import Any
@@ -18,8 +19,77 @@ from pydantic import BaseModel, Field
 
 from app.agents.base import AgentResult, BaseAgent
 from app.agents.pause import PauseRequest, PauseResult
+from app.core.config import get_settings
+from app.services.decision_layer import CampaignDecisionLayer
+from app.services.decision_trace import CampaignDecisionTraceBuilder
+from app.services.round_context import build_campaign_round_context
 
 logger = logging.getLogger(__name__)
+
+
+def _maybe_record_contextual_shadow_decision(
+    *,
+    campaign_id: str,
+    round_index: int,
+    strategy_selection_result: dict[str, Any] | None = None,
+    stop_requested: bool = False,
+    failure_summary: dict[str, Any] | None = None,
+    safety_summary: dict[str, Any] | None = None,
+    objective_summary: dict[str, Any] | None = None,
+    constraint_summary: dict[str, Any] | None = None,
+    nexus_diagnostics: dict[str, Any] | None = None,
+    backend_memory_summary: dict[str, Any] | None = None,
+    bo_mcp_summary: dict[str, Any] | None = None,
+    learning_policy_summary: dict[str, Any] | None = None,
+    validation_summary: dict[str, Any] | None = None,
+    human_observations: list[str] | None = None,
+    literature_summary: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+    actual_stage: str | None = None,
+    actual_action: str | None = None,
+) -> Any | None:
+    """Record a contextual decision trace without affecting live routing."""
+    try:
+        if not get_settings().contextual_decision_shadow_enabled:
+            return None
+
+        context = build_campaign_round_context(
+            campaign_id=campaign_id,
+            round_index=round_index,
+            strategy_selection_result=strategy_selection_result,
+            stop_requested=stop_requested,
+            failure_summary=failure_summary,
+            safety_summary=safety_summary,
+            objective_summary=objective_summary,
+            constraint_summary=constraint_summary,
+            nexus_diagnostics=nexus_diagnostics,
+            backend_memory_summary=backend_memory_summary,
+            bo_mcp_summary=bo_mcp_summary,
+            learning_policy_summary=learning_policy_summary,
+            validation_summary=validation_summary,
+            human_observations=human_observations,
+            literature_summary=literature_summary,
+            metadata=metadata,
+        )
+        decision_plan = CampaignDecisionLayer().decide(context)
+        trace = CampaignDecisionTraceBuilder().build(
+            context=context,
+            decision_plan=decision_plan,
+            actual_stage=actual_stage,
+            actual_action=actual_action or "propose_candidates",
+            metadata=metadata,
+        )
+        logger.info(
+            "contextual_shadow_decision_trace %s",
+            json.dumps(trace.model_dump(mode="json"), sort_keys=True),
+        )
+        return trace
+    except Exception:
+        logger.warning(
+            "Contextual shadow decision hook failed; continuing live campaign",
+            exc_info=True,
+        )
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -1086,6 +1156,49 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         exc_info=True,
                     )
 
+            _maybe_record_contextual_shadow_decision(
+                campaign_id=campaign_id,
+                round_index=round_num,
+                strategy_selection_result=strategy_decision_info,
+                failure_summary={
+                    "events": list(failure_event_dicts),
+                    "requires_recovery": any(
+                        event.get("failure_type") in {"hardware", "backend"}
+                        for event in failure_event_dicts
+                        if isinstance(event, dict)
+                    ),
+                },
+                safety_summary=dict(input_data.policy_snapshot or {}),
+                objective_summary={
+                    "objective_kpi": input_data.objective_kpi,
+                    "direction": input_data.direction,
+                    "target_value": input_data.target_value,
+                    "max_rounds": input_data.max_rounds,
+                },
+                constraint_summary={
+                    "dimensions": list(input_data.dimensions),
+                    "policy_snapshot": dict(input_data.policy_snapshot or {}),
+                },
+                backend_memory_summary=dict(backend_performance_records),
+                bo_mcp_summary={
+                    "backend_state": bomcp_backend_state,
+                },
+                human_observations=list(
+                    (campaign_context_dict or {}).get("human_observations", []) or []
+                ),
+                literature_summary={
+                    "literature_priors": list(
+                        (campaign_context_dict or {}).get("literature_priors", []) or []
+                    ),
+                },
+                metadata={
+                    "round_strategy": round_strategy,
+                    "planned_strategy": planned_round.strategy,
+                    "shadow_only": True,
+                },
+                actual_stage="candidate_generation",
+            )
+
             # Reset per-round batch collectors
             round_batch_kpis: list[float] = []
             round_batch_params: list[dict[str, Any]] = []
@@ -1196,6 +1309,29 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 # (c) carry the bomcp TuRBO trust region into the next round.
                 if design_result.output.backend_state is not None:
                     bomcp_backend_state = design_result.output.backend_state
+
+            # ⑤: attach read-only memory recall (similar past candidates +
+            # cross-campaign failure zones) to this round's persisted decision
+            # trace. Evidence-only — it never changes candidate selection — and
+            # fail-open so a recall error can never stop the round.
+            try:
+                from app.optimization.decision_evidence import (
+                    evidence_for_candidates,
+                )
+
+                _round_evidence = evidence_for_candidates(
+                    campaign_id,
+                    design_candidates,
+                    input_data.dimensions,
+                    input_data.protocol_template,
+                )
+                _evidence_trace = (strategy_decision_info or {}).get("strategy_trace")
+                if _round_evidence is not None and isinstance(_evidence_trace, dict):
+                    _evidence_trace["evidence"] = _round_evidence
+            except Exception:
+                logger.debug(
+                    "decision evidence recall failed; continuing", exc_info=True
+                )
 
             # 2b. For each candidate, compile protocol
             for i, candidate_params in enumerate(design_candidates):
