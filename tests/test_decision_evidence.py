@@ -183,3 +183,64 @@ def test_suggest_next_fail_open_when_evidence_raises(db_env, monkeypatch):
     # Arbitration unbroken: a decision is still produced, no evidence attached.
     assert outcome.decision is not None
     assert "evidence" not in outcome.provenance
+
+
+# --- production wiring helpers ------------------------------------------------
+
+_DIMS = [{"param_name": "x", "param_type": "number", "min_value": 0.0, "max_value": 10.0}]
+
+
+def test_space_from_dimensions_builds_parameterspace():
+    from app.services.candidate_gen import ParameterSpace, space_from_dimensions
+
+    space = space_from_dimensions(_DIMS, {"step": 1})
+
+    assert isinstance(space, ParameterSpace)
+    assert len(space.dimensions) == 1
+    d = space.dimensions[0]
+    assert d.param_name == "x"
+    assert d.param_type == "number"
+    assert d.min_value == 0.0
+    assert d.max_value == 10.0
+    assert space.protocol_template == {"step": 1}
+
+
+def test_space_from_dimensions_defaults_protocol_template():
+    from app.services.candidate_gen import space_from_dimensions
+
+    space = space_from_dimensions(_DIMS)
+    assert space.protocol_template == {}
+
+
+def test_evidence_for_candidates_attaches_per_candidate_evidence(db_env):
+    from app.optimization.decision_evidence import evidence_for_candidates
+
+    _seed("camp", 0, {"x": 0.2}, status="completed", kpi=5.0)
+    _seed("other", 0, {"x": 9.0}, status="failed", error="gel")
+
+    ev = evidence_for_candidates("camp", [{"x": 0.3}, {"x": 8.9}], _DIMS, {})
+
+    assert isinstance(ev, dict)
+    by_params = {tuple(c["params"].items()): c for c in ev["candidates"]}
+    near_low = by_params[(("x", 0.3),)]
+    near_high = by_params[(("x", 8.9),)]
+    assert near_low["similar_candidates"][0]["params"] == {"x": 0.2}
+    assert near_high["failure_zones"][0]["error"] == "gel"
+
+
+def test_evidence_for_candidates_none_when_no_history(db_env):
+    from app.optimization.decision_evidence import evidence_for_candidates
+
+    assert evidence_for_candidates("camp", [{"x": 0.3}], _DIMS, {}) is None
+
+
+def test_evidence_for_candidates_fail_open_on_error(db_env, monkeypatch):
+    import app.optimization.decision_evidence as de
+
+    def _boom(*a, **k):
+        raise RuntimeError("space build exploded")
+
+    monkeypatch.setattr(de, "space_from_dimensions", _boom)
+
+    # Must not raise, and yields no evidence rather than breaking the round.
+    assert de.evidence_for_candidates("camp", [{"x": 0.3}], _DIMS, {}) is None

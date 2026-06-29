@@ -22,6 +22,7 @@ from app.optimization.failure_zone_memory import (
     FailureZone,
     recall_failure_zones,
 )
+from app.services.candidate_gen import space_from_dimensions
 
 
 @dataclass(frozen=True)
@@ -111,6 +112,41 @@ def evidence_for_decision(
             request.campaign_id,
             params,
             request.space,
+            k_similar=k_similar,
+            k_failures=k_failures,
+        )
+        if not ev.is_empty():
+            items.append(ev.to_dict())
+    return {"candidates": items} if items else None
+
+
+def evidence_for_candidates(
+    campaign_id: str,
+    candidates: list[dict[str, Any]],
+    dimensions: list[dict[str, Any]],
+    protocol_template: dict[str, Any] | None = None,
+    *,
+    k_similar: int = 3,
+    k_failures: int = 3,
+) -> dict[str, Any] | None:
+    """Build structured evidence for a round's candidates (production wiring).
+
+    Takes raw candidate param dicts and raw dimension dicts (as the orchestrator
+    holds them), builds the search space, and returns ``{"candidates": [...]}``
+    with one entry per candidate that has recalled evidence, or ``None`` when
+    there is nothing to attach. Fail-open: any error yields ``None``.
+    """
+    try:
+        space = space_from_dimensions(dimensions, protocol_template)
+    except Exception:
+        return None
+
+    items: list[dict[str, Any]] = []
+    for params in candidates:
+        ev = build_decision_evidence(
+            campaign_id,
+            params,
+            space,
             k_similar=k_similar,
             k_failures=k_failures,
         )
