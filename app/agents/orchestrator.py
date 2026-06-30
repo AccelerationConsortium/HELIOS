@@ -20,11 +20,27 @@ from pydantic import BaseModel, Field
 from app.agents.base import AgentResult, BaseAgent
 from app.agents.pause import PauseRequest, PauseResult
 from app.core.config import get_settings
+from app.services.adaptive_campaign_substrate import (
+    build_adaptive_campaign_substrate_snapshot,
+)
+from app.services.adaptive_substrate_inputs import (
+    action_specs_from_registry,
+    available_capabilities,
+    campaign_instruments_from_protocol,
+    failure_attribution_from_events,
+    objective_state_from_input,
+)
 from app.services.decision_layer import CampaignDecisionLayer
 from app.services.decision_trace import CampaignDecisionTraceBuilder
+from app.services.primitives_registry import get_registry
 from app.services.round_context import build_campaign_round_context
 
 logger = logging.getLogger(__name__)
+
+#: Cap on instrumented (experiment) actions mapped into the substrate snapshot
+#: each round, to bound shadow-log payload size. Instrument-less actions
+#: (report / informational / diagnostic) are always retained.
+_ADAPTIVE_SUBSTRATE_ACTION_CAP = 24
 
 
 def _maybe_record_contextual_shadow_decision(
@@ -87,6 +103,74 @@ def _maybe_record_contextual_shadow_decision(
     except Exception:
         logger.warning(
             "Contextual shadow decision hook failed; continuing live campaign",
+            exc_info=True,
+        )
+        return None
+
+
+def _maybe_record_adaptive_campaign_substrate_snapshot(
+    *,
+    campaign_id: str,
+    round_index: int,
+    objective_kpi: str,
+    max_rounds: int | None = None,
+    failure_event_dicts: list[dict[str, Any]] | None = None,
+    protocol_template: dict[str, Any] | None = None,
+    now: Any | None = None,
+) -> Any | None:
+    """Record the adaptive campaign substrate snapshot as a parallel shadow track.
+
+    Strictly observational: it assembles the Phase 1-5 substrate artifact from
+    read-only round inputs and logs it. It never affects routing, strategy
+    selection, candidate selection, or execution, and its return value is
+    intentionally ignored by the round loop. The VoI ranking inside the artifact
+    is advisory only. Failures are swallowed so the live campaign is unaffected.
+    """
+    try:
+        if not get_settings().adaptive_substrate_shadow_enabled:
+            return None
+
+        registry = get_registry()
+        objective_state = objective_state_from_input(
+            campaign_id=campaign_id,
+            objective_kpi=objective_kpi,
+            max_rounds=max_rounds,
+        )
+        failure_attribution = failure_attribution_from_events(
+            list(failure_event_dicts or [])
+        )
+        campaign_instruments = campaign_instruments_from_protocol(
+            protocol_template, registry
+        )
+        actions = action_specs_from_registry(
+            registry,
+            instruments=campaign_instruments or None,
+            cap=_ADAPTIVE_SUBSTRATE_ACTION_CAP,
+        )
+        capabilities, capabilities_source = available_capabilities(
+            campaign_instruments=campaign_instruments, registry=registry
+        )
+
+        snapshot = build_adaptive_campaign_substrate_snapshot(
+            campaign_id=campaign_id,
+            round_index=round_index,
+            objective_state=objective_state,
+            failure_attribution=failure_attribution,
+            actions=actions,
+            available_capabilities=capabilities,
+            value_signals=[],
+            now=now,
+        )
+        snapshot.metadata["available_capabilities_source"] = capabilities_source
+
+        logger.info(
+            "adaptive_campaign_substrate_snapshot %s",
+            json.dumps(snapshot.model_dump(mode="json"), sort_keys=True),
+        )
+        return snapshot
+    except Exception:
+        logger.warning(
+            "Adaptive substrate shadow hook failed; continuing live campaign",
             exc_info=True,
         )
         return None
@@ -1197,6 +1281,18 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     "shadow_only": True,
                 },
                 actual_stage="candidate_generation",
+            )
+
+            # Parallel shadow track: adaptive campaign substrate snapshot.
+            # Independent of the contextual decision trace above; observational
+            # only, its return value is intentionally not consumed.
+            _maybe_record_adaptive_campaign_substrate_snapshot(
+                campaign_id=campaign_id,
+                round_index=round_num,
+                objective_kpi=input_data.objective_kpi,
+                max_rounds=input_data.max_rounds,
+                failure_event_dicts=failure_event_dicts,
+                protocol_template=input_data.protocol_template,
             )
 
             # Reset per-round batch collectors
