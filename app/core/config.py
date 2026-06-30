@@ -92,6 +92,13 @@ class Settings:
             "CONTEXTUAL_DECISION_SHADOW_ENABLED", "false"
         ).lower() in ("true", "1", "yes")
 
+        # ---- Adaptive campaign substrate (Phase 1-5) shadow logging ----
+        # Independent, shadow-only track recorded in parallel with the
+        # contextual decision trace. Default off; never affects routing.
+        self.adaptive_substrate_shadow_enabled: bool = os.getenv(
+            "ADAPTIVE_SUBSTRATE_SHADOW_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+
     @staticmethod
     def _load_puda_machine_map(raw: str) -> dict[str, str]:
         try:
