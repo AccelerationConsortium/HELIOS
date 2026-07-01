@@ -80,6 +80,7 @@ _MODE_TO_CLASS: dict[CampaignMode, ShadowEquivalenceClass] = {
     CampaignMode.FAILURE_DIAGNOSIS: ShadowEquivalenceClass.FAILURE_HANDLING,
     CampaignMode.HUMAN_OBSERVATION_REQUEST: ShadowEquivalenceClass.HUMAN_OBSERVATION,
     CampaignMode.LITERATURE_CONTEXT_SEEKING: ShadowEquivalenceClass.CONTEXT_SEEKING,
+    CampaignMode.SAFETY_CONSTRAINT_TIGHTENING: ShadowEquivalenceClass.CONSTRAINT,
 }
 
 

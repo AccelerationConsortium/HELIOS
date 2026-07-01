@@ -116,6 +116,7 @@ def _maybe_record_adaptive_campaign_substrate_snapshot(
     max_rounds: int | None = None,
     failure_event_dicts: list[dict[str, Any]] | None = None,
     protocol_template: dict[str, Any] | None = None,
+    safety_summary: dict[str, Any] | None = None,
     now: Any | None = None,
 ) -> Any | None:
     """Record the adaptive campaign substrate snapshot as a parallel shadow track.
@@ -159,6 +160,7 @@ def _maybe_record_adaptive_campaign_substrate_snapshot(
             actions=actions,
             available_capabilities=capabilities,
             value_signals=[],
+            safety_summary=safety_summary,
             now=now,
         )
         snapshot.metadata["available_capabilities_source"] = capabilities_source
@@ -1293,6 +1295,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 max_rounds=input_data.max_rounds,
                 failure_event_dicts=failure_event_dicts,
                 protocol_template=input_data.protocol_template,
+                safety_summary=dict(input_data.policy_snapshot or {}),
             )
 
             # Reset per-round batch collectors

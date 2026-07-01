@@ -58,6 +58,7 @@ class CampaignMode(StrEnum):
     FAILURE_DIAGNOSIS = "failure_diagnosis"
     LITERATURE_CONTEXT_SEEKING = "literature_context_seeking"
     HUMAN_OBSERVATION_REQUEST = "human_observation_request"
+    SAFETY_CONSTRAINT_TIGHTENING = "safety_constraint_tightening"
     STOP_RECOMMENDED = "stop_recommended"
 
 
@@ -70,6 +71,7 @@ class CampaignModeContext:
     objective_state: ObjectiveState | None = None
     failure_attribution: FailureAttributionDistribution | None = None
     literature_missing: bool = False
+    safety_summary: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -107,12 +109,13 @@ class CampaignModeTransitionTable:
         timestamp = now or datetime.now(UTC)
         objective = context.objective_state
         attribution = context.failure_attribution
-        evidence = _build_evidence(objective, attribution)
+        evidence = _build_evidence(objective, attribution, context.safety_summary)
 
         mode, rank, reason, confidence = _select_mode(
             objective=objective,
             attribution=attribution,
             literature_missing=context.literature_missing,
+            safety_summary=context.safety_summary,
         )
 
         return CampaignModeDecision(
@@ -142,6 +145,7 @@ def _select_mode(
     objective: ObjectiveState | None,
     attribution: FailureAttributionDistribution | None,
     literature_missing: bool,
+    safety_summary: dict[str, Any],
 ) -> tuple[CampaignMode, int, str, float]:
     """Apply the explicit priority order. Lowest rank that matches wins."""
     # Rank 1: an objective-state stop signal overrides every other consideration.
@@ -154,11 +158,24 @@ def _select_mode(
             objective.objective_confidence,
         )
 
-    # Rank 2: a failure we cannot attribute confidently needs human observation.
+    # Rank 2: a high safety risk gates everything else (fail closed): tighten
+    # constraints before any diagnosis, validation, or optimization.
+    if _is_high_safety_risk(safety_summary):
+        return (
+            CampaignMode.SAFETY_CONSTRAINT_TIGHTENING,
+            2,
+            (
+                "High safety risk signalled; tighten/reassess constraints before "
+                "proceeding."
+            ),
+            0.9,
+        )
+
+    # Rank 3: a failure we cannot attribute confidently needs human observation.
     if attribution is not None and attribution.confidence < _LOW_CONFIDENCE_THRESHOLD:
         return (
             CampaignMode.HUMAN_OBSERVATION_REQUEST,
-            2,
+            3,
             (
                 f"Failure attribution confidence {attribution.confidence:.3g} is "
                 f"below {_LOW_CONFIDENCE_THRESHOLD}; human observation is needed "
@@ -167,7 +184,7 @@ def _select_mode(
             _clamp_unit(1.0 - attribution.confidence),
         )
 
-    # Rank 3: a confident instrument failure routes to calibration.
+    # Rank 4: a confident instrument failure routes to calibration.
     if (
         attribution is not None
         and attribution.confidence >= _LOW_CONFIDENCE_THRESHOLD
@@ -175,7 +192,7 @@ def _select_mode(
     ):
         return (
             CampaignMode.CALIBRATION,
-            3,
+            4,
             (
                 "Dominant failure attribution is instrument "
                 f"(p={attribution.dominant_probability:.3g}); calibration is needed."
@@ -183,12 +200,12 @@ def _select_mode(
             attribution.dominant_probability,
         )
 
-    # Rank 4: any other confident failure routes to diagnosis (fail closed: a
+    # Rank 5: any other confident failure routes to diagnosis (fail closed: a
     # failure is never treated as an optimization signal).
     if attribution is not None and attribution.confidence >= _LOW_CONFIDENCE_THRESHOLD:
         return (
             CampaignMode.FAILURE_DIAGNOSIS,
-            4,
+            5,
             (
                 "Dominant failure attribution is "
                 f"{attribution.dominant_category.value} "
@@ -197,7 +214,7 @@ def _select_mode(
             attribution.dominant_probability,
         )
 
-    # Rank 5: a high proxy gap means the active proxy diverges from the true
+    # Rank 6: a high proxy gap means the active proxy diverges from the true
     # objective, so validating the proxy takes priority over seeking context.
     if (
         objective is not None
@@ -206,7 +223,7 @@ def _select_mode(
     ):
         return (
             CampaignMode.VALIDATION,
-            5,
+            6,
             (
                 "Active objective has a high proxy gap "
                 f"(score={objective.proxy_gap.score:.3g}); validate the proxy "
@@ -215,30 +232,52 @@ def _select_mode(
             objective.proxy_gap.score,
         )
 
-    # Rank 6: missing external context routes to literature seeking.
+    # Rank 7: missing external context routes to literature seeking.
     if literature_missing:
         return (
             CampaignMode.LITERATURE_CONTEXT_SEEKING,
-            6,
+            7,
             "External literature context is missing; seek context before optimizing.",
             0.6,
         )
 
-    # Rank 7: default to parameter optimization.
+    # Rank 8: default to parameter optimization.
     confidence = objective.objective_confidence if objective is not None else 0.5
     return (
         CampaignMode.BO_OPTIMIZATION,
-        7,
+        8,
         "No diagnostic, validation, or context signal; continue parameter optimization.",
         confidence,
+    )
+
+
+def _is_high_safety_risk(safety_summary: dict[str, Any]) -> bool:
+    """Mirror the legacy decision-layer safety predicate (read-only)."""
+    return (
+        safety_summary.get("blocking") is True
+        or safety_summary.get("risk_level") in {"high", "blocking", "critical"}
+        or safety_summary.get("requires_constraint_update") is True
     )
 
 
 def _build_evidence(
     objective: ObjectiveState | None,
     attribution: FailureAttributionDistribution | None,
+    safety_summary: dict[str, Any] | None = None,
 ) -> list[CampaignDecisionEvidence]:
     evidence: list[CampaignDecisionEvidence] = []
+    if safety_summary:
+        evidence.append(
+            CampaignDecisionEvidence(
+                source="safety_summary",
+                kind="safety_summary",
+                summary=(
+                    "Safety signal present "
+                    f"(high_risk={_is_high_safety_risk(safety_summary)})."
+                ),
+                payload=dict(safety_summary),
+            )
+        )
     if objective is not None:
         evidence.append(
             CampaignDecisionEvidence(

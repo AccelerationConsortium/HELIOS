@@ -210,5 +210,30 @@ def test_stop_recommended_kind_semantics_for_new_kinds():
     assert labels["flow"] == ActionShadowLabel.PROPOSED_DISABLED
 
 
+def test_safety_constraint_tightening_labels():
+    actions = [
+        ActionSpec(name="exp", kind="experiment"),
+        ActionSpec(name="prep", kind="preparation"),
+        ActionSpec(name="flow", kind="workflow"),
+        ActionSpec(name="diag", kind="diagnostic"),
+        ActionSpec(name="calib", kind="calibration"),
+        ActionSpec(name="rep", kind="report"),
+        ActionSpec(name="clean", kind="cleanup"),
+    ]
+
+    snapshot = _snapshot(
+        _mode(CampaignMode.SAFETY_CONSTRAINT_TIGHTENING, rank=2), actions
+    )
+    labels = _labels(snapshot)
+
+    assert labels["exp"] == ActionShadowLabel.RISKY
+    assert labels["prep"] == ActionShadowLabel.RISKY
+    assert labels["flow"] == ActionShadowLabel.RISKY
+    assert labels["diag"] == ActionShadowLabel.PREFERRED
+    assert labels["calib"] == ActionShadowLabel.PREFERRED
+    assert labels["rep"] == ActionShadowLabel.NEUTRAL
+    assert labels["clean"] == ActionShadowLabel.NEUTRAL
+
+
 def test_import_smoke():
     import app.services.dynamic_action_space  # noqa: F401

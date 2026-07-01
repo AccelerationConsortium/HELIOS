@@ -301,6 +301,20 @@ def _label_for_mode(
             f"Action '{action.name}' does not validate the active objective."
         )
 
+    if mode == CampaignMode.SAFETY_CONSTRAINT_TIGHTENING:
+        if kind in {"diagnostic", "calibration"}:
+            return ActionShadowLabel.PREFERRED, (
+                f"Constraint-tightening mode prefers assessment action '{action.name}'."
+            )
+        if kind in {"experiment", "preparation", "workflow"}:
+            return ActionShadowLabel.RISKY, (
+                f"Constraint-tightening mode holds '{kind}' action '{action.name}' "
+                "until constraints are tightened."
+            )
+        return ActionShadowLabel.NEUTRAL, (
+            f"Action '{action.name}' may continue during constraint tightening."
+        )
+
     if mode == CampaignMode.HUMAN_OBSERVATION_REQUEST:
         if kind in {"experiment", "optimization"}:
             return ActionShadowLabel.RISKY, (

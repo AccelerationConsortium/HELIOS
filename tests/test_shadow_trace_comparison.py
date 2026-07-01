@@ -225,6 +225,30 @@ def test_comparison_is_json_safe():
     assert cmp.created_at == _NOW
 
 
+def test_tighten_constraints_agrees_with_safety_mode():
+    snap = build_adaptive_campaign_substrate_snapshot(
+        campaign_id="camp-1",
+        round_index=0,
+        objective_state=ObjectiveState(
+            campaign_id="camp-1", primary_objective="x", created_at=_NOW
+        ),
+        actions=[ActionSpec(name="explore", kind="experiment")],
+        available_capabilities=["heater"],
+        value_signals=[],
+        safety_summary={"risk_level": "high"},
+        now=_NOW,
+    )
+    assert snap.campaign_mode_decision.mode == CampaignMode.SAFETY_CONSTRAINT_TIGHTENING
+
+    cmp = compare_shadow_tracks(
+        _plan(CampaignDecisionAction.TIGHTEN_CONSTRAINTS), snap, now=_NOW
+    )
+
+    assert cmp.agree is True
+    assert cmp.substrate_class == ShadowEquivalenceClass.CONSTRAINT
+    assert cmp.divergences == []
+
+
 def test_calibration_flag_only_fires_for_experiment_kind():
     snap = _snap(actions=[ActionSpec(name="clean", kind="cleanup", required_capabilities=[])])
 

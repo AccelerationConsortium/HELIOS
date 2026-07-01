@@ -87,6 +87,7 @@ def build_adaptive_campaign_substrate_snapshot(
     available_capabilities: list[str] | None = None,
     value_signals: list[ActionValueSignals] | None = None,
     literature_missing: bool = False,
+    safety_summary: dict[str, Any] | None = None,
     weights: VoIWeights | None = None,
     now: datetime | None = None,
 ) -> AdaptiveCampaignSubstrateSnapshot:
@@ -104,6 +105,7 @@ def build_adaptive_campaign_substrate_snapshot(
             objective_state=objective_state,
             failure_attribution=failure_attribution,
             literature_missing=literature_missing,
+            safety_summary=dict(safety_summary or {}),
         ),
         now=timestamp,
     )

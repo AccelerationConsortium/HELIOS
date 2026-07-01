@@ -105,7 +105,7 @@ def test_proxy_gap_high_outranks_literature_missing():
     )
 
     assert decision.mode == CampaignMode.VALIDATION
-    assert decision.priority_rank == 5
+    assert decision.priority_rank == 6
 
 
 def test_low_attribution_confidence_triggers_human_observation():
@@ -169,6 +169,57 @@ def test_decision_is_deterministic_and_json_safe():
     assert first.model_dump(mode="json") == second.model_dump(mode="json")
     json.dumps(first.model_dump(mode="json"))
     assert first.created_at == _NOW
+
+
+def test_safety_summary_triggers_constraint_tightening():
+    decision = decide_campaign_mode(
+        _ctx(objective_state=_objective(), safety_summary={"risk_level": "high"}),
+        now=_NOW,
+    )
+
+    assert decision.mode == CampaignMode.SAFETY_CONSTRAINT_TIGHTENING
+    assert decision.priority_rank == 2
+
+
+def test_safety_outranks_failure_and_proxy_gap():
+    objective = _objective(
+        proxy_gap=ProxyGapAssessment(
+            score=0.8,
+            level=ProxyGapLevel.HIGH,
+            active_metric_names=["raw_peak_area"],
+            rationale="distant proxy",
+        )
+    )
+
+    decision = decide_campaign_mode(
+        _ctx(
+            objective_state=objective,
+            failure_attribution=_attr("temp overshoot exceeded", primitive="heat"),
+            safety_summary={"requires_constraint_update": True},
+        ),
+        now=_NOW,
+    )
+
+    assert decision.mode == CampaignMode.SAFETY_CONSTRAINT_TIGHTENING
+
+
+def test_stop_still_outranks_safety():
+    objective = _objective(stop_recommended=True, stop_reason="target_confidence_reached")
+
+    decision = decide_campaign_mode(
+        _ctx(objective_state=objective, safety_summary={"risk_level": "critical"}),
+        now=_NOW,
+    )
+
+    assert decision.mode == CampaignMode.STOP_RECOMMENDED
+
+
+def test_empty_safety_summary_does_not_trigger():
+    decision = decide_campaign_mode(
+        _ctx(objective_state=_objective(), safety_summary={}), now=_NOW
+    )
+
+    assert decision.mode == CampaignMode.BO_OPTIMIZATION
 
 
 def test_import_smoke():

@@ -137,6 +137,36 @@ def test_hook_does_not_mutate_inputs(monkeypatch):
     assert kwargs["protocol_template"] == protocol_before
 
 
+def test_safety_summary_routes_to_constraint_mode(monkeypatch):
+    import app.agents.orchestrator as orch
+
+    monkeypatch.setattr(orch, "get_settings", lambda: _Settings(adaptive=True))
+    monkeypatch.setattr(orch, "get_registry", _FakeRegistry)
+
+    kwargs = _kwargs()
+    kwargs["failure_event_dicts"] = []  # isolate the safety signal
+    snapshot = orch._maybe_record_adaptive_campaign_substrate_snapshot(
+        safety_summary={"risk_level": "high"}, **kwargs
+    )
+
+    assert snapshot is not None
+    assert snapshot.campaign_mode_decision.mode.value == "safety_constraint_tightening"
+
+
+def test_no_safety_summary_keeps_prior_behavior(monkeypatch):
+    import app.agents.orchestrator as orch
+
+    monkeypatch.setattr(orch, "get_settings", lambda: _Settings(adaptive=True))
+    monkeypatch.setattr(orch, "get_registry", _FakeRegistry)
+
+    kwargs = _kwargs()
+    kwargs["failure_event_dicts"] = []
+    snapshot = orch._maybe_record_adaptive_campaign_substrate_snapshot(**kwargs)
+
+    assert snapshot is not None
+    assert snapshot.campaign_mode_decision.mode.value == "bo_optimization"
+
+
 def test_both_shadow_tracks_record_in_parallel(monkeypatch, caplog):
     import app.agents.orchestrator as orch
 
