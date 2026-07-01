@@ -103,6 +103,21 @@ round is backed by `StrategyTrace`, `StrategyEvidence`, `StrategyOutcome`,
 `StrategyReward`, typed `FailureEvent` attribution, and replay/validation
 records so strategy changes remain inspectable after the fact.
 
+### Adaptive Campaign Substrate (shadow)
+
+On top of the meta-controller sits a **shadow-only** adaptive decision
+substrate that, per round, proposes a scientific-activity `CampaignMode`
+(optimization, validation, calibration, failure diagnosis, context seeking,
+human observation, safety-constraint tightening, stop), assesses the action
+space, and scores candidate value-of-information — as an **advisory** artifact
+recorded next to the campaign, never as a control signal. It is composed of
+`objective_state`, `failure_attribution`, `campaign_mode`,
+`dynamic_action_space`, `value_of_information`, and
+`adaptive_campaign_substrate`, and is reconciled against the legacy contextual
+decision track by `shadow_trace_comparison`. It changes no routing and is gated
+by `ADAPTIVE_SUBSTRATE_SHADOW_ENABLED` (default off). See
+[docs/adaptive_campaign_substrate.md](docs/adaptive_campaign_substrate.md).
+
 ### Agent Roster
 
 | Agent | Purpose |
@@ -208,6 +223,8 @@ All configuration is via environment variables (`.env` file or shell).
 | `HELIOS_PORT` | `8000` | Main service port |
 | `RECOVERY_PORT` | `8001` | Hardware recovery bridge port |
 | `DB_PATH` | `/app/data/orchestrator.db` | SQLite database path |
+| `CONTEXTUAL_DECISION_SHADOW_ENABLED` | `false` | Record the legacy contextual decision shadow trace per round (observational; no routing effect) |
+| `ADAPTIVE_SUBSTRATE_SHADOW_ENABLED` | `false` | Record the adaptive campaign substrate shadow snapshot per round (observational; no routing effect) |
 
 ---
 

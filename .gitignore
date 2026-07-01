@@ -33,6 +33,7 @@ docs/
 !docs/
 docs/*
 !docs/HELIOS_ARCHITECTURE_VALIDATION.md
+!docs/adaptive_campaign_substrate.md
 
 # Planning / design notes
 plan/
