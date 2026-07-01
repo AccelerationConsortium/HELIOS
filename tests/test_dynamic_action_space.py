@@ -194,5 +194,21 @@ def test_snapshot_is_deterministic_and_json_safe():
     json.dumps(first.model_dump(mode="json"))
 
 
+def test_stop_recommended_kind_semantics_for_new_kinds():
+    actions = [
+        ActionSpec(name="clean", kind="cleanup"),
+        ActionSpec(name="prep", kind="preparation"),
+        ActionSpec(name="flow", kind="workflow"),
+    ]
+
+    snapshot = _snapshot(_mode(CampaignMode.STOP_RECOMMENDED, rank=1), actions)
+    labels = _labels(snapshot)
+
+    # cleanup may still run during stop; preparation/workflow are proposed-disabled.
+    assert labels["clean"] == ActionShadowLabel.NEUTRAL
+    assert labels["prep"] == ActionShadowLabel.PROPOSED_DISABLED
+    assert labels["flow"] == ActionShadowLabel.PROPOSED_DISABLED
+
+
 def test_import_smoke():
     import app.services.dynamic_action_space  # noqa: F401

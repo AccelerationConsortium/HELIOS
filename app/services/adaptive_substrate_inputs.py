@@ -169,12 +169,27 @@ def _action_spec_from_primitive(spec: PrimitiveSpec) -> ActionSpec:
     )
 
 
+#: Single-instrument hardware ops that don't yet declare an ``instrument`` in
+#: their skill metadata. Classified as experiments so their missing-instrument
+#: metadata gap keeps surfacing downstream. Temporary bridge until the skill
+#: files declare an instrument; remove entries as they are fixed.
+_INSTRUMENT_PENDING_EXPERIMENTS: frozenset[str] = frozenset({"heat"})
+
+
 def _kind_for_primitive(spec: PrimitiveSpec) -> str:
     name = spec.name.lower()
     if spec.safety_class == SafetyClass.INFORMATIONAL:
         return "report"
+    if name.startswith("cleanup."):
+        return "cleanup"
+    if name.startswith("sample."):
+        return "preparation"
     if "calibrat" in name:
         return "calibration"
     if "diagnos" in name:
         return "diagnostic"
-    return "experiment"
+    if spec.instrument is not None:
+        return "experiment"
+    if name in _INSTRUMENT_PENDING_EXPERIMENTS:
+        return "experiment"
+    return "workflow"

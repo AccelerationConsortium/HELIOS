@@ -225,5 +225,13 @@ def test_comparison_is_json_safe():
     assert cmp.created_at == _NOW
 
 
+def test_calibration_flag_only_fires_for_experiment_kind():
+    snap = _snap(actions=[ActionSpec(name="clean", kind="cleanup", required_capabilities=[])])
+
+    cmp = compare_shadow_tracks(_plan(CampaignDecisionAction.PROPOSE_CANDIDATES), snap, now=_NOW)
+
+    assert "experiment_without_capability" not in _codes(cmp.calibration_flags)
+
+
 def test_import_smoke():
     import app.services.shadow_trace_comparison  # noqa: F401

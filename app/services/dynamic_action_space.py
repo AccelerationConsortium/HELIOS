@@ -245,9 +245,11 @@ def _label_for_mode(
     kind = action.kind
 
     if mode == CampaignMode.STOP_RECOMMENDED:
-        if kind == "report":
+        # Report and cleanup/maintenance actions may still run while stopping;
+        # experiment / preparation / workflow actions should not start a new run.
+        if kind in {"report", "cleanup"}:
             return ActionShadowLabel.NEUTRAL, (
-                f"Stop recommended; reporting action '{action.name}' may still run."
+                f"Stop recommended; '{kind}' action '{action.name}' may still run."
             )
         return ActionShadowLabel.PROPOSED_DISABLED, (
             f"Stop recommended; action '{action.name}' should not start a new run."

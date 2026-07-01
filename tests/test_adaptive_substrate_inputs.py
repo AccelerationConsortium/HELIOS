@@ -227,5 +227,28 @@ def test_config_has_adaptive_substrate_flag_default_false(monkeypatch):
     assert settings.adaptive_substrate_shadow_enabled is False
 
 
+def test_kind_mapper_reclassifies_utility_primitives():
+    registry = _FakeRegistry(
+        [
+            _spec("cleanup.run_full", instrument=None, safety_class=SafetyClass.CAREFUL),
+            _spec("sample.prepare_from_csv", instrument=None, safety_class=SafetyClass.HAZARDOUS),
+            _spec("heat", instrument=None, safety_class=SafetyClass.REVERSIBLE),
+            _spec("robot.aspirate", instrument="ot2-robot", safety_class=SafetyClass.HAZARDOUS),
+            _spec("mystery_op", instrument=None),
+        ]
+    )
+
+    specs = {s.name: s for s in action_specs_from_registry(registry, instruments=None)}
+
+    assert specs["cleanup.run_full"].kind == "cleanup"
+    assert specs["sample.prepare_from_csv"].kind == "preparation"
+    # heat has no instrument but is a known single-instrument op -> experiment
+    # (preserves its metadata-gap true positive downstream).
+    assert specs["heat"].kind == "experiment"
+    # instrument-bearing unknown -> experiment; instrument-less unknown -> workflow.
+    assert specs["robot.aspirate"].kind == "experiment"
+    assert specs["mystery_op"].kind == "workflow"
+
+
 def test_import_smoke():
     import app.services.adaptive_substrate_inputs  # noqa: F401
