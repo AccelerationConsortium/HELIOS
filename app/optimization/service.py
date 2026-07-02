@@ -1,7 +1,7 @@
-"""Optimization service entrypoint -- the one call HELIOS makes per round.
+"""Optimization service entrypoint for provider-level callers.
 
-``suggest_next`` wires the optimization-intelligence layer together with a
-hard graceful-degradation guarantee:
+``suggest_next`` wires the optimization-intelligence provider layer together
+with a hard graceful-degradation guarantee:
 
     provider (Nexus)  --unavailable/raises-->  local fallback
                        |
@@ -14,6 +14,12 @@ hard graceful-degradation guarantee:
 A Nexus outage degrades to the built-in optimizer; it never stops a campaign.
 HELIOS retains the final say through the decision policy, and every round is
 recorded for audit.
+
+The production campaign loop currently routes through the adaptive strategy
+selector and backend registry directly because it also has to thread
+campaign-local state such as BO MCP TuRBO trust regions and failure-region
+avoidance.  This service remains the stable facade for direct provider calls
+and tests of the Nexus/local fallback contract.
 """
 from __future__ import annotations
 
@@ -23,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.optimization.arbitration_config import ArbitrationConfig
 from app.optimization.candidate_pool import CandidatePoolBuilder
+from app.optimization.decision_evidence import evidence_for_decision
 from app.optimization.decision_policy import OptimizationDecisionPolicy
 from app.optimization.local_fallback import LocalFallbackProvider
 from app.optimization.nexus_provider import NexusOptimizationProvider
@@ -35,6 +42,7 @@ from app.optimization.schemas import (
 )
 
 if TYPE_CHECKING:  # pragma: no cover
+    from app.optimization.pool_service import CandidatePoolService
     from app.services.strategy_models import StrategyDecision
 
 logger = logging.getLogger(__name__)
@@ -74,6 +82,7 @@ def suggest_next(
     fallback: OptimizationProvider | None = None,
     policy: OptimizationDecisionPolicy | None = None,
     provenance: ProvenanceLogger | None = None,
+    attach_evidence: bool = True,
 ) -> OptimizationOutcome:
     """Propose, validate, and record the next experiment(s) for a campaign."""
     provider = provider if provider is not None else NexusOptimizationProvider()
@@ -83,7 +92,18 @@ def suggest_next(
 
     suggestion = _suggest_with_fallback(request, provider, fallback)
     decision = policy.evaluate(suggestion, request)
-    record = provenance.record(request, suggestion, decision)
+
+    # Evidence is computed from the *already-decided* result, so it cannot
+    # change the decision. Fail-open: memory recall must never stop a round.
+    evidence = None
+    if attach_evidence:
+        try:
+            evidence = evidence_for_decision(request, decision)
+        except Exception:
+            logger.warning("decision evidence recall failed; continuing", exc_info=True)
+            evidence = None
+
+    record = provenance.record(request, suggestion, decision, evidence=evidence)
 
     return OptimizationOutcome(suggestion=suggestion, decision=decision, provenance=record)
 
@@ -116,16 +136,10 @@ def arbitrate_next(
     policy: OptimizationDecisionPolicy | None = None,
     provenance: ProvenanceLogger | None = None,
     pool_builder: CandidatePoolBuilder | None = None,
+    pool_service: "CandidatePoolService | None" = None,
     config: ArbitrationConfig | None = None,
 ) -> OptimizationOutcome:
-    """Deep path: build a multi-source pool and arbitrate it under the authority.
-
-    ``decision`` is the HELIOS authority's ``StrategyDecision`` (from
-    ``select_strategy``).  This function does not recompute it -- it only builds
-    the candidate pool, applies the hard gate + delegated soft scoring, and
-    records provenance.  A Nexus outage degrades to the local baseline; the
-    round is never empty.
-    """
+    """Build a multi-source candidate pool and arbitrate it under HELIOS authority."""
     provider = provider if provider is not None else NexusOptimizationProvider()
     fallback = fallback if fallback is not None else LocalFallbackProvider()
     policy = policy if policy is not None else OptimizationDecisionPolicy()
@@ -136,16 +150,17 @@ def arbitrate_next(
     nexus_suggestion = _nexus_top_k(request, provider, config.k_nexus)
     local_suggestion = fallback.suggest(request)
 
-    pool = pool_builder.build(
-        request,
-        decision,
-        nexus_suggestion=nexus_suggestion,
-        local_suggestion=local_suggestion,
-    )
+    if pool_service is not None:
+        pool = pool_service.build_pool(request, decision)
+    else:
+        pool = pool_builder.build(
+            request,
+            decision,
+            nexus_suggestion=nexus_suggestion,
+            local_suggestion=local_suggestion,
+        )
     result = policy.arbitrate(pool, request, decision, config=config)
 
-    # Provenance source-of-record: the primary generator this round, plus the
-    # authority's Δ2 backend-selection trace (so one record holds both axes).
     primary = nexus_suggestion if nexus_suggestion is not None else local_suggestion
     record = provenance.record(request, primary, result, strategy_decision=decision)
 

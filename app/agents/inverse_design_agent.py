@@ -224,6 +224,11 @@ class InverseDesignAgent(BaseAgent[InverseDesignInput, InverseDesignOutput]):
         the original result is returned unchanged.
         """
         try:
+            from app.core.config import get_settings
+
+            if not get_settings().nexus_advisor_enabled:
+                return result
+
             from app.services.nexus_advisor import NexusAdvisor
 
             nexus = NexusAdvisor()

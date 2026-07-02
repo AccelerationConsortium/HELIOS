@@ -79,11 +79,11 @@ def test_degrades_to_built_in_with_fallback_flag():
     assert sel.fallback is True
 
 
-def test_built_in_as_top_preference_is_not_a_fallback():
-    # stabilize-style pool where built_in is the intended default.
+def test_built_in_selection_is_marked_as_fallback():
+    # fallback status == "running on the universal fallback optimizer".
     sel = rank_backends("stabilize", ("built_in",), {"built_in": True})
     assert sel.selected_backend == "built_in"
-    assert sel.fallback is False
+    assert sel.fallback is True
 
 
 def test_phase_policy_dominates_low_ranked_recommendation():

@@ -1,0 +1,53 @@
+[
+  {
+    "dims": "high",
+    "modality": "multimodal",
+    "noise": "low",
+    "methods": [
+      "scipy_de",
+      "lhs",
+      "bomcp",
+      "random_sampling",
+      "pymoo_nsga2",
+      "built_in",
+      "optuna_cmaes",
+      "optuna_tpe",
+      "full_factorial"
+    ],
+    "_best_regret": 3.3834
+  },
+  {
+    "dims": "low",
+    "modality": "multimodal",
+    "noise": "low",
+    "methods": [
+      "bomcp",
+      "lhs",
+      "random_sampling",
+      "scipy_de",
+      "built_in",
+      "optuna_tpe",
+      "optuna_cmaes",
+      "pymoo_nsga2",
+      "full_factorial"
+    ],
+    "_best_regret": 1.1551
+  },
+  {
+    "dims": "low",
+    "modality": "unimodal",
+    "noise": "low",
+    "methods": [
+      "bomcp",
+      "lhs",
+      "random_sampling",
+      "built_in",
+      "optuna_tpe",
+      "optuna_cmaes",
+      "pymoo_nsga2",
+      "scipy_de",
+      "full_factorial"
+    ],
+    "_best_regret": 0.1176
+  }
+]

@@ -60,16 +60,83 @@ class SimplexConstraint:
 
 
 @dataclass(frozen=True)
+class LinearConstraint:
+    """A linear (in)equality over named input parameters.
+
+    Feasible iff ``sum(coefficients[i] * params[name_i]) <op> bound``, where
+    ``op`` is one of ``"<="``, ``">="``, ``"=="``.  Generalizes the simplex
+    constraint (which is ``coefficients=all-ones, op="==", bound=target_sum``)
+    to arbitrary weights and inequality directions.
+    """
+
+    param_names: tuple[str, ...]
+    coefficients: tuple[float, ...]
+    op: str  # "<=" | ">=" | "=="
+    bound: float
+    tol: float = 1e-9  # slack for equality / boundary comparisons
+
+
+@dataclass(frozen=True)
+class OutcomeConstraint:
+    """A constraint on a *measured response*, not the input parameters.
+
+    Feasible iff the named objective satisfies the threshold.  Unlike a linear
+    input constraint, feasibility is only known after an experiment runs, so the
+    surrogate must learn it (the bomcp backend models P(feasible | x)).  Used for
+    response limits ("yield >= 0.8") and for learned failure regions (Dim 9).
+    """
+
+    objective_name: str
+    threshold: float
+    greater_than: bool = True  # True: objective >= threshold; False: <= threshold
+    feasibility_threshold: float = 0.5  # min P(feasible) the acquisition requires
+
+
+@dataclass(frozen=True)
 class ParameterSpace:
     """Complete parameter space definition for batch generation."""
 
     dimensions: tuple[SearchDimension, ...]
     protocol_template: dict[str, Any]  # base protocol, params to be overridden
     simplex_constraints: tuple[SimplexConstraint, ...] = ()
+    linear_constraints: tuple[LinearConstraint, ...] = ()
+    outcome_constraints: tuple[OutcomeConstraint, ...] = ()
 
     @property
     def n_dims(self) -> int:
         return len(self.dimensions)
+
+
+def space_from_dimensions(
+    dimensions: list[dict[str, Any]],
+    protocol_template: dict[str, Any] | None = None,
+) -> ParameterSpace:
+    """Build a :class:`ParameterSpace` from raw dimension dicts.
+
+    Mirrors the conversion callers pass over the wire (``list[dict]``) into the
+    typed search space, so distance/recall consumers do not duplicate it.
+    """
+    dims = []
+    for d in dimensions:
+        choices = d.get("choices")
+        if choices is not None:
+            choices = tuple(choices)
+        dims.append(
+            SearchDimension(
+                param_name=d["param_name"],
+                param_type=d.get("param_type", "number"),
+                min_value=d.get("min_value"),
+                max_value=d.get("max_value"),
+                log_scale=d.get("log_scale", False),
+                choices=choices,
+                step_key=d.get("step_key"),
+                primitive=d.get("primitive"),
+            )
+        )
+    return ParameterSpace(
+        dimensions=tuple(dims),
+        protocol_template=protocol_template or {},
+    )
 
 
 @dataclass(frozen=True)
@@ -90,6 +157,9 @@ class BatchResult:
     candidates: tuple[Candidate, ...]
     strategy: str
     space: ParameterSpace
+    # (c) Opaque backend state (e.g. bomcp TuRBO trust region) from the adaptive
+    # path, for the caller to persist and pass back next round.
+    backend_state: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +251,70 @@ def sample_random(
             point[dim.param_name] = _sample_dimension(dim, rng)
         candidates.append(point)
     return candidates
+
+
+def is_feasible(params: dict[str, Any], space: ParameterSpace) -> bool:
+    """Return True if ``params`` satisfies every input linear constraint.
+
+    Only *input* constraints are checked here -- outcome constraints depend on a
+    measured response and are enforced by the surrogate, not at sampling time.
+    """
+    for c in space.linear_constraints:
+        lhs = sum(
+            coef * float(params[name])
+            for name, coef in zip(c.param_names, c.coefficients, strict=True)
+        )
+        if c.op == "<=" and lhs > c.bound + c.tol:
+            return False
+        if c.op == ">=" and lhs < c.bound - c.tol:
+            return False
+        if c.op == "==" and abs(lhs - c.bound) > c.tol:
+            return False
+    return True
+
+
+def sample_feasible(
+    space: ParameterSpace,
+    n: int,
+    *,
+    seed: int | None = None,
+    base: str = "random",
+    max_factor: int = 50,
+) -> list[dict[str, Any]]:
+    """Rejection-sample ``n`` points satisfying the space's linear constraints.
+
+    Oversamples with the base sampler (``"random"`` or ``"lhs"``) and keeps only
+    feasible points until ``n`` are collected or the budget (``max_factor * n``
+    draws) is exhausted.  Returns as many feasible points as it found, logging a
+    warning if short -- the caller decides whether a partial batch is acceptable.
+    """
+    if not space.linear_constraints:
+        sampler = sample_lhs if base == "lhs" else sample_random
+        return sampler(space, n, seed=seed)
+
+    sampler = sample_lhs if base == "lhs" else sample_random
+    kept: list[dict[str, Any]] = []
+    draws = 0
+    budget = max(n * max_factor, n)
+    batch = 0
+    while len(kept) < n and draws < budget:
+        # Vary the seed per batch so oversampling explores new points.
+        chunk = sampler(space, n, seed=None if seed is None else seed + batch)
+        for p in chunk:
+            draws += 1
+            if is_feasible(p, space):
+                kept.append(p)
+                if len(kept) == n:
+                    break
+        batch += 1
+
+    if len(kept) < n:
+        logger.warning(
+            "sample_feasible: only %d/%d feasible points after %d draws "
+            "(constraints may be very tight)",
+            len(kept), n, draws,
+        )
+    return kept[:n]
 
 
 def sample_lhs(
@@ -544,6 +678,8 @@ def generate_batch(
     acquisition: str = "ei",
     kpi_name: str = "run_success_rate",
     store: bool = True,
+    failed_params: list[dict[str, Any]] | None = None,
+    backend_state: dict[str, Any] | None = None,
 ) -> BatchResult:
     """Generate a batch of candidate parameter sets and store them.
 
@@ -564,6 +700,7 @@ def generate_batch(
         raise ValueError("n_candidates must be >= 1")
 
     # Generate raw parameter dicts
+    _result_backend_state: dict[str, Any] | None = None
     if strategy == "lhs":
         raw_params = sample_lhs(space, n_candidates, seed=seed)
     elif strategy == "grid":
@@ -588,7 +725,7 @@ def generate_batch(
         raw_params = sample_dirichlet(space, n_candidates, seed=seed)
     elif strategy == "adaptive":
         # Delegate to the adaptive strategy selector
-        from app.services.bayesian_opt import load_observations_from_db
+        from app.services.bayesian_opt import denormalize_point, load_observations_from_db
         from app.services.optimization_backends import Observation as OptObs
         from app.services.strategy_selector import (
             CampaignSnapshot,
@@ -598,11 +735,13 @@ def generate_batch(
         bo_obs = load_observations_from_db(
             space, campaign_id=campaign_id, kpi_name=kpi_name,
         )
+        # Reconstruct real named parameters from the stored [0,1] vectors so the
+        # surrogate (e.g. bomcp's GP) fits on actual coordinates, not {}.
         opt_obs = [
-            OptObs(params={}, objective=obs.objective)
+            OptObs(params=denormalize_point(obs.params, space), objective=obs.objective)
             for obs in bo_obs
         ]
-        # Build snapshot from available context
+        # Build snapshot from available context (incl. learned failure region).
         snapshot = CampaignSnapshot(
             round_number=max(1, len(bo_obs) // max(n_candidates, 1) + 1),
             max_rounds=20,  # sensible default; orchestrator passes real value
@@ -612,10 +751,13 @@ def generate_batch(
             has_log_scale=any(d.log_scale for d in space.dimensions),
             kpi_history=tuple(obs.objective for obs in bo_obs),
             direction="maximize",
+            failed_params=tuple(failed_params or ()),
         )
         raw_params, _decision = generate_adaptive_candidates(
             space, n_candidates, opt_obs, snapshot, seed=seed,
+            backend_state=backend_state,
         )
+        _result_backend_state = _decision.backend_state
     else:
         raise ValueError(f"Unknown strategy: {strategy}")
 
@@ -650,6 +792,7 @@ def generate_batch(
         candidates=tuple(candidates),
         strategy=strategy,
         space=space,
+        backend_state=_result_backend_state,
     )
 
     if store:
