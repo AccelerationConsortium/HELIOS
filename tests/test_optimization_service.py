@@ -8,6 +8,9 @@
 """
 from __future__ import annotations
 
+import pytest
+
+from app.optimization.nexus_provider import NexusOptimizationProvider
 from app.optimization.provenance import ProvenanceLogger
 from app.optimization.schemas import OptimizationRequest
 from app.optimization.service import OptimizationOutcome, suggest_next
@@ -52,6 +55,9 @@ def test_falls_back_when_provider_raises():
 
 def test_uses_nexus_when_available():
     # Real NexusOptimizationProvider (default); Nexus is installed in CI/dev env.
+    provider = NexusOptimizationProvider()
+    if not provider.is_available():
+        pytest.skip("Nexus optimization core is not installed in this environment")
     outcome = suggest_next(_request())
     assert outcome.suggestion.source == "nexus"
 

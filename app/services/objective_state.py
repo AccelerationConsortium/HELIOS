@@ -1,0 +1,267 @@
+"""Objective state and revision accounting for contextual campaign decisions.
+
+This module upgrades the objective layer from a static metric hierarchy plus a
+computed reward into an evolving, versioned ``ObjectiveState``. The updater is
+pure and shadow-only: it consumes an observed ``CampaignDecisionOutcome`` and
+returns a NEW revised state with full provenance. It performs no database
+writes, external calls, or live routing changes, and it never mutates its
+inputs.
+
+The state separates the scientific goal (``primary_objective`` /
+``scientific_question``) from optimization proxies (``proxy_objective_names`` /
+``proxy_gap``) and tracks ``objective_confidence``, ``failure_constraints``,
+``validation_requirements``, ``stopping_criteria`` and an append-only
+``revision_history`` so every change is inspectable and replayable.
+"""
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
+
+from app.services.decision_outcome import CampaignDecisionOutcome
+from app.services.objective_models import ProxyGapAssessment
+
+__all__ = [
+    "ObjectiveRevision",
+    "ObjectiveState",
+    "ObjectiveStateUpdater",
+    "StoppingCriteria",
+    "apply_outcome_to_objective_state",
+]
+
+
+class StoppingCriteria(BaseModel):
+    """Deterministic, evaluable stopping conditions for a campaign objective."""
+
+    max_rounds: int | None = Field(default=None, ge=0)
+    target_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    max_consecutive_failures: int | None = Field(default=None, ge=0)
+
+
+class ObjectiveRevision(BaseModel):
+    """Provenance record for one objective-state revision."""
+
+    revision: int = Field(ge=1)
+    reason: str
+    source: str
+    trace_id: str | None = None
+    changes: dict[str, Any] = Field(default_factory=dict)
+    evidence: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("created_at")
+    @classmethod
+    def _created_at_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+            raise ValueError("created_at must be timezone-aware")
+        return value
+
+
+class ObjectiveState(BaseModel):
+    """Evolving campaign objective state, separate from live strategy selection."""
+
+    campaign_id: str
+    primary_objective: str
+    scientific_question: str | None = None
+    proxy_objective_names: list[str] = Field(default_factory=list)
+    objective_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    proxy_gap: ProxyGapAssessment | None = None
+    failure_constraints: list[str] = Field(default_factory=list)
+    validation_requirements: list[str] = Field(default_factory=list)
+    stopping_criteria: StoppingCriteria | None = None
+    revision: int = Field(default=0, ge=0)
+    rounds_observed: int = Field(default=0, ge=0)
+    consecutive_failure_count: int = Field(default=0, ge=0)
+    stop_recommended: bool = False
+    stop_reason: str | None = None
+    revision_history: list[ObjectiveRevision] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("created_at")
+    @classmethod
+    def _created_at_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+            raise ValueError("created_at must be timezone-aware")
+        return value
+
+
+class ObjectiveStateUpdater:
+    """Turn an observed decision outcome into a revised objective state.
+
+    Deterministic and shadow-only: returns a new ``ObjectiveState`` and never
+    mutates the input state or outcome.
+    """
+
+    def apply_outcome(
+        self,
+        state: ObjectiveState,
+        outcome: CampaignDecisionOutcome,
+        *,
+        proxy_gap: ProxyGapAssessment | None = None,
+        now: datetime | None = None,
+    ) -> ObjectiveState:
+        timestamp = now or datetime.now(UTC)
+
+        delta, evidence = _confidence_delta(outcome)
+        old_confidence = state.objective_confidence
+        new_confidence = _clamp_unit(_round(old_confidence + delta))
+
+        had_failure = outcome.execution_success is False or outcome.failure_count > 0
+        new_consecutive = (
+            state.consecutive_failure_count + 1 if had_failure else 0
+        )
+        new_rounds = state.rounds_observed + 1
+        new_proxy_gap = proxy_gap if proxy_gap is not None else state.proxy_gap
+
+        stop_recommended, stop_reason = _evaluate_stopping(
+            criteria=state.stopping_criteria,
+            confidence=new_confidence,
+            consecutive_failures=new_consecutive,
+            rounds_observed=new_rounds,
+        )
+
+        changes: dict[str, Any] = {
+            "objective_confidence": {"from": old_confidence, "to": new_confidence},
+            "consecutive_failure_count": {
+                "from": state.consecutive_failure_count,
+                "to": new_consecutive,
+            },
+            "rounds_observed": {"from": state.rounds_observed, "to": new_rounds},
+        }
+        if proxy_gap is not None:
+            changes["proxy_gap"] = {
+                "from": state.proxy_gap.level.value if state.proxy_gap else None,
+                "to": proxy_gap.level.value,
+            }
+        if (stop_recommended, stop_reason) != (state.stop_recommended, state.stop_reason):
+            changes["stop_recommended"] = {
+                "from": state.stop_recommended,
+                "to": stop_recommended,
+            }
+            changes["stop_reason"] = {"from": state.stop_reason, "to": stop_reason}
+
+        revision = ObjectiveRevision(
+            revision=state.revision + 1,
+            reason=_revision_reason(delta, stop_reason),
+            source="campaign_decision_outcome",
+            trace_id=outcome.trace_id,
+            changes=changes,
+            evidence=evidence,
+            created_at=timestamp,
+        )
+
+        return state.model_copy(
+            update={
+                "objective_confidence": new_confidence,
+                "proxy_gap": new_proxy_gap,
+                "consecutive_failure_count": new_consecutive,
+                "rounds_observed": new_rounds,
+                "stop_recommended": stop_recommended,
+                "stop_reason": stop_reason,
+                "revision": state.revision + 1,
+                "revision_history": [*state.revision_history, revision],
+                "updated_at": timestamp,
+            }
+        )
+
+
+def apply_outcome_to_objective_state(
+    state: ObjectiveState,
+    outcome: CampaignDecisionOutcome,
+    *,
+    proxy_gap: ProxyGapAssessment | None = None,
+    now: datetime | None = None,
+) -> ObjectiveState:
+    """Apply an outcome with the default ObjectiveStateUpdater."""
+    return ObjectiveStateUpdater().apply_outcome(
+        state, outcome, proxy_gap=proxy_gap, now=now
+    )
+
+
+def _confidence_delta(outcome: CampaignDecisionOutcome) -> tuple[float, list[str]]:
+    delta = 0.0
+    evidence: list[str] = []
+
+    if outcome.execution_success is True:
+        delta += 0.1
+        evidence.append("execution_success=True (+0.1)")
+    elif outcome.execution_success is False:
+        delta -= 0.1
+        evidence.append("execution_success=False (-0.1)")
+
+    if outcome.objective_delta is not None:
+        contribution = _round(_clamp_signed(outcome.objective_delta) * 0.2)
+        delta += contribution
+        evidence.append(f"objective_delta={outcome.objective_delta:.3g} ({contribution:+.3g})")
+
+    if outcome.proxy_gap_delta is not None:
+        # Positive proxy_gap_delta means the gap widened (worse for confidence).
+        contribution = _round(-_clamp_signed(outcome.proxy_gap_delta) * 0.2)
+        delta += contribution
+        evidence.append(f"proxy_gap_delta={outcome.proxy_gap_delta:.3g} ({contribution:+.3g})")
+
+    if outcome.validation_success is True:
+        delta += 0.1
+        evidence.append("validation_success=True (+0.1)")
+    elif outcome.validation_success is False:
+        delta -= 0.1
+        evidence.append("validation_success=False (-0.1)")
+
+    if outcome.failure_count > 0:
+        contribution = _round(-0.05 * outcome.failure_count)
+        delta += contribution
+        evidence.append(f"failure_count={outcome.failure_count} ({contribution:+.3g})")
+
+    if not evidence:
+        evidence.append("no confidence-relevant outcome components")
+
+    return _round(delta), evidence
+
+
+def _evaluate_stopping(
+    *,
+    criteria: StoppingCriteria | None,
+    confidence: float,
+    consecutive_failures: int,
+    rounds_observed: int,
+) -> tuple[bool, str | None]:
+    if criteria is None:
+        return False, None
+    if (
+        criteria.max_consecutive_failures is not None
+        and consecutive_failures >= criteria.max_consecutive_failures
+    ):
+        return True, "max_consecutive_failures_reached"
+    if (
+        criteria.target_confidence is not None
+        and confidence >= criteria.target_confidence
+    ):
+        return True, "target_confidence_reached"
+    if criteria.max_rounds is not None and rounds_observed >= criteria.max_rounds:
+        return True, "max_rounds_reached"
+    return False, None
+
+
+def _revision_reason(delta: float, stop_reason: str | None) -> str:
+    direction = "raised" if delta > 0 else "lowered" if delta < 0 else "held"
+    base = f"Objective confidence {direction} by {delta:+.3g} from observed outcome."
+    if stop_reason is not None:
+        return f"{base} Stopping criterion: {stop_reason}."
+    return base
+
+
+def _clamp_unit(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _clamp_signed(value: float) -> float:
+    return max(-1.0, min(1.0, value))
+
+
+def _round(value: float) -> float:
+    return round(value, 10)

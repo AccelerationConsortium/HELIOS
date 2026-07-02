@@ -6,6 +6,8 @@ mapping.  See docs/plans/2026-06-26-bomcp-backend-integration-design.md (roadmap
 """
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
 
 from app.services.candidate_gen import (
@@ -15,6 +17,11 @@ from app.services.candidate_gen import (
     SearchDimension,
     is_feasible,
     sample_feasible,
+)
+
+_needs_bomcp = pytest.mark.skipif(
+    importlib.util.find_spec("bo_engine") is None,
+    reason="bo-engine not installed",
 )
 
 
@@ -77,6 +84,7 @@ def test_sample_feasible_only_returns_feasible_points():
 # --- bomcp spec mapping ------------------------------------------------------
 
 
+@_needs_bomcp
 def test_bomcp_maps_sum_leq_constraint():
     from bo_engine.types import ConstraintType
 
@@ -90,6 +98,7 @@ def test_bomcp_maps_sum_leq_constraint():
     assert ConstraintType.SUM_LESS_THAN in types
 
 
+@_needs_bomcp
 def test_bomcp_maps_sum_geq_constraint():
     from bo_engine.types import ConstraintType
 
@@ -102,6 +111,7 @@ def test_bomcp_maps_sum_geq_constraint():
     assert any(sc.type == ConstraintType.SUM_GREATER_THAN for sc in spec.constraints)
 
 
+@_needs_bomcp
 def test_bomcp_maps_weighted_to_linear_with_coefficients():
     from bo_engine.types import ConstraintType
 
@@ -116,6 +126,7 @@ def test_bomcp_maps_weighted_to_linear_with_coefficients():
     assert list(linear[0].coefficients) == [2.0, 1.0]
 
 
+@_needs_bomcp
 def test_bomcp_maps_outcome_constraint():
     from app.optimization.bomcp_backend import to_bomcp_spec
 

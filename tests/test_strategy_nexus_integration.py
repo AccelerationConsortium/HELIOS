@@ -16,8 +16,13 @@ from __future__ import annotations
 import dataclasses
 
 from app.services.optimization_intelligence import OptimizationIntelligence
-from app.services.strategy_models import CampaignSnapshot, PhaseConfig
-from app.services.strategy_selector import select_strategy
+from app.services.strategy_models import (
+    CampaignContext,
+    CampaignSnapshot,
+    FailureEvent,
+    PhaseConfig,
+)
+from app.services.strategy_selector import select_strategy, strategy_trace_to_dict
 
 # An "exploration"-yielding snapshot whose backend pool is
 # ('lhs', 'nexus_lhs', 'nexus_sobol') -- all three available below.
@@ -81,6 +86,59 @@ def test_backend_selection_provenance_is_populated():
     assert bs.score_components
     assert bs.selected_backend == decision.backend_name
     assert bs.reason
+
+
+def test_strategy_trace_carries_context_evidence_and_backend_scores():
+    base = _explore_snapshot(_ALL_AVAIL)
+    snap = dataclasses.replace(
+        base,
+        campaign_context=CampaignContext(
+            scientific_goal="improve full-cell lifetime",
+            current_objective_level="mechanism",
+            synthesis_routes=("electrodeposition", "gel"),
+            human_observations=("film delaminated near high current",),
+        ),
+        failure_events=(
+            FailureEvent(
+                failure_type="measurement",
+                reason="QC drift observed",
+                backend_name="nexus_gp_bo",
+                round_number=4,
+                candidate_index=2,
+                penalize_backend=False,
+            ),
+        ),
+    )
+
+    decision = select_strategy(snap, PhaseConfig())
+    trace = strategy_trace_to_dict(decision.strategy_trace)
+
+    assert trace is not None
+    assert trace["selected_backend"] == decision.backend_name
+    assert trace["selected_intent"] in {"diagnose", "validate"}
+    assert trace["context_summary"]["scientific_goal"] == "improve full-cell lifetime"
+    assert trace["context_summary"]["current_objective_level"] == "mechanism"
+    assert trace["context_gate"]["requires_calibration"] is True
+    assert trace["space_revision"] is None
+    assert trace["bandit_decision"]["selected_arm"]
+    assert trace["candidate_backends"]
+    assert any(e["source"] == "failure:measurement" for e in trace["evidence"])
+    assert any(e["source"] == "context_gate" for e in trace["evidence"])
+
+
+def test_strategy_trace_records_space_revision_for_failed_coordinates():
+    base = _explore_snapshot(_ALL_AVAIL)
+    snap = dataclasses.replace(
+        base,
+        failed_params=({"x": 0.9, "y": 0.9},),
+    )
+
+    decision = select_strategy(snap, PhaseConfig())
+    trace = strategy_trace_to_dict(decision.strategy_trace)
+
+    assert trace["selected_mode"] == "failure_avoidance"
+    assert trace["space_revision"]["add_constraints"][0]["type"] == "avoid_failed_coordinate"
+    assert any(e["source"] == "space_policy" for e in trace["evidence"])
 
 
 # --- Criterion 1 + 3: nexus selectable; recommendation changes ranking -------

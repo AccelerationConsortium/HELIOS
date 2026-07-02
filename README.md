@@ -69,7 +69,7 @@ Results, uncertainties, and decision chains land in campaign memory — queryabl
 - **Devices as skills** — instruments expose typed primitives with safety classes and precondition/effect contracts; agents cannot invoke operations that don't exist
 - **Real-time reasoning stream** — every agent step emits SSE events with exactly-once delivery and DB-backed replay; the browser shows a live decision tree of what each agent considered and why
 - **Hardware agnostic** — runs in `simulated` mode for development; switches to live Opentrons OT-2, PLC relays, and electrochemistry sensors by changing one env var
-- **Research-grade optimization** — ARD-Matérn GP surrogates with EI / UCB / TS / MES / KG acquisition, multi-fidelity BO, RGPE transfer learning, conformal uncertainty, and causal discovery; an inner RL loop selects the strategy per campaign phase
+- **Context-aware dynamic strategy** — a scientific campaign meta-controller selects campaign intent, optimization mode, and candidate-generation backend from scientific context, objective hierarchy, failure attribution, backend memory, Nexus diagnostics, BO MCP availability, and shadow learning signals
 - **Safety-first** — contract safety envelopes, per-primitive safety classes, preflight checks before every round, and human-in-the-loop gates as resumable pause states
 - **Durable execution** — SQLite-backed campaign checkpoints survive restarts; crashed campaigns resume from the last completed round
 
@@ -85,6 +85,48 @@ Results, uncertainties, and decision chains land in campaign memory — queryabl
 | **L2 Planning** | Experimental design & adaptive strategy | `PlannerAgent`, `DesignAgent`, `SafetyAgent`, inner RL strategy router |
 | **L1 Execution** | Protocol compilation & hardware abstraction | `CompilerAgent`, `CodeWriterAgent`, `DeckLayoutAgent`, hardware dispatcher |
 | **L0 Evidence** | Campaign memory, uncertainty, causal updates | `AnalyzerAgent`, `SensingAgent`, `MonitorAgent`, `RecoveryAgent` |
+
+### Dynamic Strategy Meta-Controller
+
+HELIOS dynamic strategy selection is a context-aware scientific campaign
+meta-controller. It uses scientific context, objective hierarchy, typed failure
+attribution, backend performance memory, candidate/failure-zone memory, Nexus
+diagnostics, BO MCP availability, and bandit/learned-policy signals to choose
+three things each round: `CampaignIntent`, `OptimizationMode`, and the
+candidate-generation backend.
+
+The default live path is conservative: rule-based, auditable, and bounded by
+explicit safety gates. Learning-based policies do not replace this path by
+default. They are introduced progressively through replay evaluation, shadow
+records, canary runs, promotion gates, and explicit approval workflows. Each
+round is backed by `StrategyTrace`, `StrategyEvidence`, `StrategyOutcome`,
+`StrategyReward`, typed `FailureEvent` attribution, and replay/validation
+records so strategy changes remain inspectable after the fact.
+
+### Adaptive Campaign Substrate (shadow)
+
+On top of the meta-controller sits a **shadow-only** adaptive decision
+substrate that, per round, proposes a scientific-activity `CampaignMode`
+(optimization, validation, calibration, failure diagnosis, context seeking,
+human observation, safety-constraint tightening, stop), assesses the action
+space, and scores candidate value-of-information — as an **advisory** artifact
+recorded next to the campaign, never as a control signal. It is composed of
+`objective_state`, `failure_attribution`, `campaign_mode`,
+`dynamic_action_space`, `value_of_information`, and
+`adaptive_campaign_substrate`, and is reconciled against the legacy contextual
+decision track by `shadow_trace_comparison`. It changes no routing and is gated
+by `ADAPTIVE_SUBSTRATE_SHADOW_ENABLED` (default off). See
+[docs/adaptive_campaign_substrate.md](docs/adaptive_campaign_substrate.md).
+
+### Agent Model
+
+HELIOS is an **autonomous multi-agent experimentation system**, not an "LLM
+agent". Agents are typed input→output services orchestrated in a deterministic
+L3→L2→L1→L0 pipeline; the per-round optimization/decision loop is **LLM-free by
+design** (classical BO/GP + rule-based scoring + optional non-LLM learned
+policies). The LLM is used only at the language/knowledge boundary (NL→plan,
+NL→code, priors, post-run review) and never steers a live round. See
+[docs/agent_architecture.md](docs/agent_architecture.md).
 
 ### Agent Roster
 
@@ -191,6 +233,8 @@ All configuration is via environment variables (`.env` file or shell).
 | `HELIOS_PORT` | `8000` | Main service port |
 | `RECOVERY_PORT` | `8001` | Hardware recovery bridge port |
 | `DB_PATH` | `/app/data/orchestrator.db` | SQLite database path |
+| `CONTEXTUAL_DECISION_SHADOW_ENABLED` | `false` | Record the legacy contextual decision shadow trace per round (observational; no routing effect) |
+| `ADAPTIVE_SUBSTRATE_SHADOW_ENABLED` | `false` | Record the adaptive campaign substrate shadow snapshot per round (observational; no routing effect) |
 
 ---
 
@@ -314,6 +358,58 @@ Type checking and lint:
 mypy app/
 ruff check app/
 ruff format app/
+```
+
+### Validation Evidence Pack
+
+HELIOS is framed as an agent-native, hierarchical, graph/state-machine routed,
+role-based multi-agent SDL controller. The live campaign controller remains
+rule-based and auditable by default; Nexus and BO MCP are optimization
+advisor/backend/tool paths, not top-level campaign decision authorities. Learned
+policy and self-evolution paths are offline, shadow, canary, and approval-gated;
+their metadata does not change default BO MCP/Nexus/backend behavior.
+
+The architecture validation report is version-controlled at
+`docs/HELIOS_ARCHITECTURE_VALIDATION.md`. It is a static evidence pack for the
+current validation boundary, not a runtime-generated artifact.
+
+Run the validation suite:
+
+```bash
+bash scripts/run_validation_suite.sh
+```
+
+Equivalent targeted test command:
+
+```bash
+pytest \
+  tests/test_candidate_memory.py \
+  tests/test_failure_zone_memory.py \
+  tests/test_offline_closed_loop_sdl.py \
+  tests/test_offline_scenario_benchmarks.py \
+  tests/test_policy_evolution.py \
+  tests/test_policy_evolution_workflow_e2e.py \
+  tests/test_learned_policy.py \
+  tests/test_system_validation_report.py \
+  tests/test_backend_selection.py
+```
+
+Full `pytest` is expected to pass. Full-repository `ruff check .` currently has
+legacy lint debt in older modules and vendored/benchmark-style test areas. The
+clean ruff boundary for the new validation/reporting files is:
+
+```bash
+ruff check \
+  app/optimization/candidate_memory.py \
+  app/optimization/failure_zone_memory.py \
+  app/services/campaign_state.py \
+  app/services/system_validation_report.py \
+  tests/test_candidate_memory.py \
+  tests/test_failure_zone_memory.py \
+  tests/test_system_validation_report.py \
+  tests/test_offline_closed_loop_sdl.py \
+  tests/test_offline_scenario_benchmarks.py \
+  tests/test_policy_evolution_workflow_e2e.py
 ```
 
 ---

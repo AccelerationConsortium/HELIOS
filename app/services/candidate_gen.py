@@ -107,6 +107,38 @@ class ParameterSpace:
         return len(self.dimensions)
 
 
+def space_from_dimensions(
+    dimensions: list[dict[str, Any]],
+    protocol_template: dict[str, Any] | None = None,
+) -> ParameterSpace:
+    """Build a :class:`ParameterSpace` from raw dimension dicts.
+
+    Mirrors the conversion callers pass over the wire (``list[dict]``) into the
+    typed search space, so distance/recall consumers do not duplicate it.
+    """
+    dims = []
+    for d in dimensions:
+        choices = d.get("choices")
+        if choices is not None:
+            choices = tuple(choices)
+        dims.append(
+            SearchDimension(
+                param_name=d["param_name"],
+                param_type=d.get("param_type", "number"),
+                min_value=d.get("min_value"),
+                max_value=d.get("max_value"),
+                log_scale=d.get("log_scale", False),
+                choices=choices,
+                step_key=d.get("step_key"),
+                primitive=d.get("primitive"),
+            )
+        )
+    return ParameterSpace(
+        dimensions=tuple(dims),
+        protocol_template=protocol_template or {},
+    )
+
+
 @dataclass(frozen=True)
 class Candidate:
     """A single parameter candidate set."""

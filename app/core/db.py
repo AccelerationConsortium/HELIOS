@@ -397,6 +397,18 @@ def init_db() -> None:
         all_kpis_json       TEXT NOT NULL DEFAULT '[]',
         all_params_json     TEXT NOT NULL DEFAULT '[]',
         all_rounds_json     TEXT NOT NULL DEFAULT '[]',
+        backend_failure_counts_json TEXT NOT NULL DEFAULT '{}',
+        all_failed_params_json TEXT NOT NULL DEFAULT '[]',
+        bomcp_backend_state_json TEXT,
+        campaign_context_json TEXT NOT NULL DEFAULT '{}',
+        failure_events_json TEXT NOT NULL DEFAULT '[]',
+        latest_strategy_trace_json TEXT,
+        backend_performance_json TEXT NOT NULL DEFAULT '{}',
+        strategy_bandit_json TEXT NOT NULL DEFAULT '{}',
+        space_revisions_json TEXT NOT NULL DEFAULT '[]',
+        strategy_rewards_json TEXT NOT NULL DEFAULT '[]',
+        shadow_bandit_records_json TEXT NOT NULL DEFAULT '[]',
+        objective_transitions_json TEXT NOT NULL DEFAULT '[]',
         stop_reason    TEXT,
         error          TEXT,
         created_at     TEXT NOT NULL,
@@ -736,4 +748,90 @@ def init_db() -> None:
 
     with connection() as conn:
         conn.executescript(schema)
+        _ensure_column(
+            conn,
+            "campaign_state",
+            "backend_failure_counts_json",
+            "TEXT NOT NULL DEFAULT '{}'",
+        )
+        _ensure_column(
+            conn,
+            "campaign_state",
+            "all_failed_params_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )
+        _ensure_column(
+            conn,
+            "campaign_state",
+            "bomcp_backend_state_json",
+            "TEXT",
+        )
+        _ensure_column(
+            conn,
+            "campaign_state",
+            "campaign_context_json",
+            "TEXT NOT NULL DEFAULT '{}'",
+        )
+        _ensure_column(
+            conn,
+            "campaign_state",
+            "failure_events_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )
+        _ensure_column(
+            conn,
+            "campaign_state",
+            "latest_strategy_trace_json",
+            "TEXT",
+        )
+        _ensure_column(
+            conn,
+            "campaign_state",
+            "backend_performance_json",
+            "TEXT NOT NULL DEFAULT '{}'",
+        )
+        _ensure_column(
+            conn,
+            "campaign_state",
+            "strategy_bandit_json",
+            "TEXT NOT NULL DEFAULT '{}'",
+        )
+        _ensure_column(
+            conn,
+            "campaign_state",
+            "space_revisions_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )
+        _ensure_column(
+            conn,
+            "campaign_state",
+            "strategy_rewards_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )
+        _ensure_column(
+            conn,
+            "campaign_state",
+            "shadow_bandit_records_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )
+        _ensure_column(
+            conn,
+            "campaign_state",
+            "objective_transitions_json",
+            "TEXT NOT NULL DEFAULT '[]'",
+        )
         conn.commit()
+
+
+def _ensure_column(
+    conn: sqlite3.Connection,
+    table: str,
+    column: str,
+    definition: str,
+) -> None:
+    existing = {
+        row["name"]
+        for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

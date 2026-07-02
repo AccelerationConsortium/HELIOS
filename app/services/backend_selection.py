@@ -1,23 +1,4 @@
-"""Conservative, fingerprint-biased backend ranking (staged Δ2).
-
-``rank_backends`` chooses one backend from an ordered preference *pool* for the
-winning campaign action.  It is deliberately conservative:
-
-* **phase policy dominates** -- the pool's preference order is the base score;
-* **fingerprint recommendation is a secondary boost** -- it can flip near-ties
-  but cannot overturn a clearly-preferred phase backend;
-* **availability and phase-incompatibility are hard vetoes** -- only backends in
-  the pool that are available can ever be selected, so a recommendation can
-  never pull in an unavailable or phase-incompatible backend;
-* **recent failure history penalizes and (past a threshold) vetoes**;
-* **selection is deterministic** -- ties break by preference order.
-
-With no recommendation and no failures it reduces exactly to "first available
-in preference order", so it is a no-op for the existing decision path.
-
-The function is pure (no Nexus import, no I/O) and returns a ``BackendSelection``
-that doubles as the provenance record for the choice.
-"""
+"""Conservative, fingerprint-biased backend ranking (staged delta 2)."""
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -33,6 +14,7 @@ class BackendScore:
     fingerprint_boost: float
     failure_penalty: float
     total: float
+    influence_delta: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -40,7 +22,7 @@ class BackendSelection:
     """The ratified backend choice plus full selection provenance."""
 
     phase: str
-    candidate_backends: tuple[str, ...]  # available pool members considered, in order
+    candidate_backends: tuple[str, ...]
     fingerprint_recommendation: tuple[str, ...]
     score_components: tuple[BackendScore, ...]
     selected_backend: str
@@ -60,19 +42,18 @@ def rank_backends(
     failure_penalty: float = 0.5,
     failure_veto_threshold: int = 3,
     fallback_backend: str = "built_in",
+    influence_deltas: Mapping[str, float] | None = None,
 ) -> BackendSelection:
-    """Rank *pool* backends and return the ratified selection with provenance."""
+    """Rank pool backends and return the ratified selection with provenance."""
     failures = failure_counts or {}
+    external_deltas = influence_deltas or {}
     n = len(pool)
 
-    # Hard veto 1: availability + phase-incompatibility (only pool members count).
     avail = [b for b in pool if available.get(b, False)]
-    # Hard veto 2: failure history at/above the veto threshold.
     considered = [b for b in avail if failures.get(b, 0) < failure_veto_threshold]
     scoring_pool = considered if considered else avail
 
     if not scoring_pool:
-        # Nothing in the pool is usable -> degrade to the guaranteed fallback.
         return BackendSelection(
             phase=phase,
             candidate_backends=(),
@@ -87,7 +68,7 @@ def rank_backends(
     scores: list[BackendScore] = []
     for backend in scoring_pool:
         idx = pool.index(backend)
-        phase_score = (n - idx) / n  # top preference -> highest
+        phase_score = (n - idx) / n
 
         if recommended and backend in rec_index:
             rank = rec_index[backend]
@@ -102,27 +83,29 @@ def rank_backends(
             else 0.0
         )
 
-        total = phase_weight * phase_score + boost - penalty
+        influence_delta = external_deltas.get(backend, 0.0)
+        total = phase_weight * phase_score + boost - penalty + influence_delta
         scores.append(
             BackendScore(
                 backend=backend,
                 phase_score=round(phase_score, 4),
                 fingerprint_boost=round(boost, 4),
                 failure_penalty=round(penalty, 4),
+                influence_delta=round(influence_delta, 4),
                 total=round(total, 4),
             )
         )
 
-    # Deterministic: highest total, ties broken by preference order.
     ranked = sorted(scores, key=lambda s: (-s.total, pool.index(s.backend)))
     selected = ranked[0].backend
 
-    phase_only = scoring_pool[0]  # what phase policy alone would pick
+    phase_only = scoring_pool[0]
     biased = selected != phase_only
-    # Fallback status: the run is using the universal fallback optimizer.
     fallback = selected == fallback_backend
 
-    if biased:
+    if biased and any(abs(v) > 0 for v in external_deltas.values()):
+        reason = f"ranking influence promoted '{selected}' over phase-default '{phase_only}'"
+    elif biased:
         reason = f"fingerprint promoted '{selected}' over phase-default '{phase_only}'"
     elif fallback:
         reason = f"using fallback backend '{fallback_backend}'"

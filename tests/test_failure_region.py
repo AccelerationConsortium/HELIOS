@@ -8,7 +8,11 @@ suggestions avoid -- expressed as a bomcp OutcomeConstraint on a synthetic
 """
 from __future__ import annotations
 
-from app.services.failure_region import (
+import importlib.util
+
+import pytest
+
+from app.optimization.failure_region import (
     FailureRegionModel,
     build_feasibility_observations,
     failure_outcome_constraint,
@@ -16,6 +20,11 @@ from app.services.failure_region import (
 )
 from app.services.candidate_gen import OutcomeConstraint, ParameterSpace, SearchDimension
 from app.services.optimization_backends import Observation
+
+_needs_bomcp = pytest.mark.skipif(
+    importlib.util.find_spec("bo_engine") is None,
+    reason="bo-engine not installed",
+)
 
 
 def _unit_square() -> ParameterSpace:
@@ -99,6 +108,7 @@ def test_filter_failure_prone_removes_points_in_region():
 # --- bomcp expression (learned outcome constraint) --------------------------
 
 
+@_needs_bomcp
 def test_feasibility_observations_label_success_and_failure():
     succeeded = [Observation(params={"x0": 0.1, "x1": 0.1}, objective=5.0)]
     failed = [{"x0": 0.8, "x1": 0.8}]
@@ -164,7 +174,7 @@ def test_generation_unchanged_without_failures():
 
 
 def test_avoid_failure_region_filters_and_tops_up():
-    from app.services.failure_region import avoid_failure_region
+    from app.optimization.failure_region import avoid_failure_region
 
     space = _unit_square()
     failed = _failures_near(0.8, 0.8, n=8)
@@ -182,7 +192,7 @@ def test_avoid_failure_region_filters_and_tops_up():
 
 
 def test_avoid_failure_region_noop_without_failures():
-    from app.services.failure_region import avoid_failure_region
+    from app.optimization.failure_region import avoid_failure_region
 
     space = _unit_square()
     cands = [{"x0": 0.8, "x1": 0.8}, {"x0": 0.1, "x1": 0.1}]

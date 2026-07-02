@@ -113,9 +113,8 @@ class DesignAgent(BaseAgent[DesignInput, DesignOutput]):
 
     async def process(self, input_data: DesignInput) -> DesignOutput:
         from app.services.candidate_gen import (
-            ParameterSpace,
-            SearchDimension,
             generate_batch,
+            space_from_dimensions,
         )
 
         # Incorporate adversarial refutations from ValidatorSwarm, if any.
@@ -130,25 +129,8 @@ class DesignAgent(BaseAgent[DesignInput, DesignOutput]):
             )
             logger.info("design_agent: %s", refutation_note)
 
-        dims = []
-        for d in input_data.dimensions:
-            choices = d.get("choices")
-            if choices is not None:
-                choices = tuple(choices)
-            dims.append(SearchDimension(
-                param_name=d["param_name"],
-                param_type=d.get("param_type", "number"),
-                min_value=d.get("min_value"),
-                max_value=d.get("max_value"),
-                log_scale=d.get("log_scale", False),
-                choices=choices,
-                step_key=d.get("step_key"),
-                primitive=d.get("primitive"),
-            ))
-
-        space = ParameterSpace(
-            dimensions=tuple(dims),
-            protocol_template=input_data.protocol_template,
+        space = space_from_dimensions(
+            input_data.dimensions, input_data.protocol_template
         )
 
         batch = generate_batch(
@@ -167,7 +149,7 @@ class DesignAgent(BaseAgent[DesignInput, DesignOutput]):
 
         # Dim 9 / P3b: steer candidates away from learned failure coordinates.
         if input_data.failed_params:
-            from app.services.failure_region import avoid_failure_region
+            from app.optimization.failure_region import avoid_failure_region
 
             candidates = avoid_failure_region(
                 candidates, space, input_data.batch_size,

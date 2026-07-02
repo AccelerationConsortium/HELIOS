@@ -1,25 +1,4 @@
-"""Dim 9 -- failure-region modeling in parameter space.
-
-HELIOS learns failures at the *method* level (``backend_failure_counts`` ->
-penalty/veto in ranking).  This module pushes failure learning down to the
-*coordinate* level: a region of the parameter space where experiments keep
-failing (errored runs, QC rejections) becomes a learned infeasible region that
-future suggestions avoid.
-
-Two complementary enforcement paths:
-
-* **Universal** -- :func:`filter_failure_prone` drops candidate points that fall
-  inside the learned region, so *any* backend (LHS, CMA-ES, built_in, ...)
-  benefits without modification.
-* **Surrogate-aware** -- :func:`build_feasibility_observations` +
-  :func:`failure_outcome_constraint` express the region as a bomcp
-  ``OutcomeConstraint`` on a synthetic ``"feasibility"`` response, so the GP
-  models ``P(feasible | x)`` and steers the acquisition away from it.
-
-The score is a distance-kernel density of past failures in *normalized* space:
-``1`` on top of a failure cluster, decaying to ``0`` far away.  This is a cheap,
-explainable model -- no training, robust with a handful of failures.
-"""
+"""Failure-region modeling in parameter space."""
 from __future__ import annotations
 
 import math
@@ -33,8 +12,8 @@ if TYPE_CHECKING:  # pragma: no cover
     from app.services.optimization_backends import Observation
 
 _FEASIBILITY = "feasibility"
-_DEFAULT_BANDWIDTH = 0.15  # fraction of normalized space; ~one cluster radius
-_DEFAULT_THRESHOLD = 0.5  # failure_score >= this => predicted to fail
+_DEFAULT_BANDWIDTH = 0.15
+_DEFAULT_THRESHOLD = 0.5
 
 
 def _dim_distance(dim: SearchDimension, a: Any, b: Any) -> float:
@@ -86,7 +65,7 @@ class FailureRegionModel:
         )
 
     def failure_score(self, params: dict[str, Any]) -> float:
-        """Return P-like failure proneness in [0, 1] (0 if no failures known)."""
+        """Return failure proneness in [0, 1], or 0 if no failures are known."""
         if not self.failed:
             return 0.0
         best = 0.0
@@ -116,12 +95,7 @@ def avoid_failure_region(
     failed: list[dict[str, Any]],
     seed: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Filter failure-prone candidates and top up to ``n`` with feasible points.
-
-    Shared by ``generate_adaptive_candidates`` and the DesignAgent so every
-    generation path steers around learned failure coordinates identically.
-    No-op (returns ``candidates`` unchanged) when no failures are recorded.
-    """
+    """Filter failure-prone candidates and top up to n with feasible points."""
     if not failed:
         return candidates
 
@@ -135,9 +109,9 @@ def avoid_failure_region(
     base = 0 if seed is None else seed
     tries = 0
     while len(kept) < n and tries < 50:
-        for p in sample_feasible(space, n, seed=base + tries + 1):
-            if model.predicted_feasible(p) and p not in kept:
-                kept.append(p)
+        for point in sample_feasible(space, n, seed=base + tries + 1):
+            if model.predicted_feasible(point) and point not in kept:
+                kept.append(point)
                 if len(kept) == n:
                     break
         tries += 1
@@ -148,21 +122,20 @@ def build_feasibility_observations(
     succeeded: list[Observation],
     failed: list[dict[str, Any]],
 ) -> list[Any]:
-    """Label succeeded/failed points as a binary ``feasibility`` response.
-
-    Returns bo-engine ``ObservationData`` (lazy import) so the constraint GP can
-    fit ``P(feasible | x)``.  Succeeded -> 1.0, failed -> 0.0.
-    """
+    """Label succeeded/failed points as binary feasibility observations."""
     from bo_engine.types import ObservationData
 
     obs: list[Any] = []
-    for o in succeeded:
+    for item in succeeded:
         obs.append(
-            ObservationData(parameter_values=dict(o.params), objective_values={_FEASIBILITY: 1.0})
+            ObservationData(
+                parameter_values=dict(item.params),
+                objective_values={_FEASIBILITY: 1.0},
+            )
         )
-    for p in failed:
+    for params in failed:
         obs.append(
-            ObservationData(parameter_values=dict(p), objective_values={_FEASIBILITY: 0.0})
+            ObservationData(parameter_values=dict(params), objective_values={_FEASIBILITY: 0.0})
         )
     return obs
 

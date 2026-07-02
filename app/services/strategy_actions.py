@@ -123,6 +123,7 @@ def generate_action_candidates(
             + w_info * a.expected_info_gain
             - w_risk * a.risk
         )
+        utility += _objective_level_action_prior(snapshot, a)
         scored.append(ActionCandidate(
             name=a.name,
             backend_name=a.backend_name,
@@ -134,6 +135,30 @@ def generate_action_candidates(
         ))
 
     return sorted(scored, key=lambda a: a.utility, reverse=True)
+
+
+def _objective_level_action_prior(
+    snapshot: CampaignSnapshot,
+    action: ActionCandidate,
+) -> float:
+    """Small explicit action prior from the scientific objective ladder."""
+    context = snapshot.campaign_context
+    if context is None:
+        return 0.0
+    level = getattr(context.current_objective_level, "value", context.current_objective_level)
+    if level == "feasibility":
+        return 0.45 if action.name == "stabilize" else -0.05
+    if level == "data_quality":
+        return 0.40 if action.name == "stabilize" else -0.05
+    if level == "baseline":
+        return 0.35 if action.name == "explore" else 0.0
+    if level == "performance":
+        return 0.25 if action.name == "exploit" else 0.05 if action.name == "refine" else 0.0
+    if level == "mechanism":
+        return 0.25 if action.name in ("stabilize", "refine") else 0.0
+    if level == "generalization":
+        return 0.25 if action.name in ("explore", "refine") else 0.0
+    return 0.0
 
 
 # ---------------------------------------------------------------------------
