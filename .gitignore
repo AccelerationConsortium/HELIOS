@@ -36,6 +36,9 @@ docs/*
 !docs/adaptive_campaign_substrate.md
 !docs/development_progress.md
 !docs/agent_architecture.md
+!docs/plans/
+docs/plans/*
+!docs/plans/2026-07-02-llm-candidate-proposer-design.md
 
 # Planning / design notes
 plan/
