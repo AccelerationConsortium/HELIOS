@@ -5,6 +5,7 @@ import logging
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+from app.optimization.failure_zone_memory import FailureZone
 from app.services.llm_candidate_proposer import LLMCandidateProposer
 from app.services.llm_gateway import MockProvider
 
@@ -46,11 +47,18 @@ def _kwargs(**over):
         objective_kpi="conductivity",
         direction="maximize",
         strategy_decision=_decision(plateau=True, uncertainty=0.1),
+        policy_snapshot={},
         proposer=_proposer_with_points(),
         now=_NOW,
     )
     base.update(over)
     return base
+
+
+def _no_failure_history(monkeypatch):
+    import app.agents.orchestrator as orch
+
+    monkeypatch.setattr(orch, "recall_failure_zones", lambda *a, **k: [])
 
 
 async def test_disabled_flag_returns_none_and_skips_llm(monkeypatch):
@@ -86,6 +94,7 @@ async def test_enabled_and_triggered_records_shadow(monkeypatch, caplog):
     import app.agents.orchestrator as orch
 
     monkeypatch.setattr(orch, "get_settings", lambda: _Settings(True))
+    _no_failure_history(monkeypatch)
 
     with caplog.at_level(logging.INFO):
         shadow = await orch._maybe_record_llm_proposer_shadow(**_kwargs())
@@ -95,10 +104,64 @@ async def test_enabled_and_triggered_records_shadow(monkeypatch, caplog):
     assert "llm_proposer_shadow" in caplog.text
 
 
+async def test_real_failure_zone_rejector_binds(monkeypatch):
+    import app.agents.orchestrator as orch
+
+    monkeypatch.setattr(orch, "get_settings", lambda: _Settings(True))
+    # The proposed point {x:0.4,c:a} matches a recalled historical failure.
+    monkeypatch.setattr(
+        orch,
+        "recall_failure_zones",
+        lambda *a, **k: [
+            FailureZone(
+                params={"x": 0.4, "c": "a"},
+                distance=0.0,
+                error="boom",
+                campaign_id="other",
+                round_number=0,
+                candidate_index=0,
+            )
+        ],
+    )
+
+    shadow = await orch._maybe_record_llm_proposer_shadow(**_kwargs())
+
+    assert shadow.validation.accepted_points == []
+    assert any(
+        "failure_zone" in r
+        for v in shadow.validation.validations
+        for r in v.rejections
+    )
+
+
+async def test_real_safety_rejector_binds(monkeypatch):
+    import app.agents.orchestrator as orch
+
+    monkeypatch.setattr(orch, "get_settings", lambda: _Settings(True))
+    _no_failure_history(monkeypatch)
+
+    provider = MockProvider(
+        responses=[json.dumps({"proposals": [{"params": {"temp_c": 150.0}, "reason": "hot"}]})]
+    )
+    shadow = await orch._maybe_record_llm_proposer_shadow(
+        **_kwargs(
+            dimensions=[{"param_name": "temp_c", "param_type": "number", "min_value": 0.0, "max_value": 200.0}],
+            policy_snapshot={"max_temp_c": 100.0},
+            proposer=LLMCandidateProposer(provider=provider),
+        )
+    )
+
+    assert shadow.validation.accepted_points == []
+    assert any(
+        "safety" in r for v in shadow.validation.validations for r in v.rejections
+    )
+
+
 async def test_hook_is_fail_open(monkeypatch, caplog):
     import app.agents.orchestrator as orch
 
     monkeypatch.setattr(orch, "get_settings", lambda: _Settings(True))
+    _no_failure_history(monkeypatch)
 
     def _boom(*_a, **_k):
         raise RuntimeError("validation exploded")

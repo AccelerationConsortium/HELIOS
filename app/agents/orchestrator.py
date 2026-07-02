@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from app.agents.base import AgentResult, BaseAgent
 from app.agents.pause import PauseRequest, PauseResult
 from app.core.config import get_settings
+from app.optimization.failure_zone_memory import recall_failure_zones
 from app.services.adaptive_campaign_substrate import (
     build_adaptive_campaign_substrate_snapshot,
 )
@@ -36,7 +37,9 @@ from app.services.decision_trace import CampaignDecisionTraceBuilder
 from app.services.llm_candidate_proposer import (
     LLMCandidateProposer,
     LLMProposerShadow,
+    make_safety_bounds_rejector,
     should_invoke_llm_proposer,
+    space_centroid,
     validate_proposal,
 )
 from app.services.primitives_registry import get_registry
@@ -205,6 +208,7 @@ async def _maybe_record_llm_proposer_shadow(
     direction: str,
     strategy_decision: Any | None = None,
     best_so_far: dict[str, Any] | None = None,
+    policy_snapshot: dict[str, Any] | None = None,
     proposer: LLMCandidateProposer | None = None,
     now: Any | None = None,
 ) -> Any | None:
@@ -235,7 +239,23 @@ async def _maybe_record_llm_proposer_shadow(
             trigger_reason="plateau" if plateau else "uncertainty",
             now=now,
         )
-        validation = validate_proposal(proposal, space=space, now=now)
+
+        # Bind the real failure-zone and safety rejectors (both fail-open).
+        failure_zones: list[dict[str, Any]] = []
+        try:
+            zones = recall_failure_zones(campaign_id, space_centroid(space), space, k=20)
+            failure_zones = [dict(zone.params) for zone in zones]
+        except Exception:
+            logger.debug("Failure-zone recall failed for LLM proposer", exc_info=True)
+        safety_rejector = make_safety_bounds_rejector(policy_snapshot or {})
+
+        validation = validate_proposal(
+            proposal,
+            space=space,
+            failure_zones=failure_zones,
+            extra_rejectors=[safety_rejector],
+            now=now,
+        )
         shadow = LLMProposerShadow(proposal=proposal, validation=validation)
         logger.info(
             "llm_proposer_shadow %s",
@@ -1380,6 +1400,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 objective_kpi=input_data.objective_kpi,
                 direction=input_data.direction,
                 strategy_decision=strategy_decision,
+                policy_snapshot=dict(input_data.policy_snapshot or {}),
             )
 
             # Reset per-round batch collectors

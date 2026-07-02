@@ -43,10 +43,20 @@ __all__ = [
     "PointValidation",
     "ValidatedProposal",
     "compare_llm_proposal_to_selection",
+    "make_safety_bounds_rejector",
     "parse_llm_proposer_shadow_log_line",
     "should_invoke_llm_proposer",
+    "space_centroid",
     "validate_proposal",
 ]
+
+#: Safety-relevant parameter keys and the policy limit they must not exceed.
+#: Mirrors the thresholds used by ``app.services.safety.evaluate_preflight`` so
+#: obviously-unsafe LLM proposals are pre-filtered without protocol compilation.
+_SAFETY_MAX_KEYS: tuple[tuple[tuple[str, ...], str, float], ...] = (
+    (("temp_c", "temperature"), "max_temp_c", 95.0),
+    (("volume_ul", "volume"), "max_volume_ul", 1000.0),
+)
 
 #: Epistemic uncertainty at or above this triggers the proposer.
 _UNCERTAINTY_THRESHOLD = 0.7
@@ -188,6 +198,43 @@ def compare_llm_proposal_to_selection(
         overlap_rate=(overlap / n_selected) if n_selected else 0.0,
         created_at=timestamp,
     )
+
+
+def space_centroid(space: ParameterSpace) -> dict[str, Any]:
+    """A representative query point: numeric midpoints, first categorical choice."""
+    point: dict[str, Any] = {}
+    for dim in space.dimensions:
+        if dim.param_type in {"number", "integer"} and (
+            dim.min_value is not None and dim.max_value is not None
+        ):
+            mid = (dim.min_value + dim.max_value) / 2.0
+            point[dim.param_name] = int(round(mid)) if dim.param_type == "integer" else mid
+        elif dim.choices:
+            point[dim.param_name] = dim.choices[0]
+    return point
+
+
+def make_safety_bounds_rejector(policy_snapshot: dict[str, Any]) -> Rejector:
+    """Reject candidates whose safety-relevant params exceed policy limits.
+
+    Reuses the same thresholds/keys as ``safety.evaluate_preflight`` at the
+    parameter level (no protocol compilation). This is a shadow pre-filter; the
+    full protocol-level safety gate still runs before real execution downstream.
+    """
+    limits: list[tuple[tuple[str, ...], float]] = []
+    for keys, policy_key, default in _SAFETY_MAX_KEYS:
+        limits.append((keys, float(policy_snapshot.get(policy_key, default))))
+
+    def _reject(params: dict[str, Any]) -> str | None:
+        for keys, limit in limits:
+            for key in keys:
+                value = params.get(key)
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    if float(value) > limit:
+                        return f"safety: '{key}'={value} exceeds policy limit {limit}"
+        return None
+
+    return _reject
 
 
 def parse_llm_proposer_shadow_log_line(line: str) -> LLMProposerShadow | None:

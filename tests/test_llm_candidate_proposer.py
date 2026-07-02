@@ -9,8 +9,10 @@ from app.services.llm_candidate_proposer import (
     LLMProposerShadow,
     ValidatedProposal,
     compare_llm_proposal_to_selection,
+    make_safety_bounds_rejector,
     parse_llm_proposer_shadow_log_line,
     should_invoke_llm_proposer,
+    space_centroid,
     validate_proposal,
 )
 from app.services.llm_gateway import MockProvider
@@ -227,6 +229,20 @@ async def test_llm_proposer_shadow_log_round_trips():
     assert parsed is not None
     assert parsed.validation.accepted_points == [{"x": 0.5, "c": "a"}]
     assert parse_llm_proposer_shadow_log_line("unrelated line") is None
+
+
+def test_space_centroid():
+    assert space_centroid(_space()) == {"x": 0.5, "c": "a"}
+
+
+def test_make_safety_bounds_rejector_uses_policy_limits():
+    reject = make_safety_bounds_rejector({"max_temp_c": 50.0, "max_volume_ul": 200.0})
+
+    assert reject({"temp_c": 99.0}) is not None
+    assert "safety" in reject({"temp_c": 99.0})
+    assert reject({"volume_ul": 500.0}) is not None
+    assert reject({"temp_c": 25.0, "volume_ul": 100.0}) is None
+    assert reject({"x": 0.5}) is None  # non-safety params are ignored
 
 
 def test_import_smoke():
