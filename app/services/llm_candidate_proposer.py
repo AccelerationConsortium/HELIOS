@@ -38,8 +38,12 @@ __all__ = [
     "LLMCandidateProposer",
     "LLMProposal",
     "LLMProposedPoint",
+    "LLMProposerShadow",
+    "LLMSelectionComparison",
     "PointValidation",
     "ValidatedProposal",
+    "compare_llm_proposal_to_selection",
+    "parse_llm_proposer_shadow_log_line",
     "should_invoke_llm_proposer",
     "validate_proposal",
 ]
@@ -107,6 +111,96 @@ class ValidatedProposal(BaseModel):
         if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
             raise ValueError("created_at must be timezone-aware")
         return value
+
+
+class LLMProposerShadow(BaseModel):
+    """Shadow artifact bundling a proposal with its deterministic validation."""
+
+    proposal: LLMProposal
+    validation: ValidatedProposal
+    shadow_only: bool = True
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("created_at")
+    @classmethod
+    def _created_at_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+            raise ValueError("created_at must be timezone-aware")
+        return value
+
+
+class LLMSelectionComparison(BaseModel):
+    """Offline comparison of LLM proposals vs what HELIOS actually selected."""
+
+    campaign_id: str
+    round_index: int = Field(ge=0)
+    n_proposed: int = Field(ge=0)
+    n_accepted: int = Field(ge=0)
+    validity_rate: float = Field(ge=0.0, le=1.0)
+    n_selected: int = Field(ge=0)
+    overlap_count: int = Field(ge=0)
+    overlap_rate: float = Field(ge=0.0, le=1.0)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("created_at")
+    @classmethod
+    def _created_at_must_be_timezone_aware(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+            raise ValueError("created_at must be timezone-aware")
+        return value
+
+
+def compare_llm_proposal_to_selection(
+    validation: ValidatedProposal,
+    *,
+    selected_candidates: list[dict[str, Any]],
+    space: ParameterSpace,
+    tol: float = _FAILURE_ZONE_TOL,
+    now: datetime | None = None,
+) -> LLMSelectionComparison:
+    """Compare validated LLM points to the round's actually selected candidates.
+
+    Advisory / offline only. ``overlap`` counts selected candidates that have an
+    accepted LLM point within ``tol`` normalized distance.
+    """
+    timestamp = now or datetime.now(UTC)
+    n_proposed = len(validation.validations)
+    accepted = validation.accepted_points
+    n_accepted = len(accepted)
+    n_selected = len(selected_candidates)
+
+    overlap = sum(
+        1
+        for chosen in selected_candidates
+        if any(_normalized_distance(point, chosen, space) <= tol for point in accepted)
+    )
+
+    return LLMSelectionComparison(
+        campaign_id=validation.campaign_id,
+        round_index=validation.round_index,
+        n_proposed=n_proposed,
+        n_accepted=n_accepted,
+        validity_rate=(n_accepted / n_proposed) if n_proposed else 0.0,
+        n_selected=n_selected,
+        overlap_count=overlap,
+        overlap_rate=(overlap / n_selected) if n_selected else 0.0,
+        created_at=timestamp,
+    )
+
+
+def parse_llm_proposer_shadow_log_line(line: str) -> LLMProposerShadow | None:
+    """Reconstruct an LLMProposerShadow from its shadow log line, or None."""
+    marker = "llm_proposer_shadow "
+    index = line.find(marker)
+    if index < 0:
+        return None
+    payload = line[index + len(marker):].strip()
+    try:
+        return LLMProposerShadow.model_validate(json.loads(payload))
+    except Exception:
+        return None
 
 
 def should_invoke_llm_proposer(

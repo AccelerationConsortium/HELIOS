@@ -30,8 +30,15 @@ from app.services.adaptive_substrate_inputs import (
     failure_attribution_from_events,
     objective_state_from_input,
 )
+from app.services.candidate_gen import space_from_dimensions
 from app.services.decision_layer import CampaignDecisionLayer
 from app.services.decision_trace import CampaignDecisionTraceBuilder
+from app.services.llm_candidate_proposer import (
+    LLMCandidateProposer,
+    LLMProposerShadow,
+    should_invoke_llm_proposer,
+    validate_proposal,
+)
 from app.services.primitives_registry import get_registry
 from app.services.round_context import build_campaign_round_context
 
@@ -173,6 +180,71 @@ def _maybe_record_adaptive_campaign_substrate_snapshot(
     except Exception:
         logger.warning(
             "Adaptive substrate shadow hook failed; continuing live campaign",
+            exc_info=True,
+        )
+        return None
+
+
+def _llm_trigger_signals(strategy_decision: Any) -> tuple[bool, float | None]:
+    """Read plateau / epistemic-uncertainty signals for the LLM proposer trigger."""
+    diagnostics = getattr(strategy_decision, "diagnostics", None)
+    if diagnostics is None:
+        return False, None
+    plateau = getattr(diagnostics, "convergence_status", None) == "plateau"
+    epistemic = getattr(diagnostics, "model_uncertainty", None)
+    return plateau, epistemic
+
+
+async def _maybe_record_llm_proposer_shadow(
+    *,
+    campaign_id: str,
+    round_index: int,
+    dimensions: list[dict[str, Any]],
+    protocol_template: dict[str, Any] | None,
+    objective_kpi: str,
+    direction: str,
+    strategy_decision: Any | None = None,
+    best_so_far: dict[str, Any] | None = None,
+    proposer: LLMCandidateProposer | None = None,
+    now: Any | None = None,
+) -> Any | None:
+    """Record an LLM candidate proposal as a parallel shadow track.
+
+    Shadow-only and advisory: the LLM proposes candidate points, they pass a
+    deterministic validation gate, and the artifact is logged. It never affects
+    routing, strategy, candidate selection, or execution, and its return value is
+    ignored. Invoked only on plateau / high uncertainty (cost control) and
+    fail-open.
+    """
+    try:
+        if not get_settings().llm_proposer_shadow_enabled:
+            return None
+        plateau, epistemic = _llm_trigger_signals(strategy_decision)
+        if not should_invoke_llm_proposer(plateau=plateau, epistemic_uncertainty=epistemic):
+            return None
+
+        space = space_from_dimensions(list(dimensions), protocol_template)
+        active_proposer = proposer or LLMCandidateProposer()
+        proposal = await active_proposer.propose(
+            campaign_id=campaign_id,
+            round_index=round_index,
+            space=space,
+            objective_kpi=objective_kpi,
+            direction=direction,
+            best_so_far=best_so_far,
+            trigger_reason="plateau" if plateau else "uncertainty",
+            now=now,
+        )
+        validation = validate_proposal(proposal, space=space, now=now)
+        shadow = LLMProposerShadow(proposal=proposal, validation=validation)
+        logger.info(
+            "llm_proposer_shadow %s",
+            json.dumps(shadow.model_dump(mode="json"), sort_keys=True),
+        )
+        return shadow
+    except Exception:
+        logger.warning(
+            "LLM proposer shadow hook failed; continuing live campaign",
             exc_info=True,
         )
         return None
@@ -1296,6 +1368,18 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 failure_event_dicts=failure_event_dicts,
                 protocol_template=input_data.protocol_template,
                 safety_summary=dict(input_data.policy_snapshot or {}),
+            )
+
+            # Parallel shadow track: LLM candidate proposer (advisory, plug-in
+            # proposer governed by HELIOS; observational only, return ignored).
+            await _maybe_record_llm_proposer_shadow(
+                campaign_id=campaign_id,
+                round_index=round_num,
+                dimensions=list(input_data.dimensions),
+                protocol_template=input_data.protocol_template,
+                objective_kpi=input_data.objective_kpi,
+                direction=input_data.direction,
+                strategy_decision=strategy_decision,
             )
 
             # Reset per-round batch collectors

@@ -6,7 +6,10 @@ from datetime import UTC, datetime
 from app.services.candidate_gen import space_from_dimensions
 from app.services.llm_candidate_proposer import (
     LLMCandidateProposer,
+    LLMProposerShadow,
     ValidatedProposal,
+    compare_llm_proposal_to_selection,
+    parse_llm_proposer_shadow_log_line,
     should_invoke_llm_proposer,
     validate_proposal,
 )
@@ -188,6 +191,42 @@ def test_config_flag_default_false(monkeypatch):
     from app.core.config import Settings
 
     assert Settings().llm_proposer_shadow_enabled is False
+
+
+async def test_compare_llm_proposal_to_selection_overlap():
+    proposal = await _proposal_with(
+        [
+            {"params": {"x": 0.5, "c": "a"}, "reason": "matches a selected candidate"},
+            {"params": {"x": 2.0, "c": "a"}, "reason": "invalid, rejected"},
+        ]
+    )
+    validated = validate_proposal(proposal, space=_space(), now=_NOW)
+
+    comparison = compare_llm_proposal_to_selection(
+        validated,
+        selected_candidates=[{"x": 0.5, "c": "a"}, {"x": 0.9, "c": "b"}],
+        space=_space(),
+        now=_NOW,
+    )
+
+    assert comparison.n_proposed == 2
+    assert comparison.n_accepted == 1
+    assert comparison.validity_rate == 0.5
+    assert comparison.overlap_count == 1  # the accepted point matches a selection
+    assert comparison.created_at == _NOW
+
+
+async def test_llm_proposer_shadow_log_round_trips():
+    proposal = await _proposal_with([{"params": {"x": 0.5, "c": "a"}, "reason": "ok"}])
+    validated = validate_proposal(proposal, space=_space(), now=_NOW)
+    shadow = LLMProposerShadow(proposal=proposal, validation=validated)
+
+    line = "llm_proposer_shadow " + json.dumps(shadow.model_dump(mode="json"), sort_keys=True)
+    parsed = parse_llm_proposer_shadow_log_line(line)
+
+    assert parsed is not None
+    assert parsed.validation.accepted_points == [{"x": 0.5, "c": "a"}]
+    assert parse_llm_proposer_shadow_log_line("unrelated line") is None
 
 
 def test_import_smoke():
