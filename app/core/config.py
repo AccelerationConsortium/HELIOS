@@ -99,6 +99,14 @@ class Settings:
             "ADAPTIVE_SUBSTRATE_SHADOW_ENABLED", "false"
         ).lower() in ("true", "1", "yes")
 
+        # ---- LLM candidate proposer (shadow-first) ----
+        # When enabled, an LLM proposes candidate points (validated, advisory)
+        # alongside the classical backends. Default off; proposals never affect
+        # candidate selection until promoted.
+        self.llm_proposer_shadow_enabled: bool = os.getenv(
+            "LLM_PROPOSER_SHADOW_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+
     @staticmethod
     def _load_puda_machine_map(raw: str) -> dict[str, str]:
         try:
