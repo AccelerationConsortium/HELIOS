@@ -118,6 +118,16 @@ decision track by `shadow_trace_comparison`. It changes no routing and is gated
 by `ADAPTIVE_SUBSTRATE_SHADOW_ENABLED` (default off). See
 [docs/adaptive_campaign_substrate.md](docs/adaptive_campaign_substrate.md).
 
+### Agent Model
+
+HELIOS is an **autonomous multi-agent experimentation system**, not an "LLM
+agent". Agents are typed input→output services orchestrated in a deterministic
+L3→L2→L1→L0 pipeline; the per-round optimization/decision loop is **LLM-free by
+design** (classical BO/GP + rule-based scoring + optional non-LLM learned
+policies). The LLM is used only at the language/knowledge boundary (NL→plan,
+NL→code, priors, post-run review) and never steers a live round. See
+[docs/agent_architecture.md](docs/agent_architecture.md).
+
 ### Agent Roster
 
 | Agent | Purpose |

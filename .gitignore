@@ -35,6 +35,7 @@ docs/*
 !docs/HELIOS_ARCHITECTURE_VALIDATION.md
 !docs/adaptive_campaign_substrate.md
 !docs/development_progress.md
+!docs/agent_architecture.md
 
 # Planning / design notes
 plan/
