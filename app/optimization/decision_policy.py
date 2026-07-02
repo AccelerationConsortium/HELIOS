@@ -19,14 +19,20 @@ or applied elsewhere in the campaign loop.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from app.optimization.arbitration_config import ArbitrationConfig
+from app.optimization.candidate_scorer import score_pool
 from app.optimization.schemas import (
+    CandidatePool,
     CandidateSuggestion,
     DecisionResult,
     OptimizationRequest,
 )
 from app.services.candidate_gen import ParameterSpace
+
+if TYPE_CHECKING:  # pragma: no cover
+    from app.services.strategy_models import StrategyDecision
 
 SafetyCheck = Callable[[dict[str, Any], OptimizationRequest], bool]
 
@@ -67,6 +73,32 @@ class OptimizationDecisionPolicy:
     def __init__(self, *, safety_check: SafetyCheck | None = None) -> None:
         self._safety_check = safety_check
 
+    # -- shared hard gate -------------------------------------------------
+
+    def _gate(
+        self,
+        params: dict[str, Any],
+        seen: set[tuple],
+        request: OptimizationRequest,
+    ) -> str | None:
+        """Return a rejection reason if *params* fail the hard gate, else None.
+
+        On acceptance, records the signature in *seen* (within-batch dedup).
+        The gate is absolute and strategy-free: bounds, dedup, safety.
+        """
+        violation = _bounds_violation(params, request.space)
+        if violation is not None:
+            return f"out of bounds: {violation}"
+        sig = _signature(params)
+        if sig in seen:
+            return "duplicate of a prior or already-accepted point"
+        if self._safety_check is not None and not self._safety_check(params, request):
+            return "failed safety check"
+        seen.add(sig)
+        return None
+
+    # -- legacy hard-gate-only verdict (unchanged behaviour) --------------
+
     def evaluate(
         self,
         suggestion: CandidateSuggestion,
@@ -84,27 +116,12 @@ class OptimizationDecisionPolicy:
         )
 
         for cand in suggestion.candidates:
-            violation = _bounds_violation(cand, request.space)
-            if violation is not None:
+            reason = self._gate(cand, seen, request)
+            if reason is not None:
                 rejected.append(cand)
-                reasons.append(f"out of bounds: {violation}")
-                trace.append(f"rejected {cand}: {violation}")
+                reasons.append(reason)
+                trace.append(f"rejected {cand}: {reason}")
                 continue
-
-            sig = _signature(cand)
-            if sig in seen:
-                rejected.append(cand)
-                reasons.append("duplicate of a prior or already-accepted point")
-                trace.append(f"rejected {cand}: duplicate")
-                continue
-
-            if self._safety_check is not None and not self._safety_check(cand, request):
-                rejected.append(cand)
-                reasons.append("failed safety check")
-                trace.append(f"rejected {cand}: failed safety check")
-                continue
-
-            seen.add(sig)
             accepted.append(cand)
             trace.append(f"accepted {cand}")
 
@@ -119,4 +136,63 @@ class OptimizationDecisionPolicy:
             rejection_reasons=tuple(reasons),
             requires_human_review=requires_human_review,
             decision_trace=tuple(trace),
+        )
+
+    # -- two-stage verdict over a concrete candidate pool (Δ1) ------------
+
+    def arbitrate(
+        self,
+        pool: CandidatePool,
+        request: OptimizationRequest,
+        decision: StrategyDecision,
+        *,
+        config: ArbitrationConfig | None = None,
+    ) -> DecisionResult:
+        """Hard-gate the pool, then soft-rank survivors via the authority's utilities.
+
+        Stage 2 delegates entirely to ``score_pool`` -- no weights or phase are
+        computed here.  Returns the top-``request.n`` candidates plus the full
+        scored portfolio for audit.
+        """
+        config = config or ArbitrationConfig()
+        trace: list[str] = [
+            f"arbitrating pool of {len(pool.candidates)} candidate(s); "
+            f"sources_used={list(pool.sources_used)} dropped={list(pool.sources_dropped)}"
+        ]
+        rejected: list[dict[str, Any]] = []
+        reasons: list[str] = []
+        survivors = []
+
+        seen: set[tuple] = {_signature(o.params) for o in request.observations}
+        for cand in pool.candidates:
+            reason = self._gate(cand.params, seen, request)
+            if reason is not None:
+                rejected.append(dict(cand.params))
+                reasons.append(reason)
+                trace.append(f"rejected {cand.params} [{cand.source}]: {reason}")
+                continue
+            survivors.append(cand)
+
+        scored = score_pool(survivors, decision, request.space, config)
+        for s in scored:
+            trace.append(
+                f"scored {s.candidate.params} "
+                f"[{s.candidate.source}/{s.candidate.source_action}]: "
+                f"util={s.utility} (base={s.base_utility}, delta={s.delta}, "
+                f"redun={s.redundancy})"
+            )
+
+        final = tuple(dict(s.candidate.params) for s in scored[: request.n])
+        requires_human_review = len(scored) == 0
+        if requires_human_review:
+            trace.append("no executable candidate -> escalating for human review")
+
+        return DecisionResult(
+            accepted=bool(final),
+            final_candidates=final,
+            rejected=tuple(rejected),
+            rejection_reasons=tuple(reasons),
+            requires_human_review=requires_human_review,
+            decision_trace=tuple(trace),
+            scored_pool=tuple(scored),
         )

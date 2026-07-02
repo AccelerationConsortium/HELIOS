@@ -25,11 +25,21 @@ from __future__ import annotations
 import random
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from app.optimization.arbitration_config import ArbitrationConfig
 from app.optimization.decision_policy import _bounds_violation, _signature
-from app.optimization.schemas import OptimizationRequest
+from app.optimization.schemas import (
+    CandidatePool as ArbitrationCandidatePool,
+    CandidateSuggestion,
+    OptimizationRequest,
+    PooledCandidate as ArbitrationPooledCandidate,
+)
+from app.services.candidate_gen import sample_lhs
 from app.services.optimization_backends import Observation, get_backend
+
+if TYPE_CHECKING:  # pragma: no cover
+    from app.services.strategy_models import StrategyDecision
 
 COMPONENTS = ("acquisition", "diversity", "robustness", "replication")
 
@@ -267,3 +277,147 @@ def build_candidate_pool(
         archetype_weights=weights,
         source_distribution=source_distribution,
     )
+
+
+# ---------------------------------------------------------------------------
+# Authority-bound arbitration pool (main integration path)
+# ---------------------------------------------------------------------------
+
+_EXPLORATION_PHASES = {"exploration", "explore"}
+
+
+def _authority_action(decision: StrategyDecision) -> str:
+    """The archetype HELIOS authority selected this round."""
+    if decision.actions_considered:
+        return decision.actions_considered[0].name
+    phase = decision.phase
+    return {
+        "exploration": "explore",
+        "exploitation": "exploit",
+        "refinement": "refine",
+    }.get(phase, phase)
+
+
+def _explicit_action(suggestion: CandidateSuggestion, index: int) -> str | None:
+    """Read an explicit per-candidate archetype, if the provider supplied one."""
+    if index < len(suggestion.per_candidate):
+        meta = suggestion.per_candidate[index]
+        action = meta.get("source_action") or meta.get("action") or meta.get("archetype")
+        if action:
+            return str(action)
+    return None
+
+
+class CandidatePoolBuilder:
+    """Build a concrete arbitration pool from provider suggestions."""
+
+    def __init__(self, config: ArbitrationConfig | None = None) -> None:
+        self._config = config or ArbitrationConfig()
+
+    def build(
+        self,
+        request: OptimizationRequest,
+        decision: StrategyDecision,
+        *,
+        nexus_suggestion: CandidateSuggestion | None = None,
+        local_suggestion: CandidateSuggestion | None = None,
+        extra_suggestions: tuple[CandidateSuggestion, ...] = (),
+    ) -> ArbitrationCandidatePool:
+        cfg = self._config
+        authority_action = _authority_action(decision)
+        candidates: list[ArbitrationPooledCandidate] = []
+        used: list[str] = []
+        dropped: list[str] = []
+        trace: list[str] = []
+
+        if nexus_suggestion is not None and nexus_suggestion.candidates:
+            for i, params in enumerate(nexus_suggestion.candidates):
+                candidates.append(
+                    ArbitrationPooledCandidate(
+                        params=dict(params),
+                        source="nexus",
+                        source_action=_explicit_action(nexus_suggestion, i) or authority_action,
+                        generator_backend=nexus_suggestion.algorithm,
+                        rationale=nexus_suggestion.rationale,
+                    )
+                )
+            used.append("nexus")
+            trace.append(
+                f"nexus: {len(nexus_suggestion.candidates)} candidate(s) via "
+                f"{nexus_suggestion.algorithm}, archetype={authority_action}"
+            )
+        else:
+            dropped.append("nexus")
+            trace.append("nexus: no suggestion (dropped)")
+
+        if cfg.include_local_baseline and local_suggestion is not None and local_suggestion.candidates:
+            for params in local_suggestion.candidates:
+                candidates.append(
+                    ArbitrationPooledCandidate(
+                        params=dict(params),
+                        source="local",
+                        source_action=authority_action,
+                        generator_backend=local_suggestion.algorithm,
+                        rationale=local_suggestion.rationale,
+                    )
+                )
+            used.append("local")
+            trace.append(f"local: {len(local_suggestion.candidates)} baseline(s)")
+        elif cfg.include_local_baseline:
+            dropped.append("local")
+            trace.append("local: no baseline (dropped)")
+
+        spec = decision.stabilize_spec
+        if cfg.include_replicate_best and spec is not None and spec.points_to_replicate:
+            for params in spec.points_to_replicate:
+                candidates.append(
+                    ArbitrationPooledCandidate(
+                        params=dict(params),
+                        source="replicate",
+                        source_action="stabilize",
+                        generator_backend="replicate",
+                        rationale=spec.reason,
+                    )
+                )
+            used.append("replicate")
+            trace.append(
+                f"replicate: {len(spec.points_to_replicate)} point(s) from stabilize_spec"
+            )
+
+        if cfg.include_sobol_in_exploration and decision.phase in _EXPLORATION_PHASES:
+            diversity = sample_lhs(request.space, max(1, request.n), seed=request.seed)
+            for params in diversity:
+                candidates.append(
+                    ArbitrationPooledCandidate(
+                        params=dict(params),
+                        source="sobol",
+                        source_action="explore",
+                        generator_backend="lhs",
+                        rationale="space-filling diversity (exploration phase)",
+                    )
+                )
+            used.append("sobol")
+            trace.append(f"sobol/lhs: {len(diversity)} diversity candidate(s)")
+
+        for sug in extra_suggestions:
+            if sug is None or not sug.candidates:
+                continue
+            for i, params in enumerate(sug.candidates):
+                candidates.append(
+                    ArbitrationPooledCandidate(
+                        params=dict(params),
+                        source=sug.source,
+                        source_action=_explicit_action(sug, i) or authority_action,
+                        generator_backend=sug.algorithm,
+                        rationale=sug.rationale,
+                    )
+                )
+            used.append(sug.source)
+            trace.append(f"{sug.source}: {len(sug.candidates)} candidate(s) via {sug.algorithm}")
+
+        return ArbitrationCandidatePool(
+            candidates=tuple(candidates),
+            sources_used=tuple(used),
+            sources_dropped=tuple(dropped),
+            construction_trace=tuple(trace),
+        )

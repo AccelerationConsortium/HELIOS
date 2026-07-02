@@ -25,8 +25,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from app.optimization.arbitration_config import ArbitrationConfig
+from app.optimization.candidate_pool import CandidatePoolBuilder
 from app.optimization.decision_evidence import evidence_for_decision
 from app.optimization.decision_policy import OptimizationDecisionPolicy
 from app.optimization.local_fallback import LocalFallbackProvider
@@ -38,6 +40,10 @@ from app.optimization.schemas import (
     OptimizationProvider,
     OptimizationRequest,
 )
+
+if TYPE_CHECKING:  # pragma: no cover
+    from app.optimization.pool_service import CandidatePoolService
+    from app.services.strategy_models import StrategyDecision
 
 logger = logging.getLogger(__name__)
 
@@ -100,3 +106,62 @@ def suggest_next(
     record = provenance.record(request, suggestion, decision, evidence=evidence)
 
     return OptimizationOutcome(suggestion=suggestion, decision=decision, provenance=record)
+
+
+def _nexus_top_k(
+    request: OptimizationRequest,
+    provider: OptimizationProvider,
+    k: int,
+) -> CandidateSuggestion | None:
+    """Best-effort Nexus top-k; returns None on unavailability or any error."""
+    try:
+        if not provider.is_available():
+            logger.info("Optimization provider unavailable; arbitrating local-only")
+            return None
+        top_k = getattr(provider, "suggest_top_k", None)
+        if top_k is not None:
+            return top_k(request, k)
+        return provider.suggest(request)
+    except Exception:
+        logger.warning("Optimization provider failed; arbitrating local-only", exc_info=True)
+        return None
+
+
+def arbitrate_next(
+    request: OptimizationRequest,
+    decision: StrategyDecision,
+    *,
+    provider: OptimizationProvider | None = None,
+    fallback: OptimizationProvider | None = None,
+    policy: OptimizationDecisionPolicy | None = None,
+    provenance: ProvenanceLogger | None = None,
+    pool_builder: CandidatePoolBuilder | None = None,
+    pool_service: "CandidatePoolService | None" = None,
+    config: ArbitrationConfig | None = None,
+) -> OptimizationOutcome:
+    """Build a multi-source candidate pool and arbitrate it under HELIOS authority."""
+    provider = provider if provider is not None else NexusOptimizationProvider()
+    fallback = fallback if fallback is not None else LocalFallbackProvider()
+    policy = policy if policy is not None else OptimizationDecisionPolicy()
+    provenance = provenance if provenance is not None else ProvenanceLogger()
+    config = config if config is not None else ArbitrationConfig()
+    pool_builder = pool_builder if pool_builder is not None else CandidatePoolBuilder(config)
+
+    nexus_suggestion = _nexus_top_k(request, provider, config.k_nexus)
+    local_suggestion = fallback.suggest(request)
+
+    if pool_service is not None:
+        pool = pool_service.build_pool(request, decision)
+    else:
+        pool = pool_builder.build(
+            request,
+            decision,
+            nexus_suggestion=nexus_suggestion,
+            local_suggestion=local_suggestion,
+        )
+    result = policy.arbitrate(pool, request, decision, config=config)
+
+    primary = nexus_suggestion if nexus_suggestion is not None else local_suggestion
+    record = provenance.record(request, primary, result, strategy_decision=decision)
+
+    return OptimizationOutcome(suggestion=primary, decision=result, provenance=record)

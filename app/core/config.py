@@ -71,6 +71,14 @@ class Settings:
         # Squidstat — use "auto" for cross-platform detection
         self.squidstat_port: str = os.getenv("SQUIDSTAT_PORT", "auto")
 
+        # ---- Optimization-intelligence loop wiring ----
+        # Gates whether the campaign loop routes candidate generation through
+        # deep candidate-pool arbitration (arbitrate_next). Off by default:
+        # existing behavior is preserved exactly until explicitly enabled.
+        self.enable_candidate_arbitration: bool = os.getenv(
+            "ENABLE_CANDIDATE_ARBITRATION", "false"
+        ).lower() in ("true", "1", "yes")
+
         # ---- LLM settings ----
         self.llm_provider: str = os.getenv("LLM_PROVIDER", "mock")  # "anthropic" | "openai" | "mock"
         self.llm_api_key: str = os.getenv("LLM_API_KEY", "")
