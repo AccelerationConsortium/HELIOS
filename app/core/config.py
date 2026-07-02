@@ -107,6 +107,14 @@ class Settings:
             "LLM_PROPOSER_SHADOW_ENABLED", "false"
         ).lower() in ("true", "1", "yes")
 
+        # ---- LLM proposer canary (Phase B) ----
+        # When enabled, the LLM is offered as a low-weight bandit arm with
+        # auto-disable. Default off; requires real shadow evidence before use and
+        # is not wired into live candidate selection yet.
+        self.llm_proposer_canary_enabled: bool = os.getenv(
+            "LLM_PROPOSER_CANARY_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+
     @staticmethod
     def _load_puda_machine_map(raw: str) -> dict[str, str]:
         try:
