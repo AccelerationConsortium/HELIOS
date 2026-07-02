@@ -24,6 +24,7 @@ __all__ = [
     "ReplayProvider",
     "build_openai_compatible",
     "recording_key",
+    "resolve_proposer_provider",
 ]
 
 #: Base URLs for known OpenAI-compatible vendors.
@@ -53,4 +54,34 @@ def build_openai_compatible(
         )
     return OpenAICompatibleProvider(
         api_key=api_key, base_url=resolved, default_model=model, **kwargs
+    )
+
+
+def resolve_proposer_provider(settings: object | None = None) -> OpenAICompatibleProvider | None:
+    """Build the configured LLM proposer provider from settings, or None.
+
+    Returns None (proposer fail-opens to the classical path) when no provider is
+    configured, the vendor is unknown, or no API key is available. api_key falls
+    back to ``llm_api_key``; ``llm_proposer_base_url`` overrides the preset.
+    """
+    if settings is None:
+        from app.core.config import get_settings
+
+        settings = get_settings()
+
+    vendor = (getattr(settings, "llm_proposer_provider", "") or "").strip()
+    if not vendor:
+        return None
+    api_key = (
+        getattr(settings, "llm_proposer_api_key", "")
+        or getattr(settings, "llm_api_key", "")
+    )
+    model = getattr(settings, "llm_proposer_model", "")
+    base_url = getattr(settings, "llm_proposer_base_url", "") or None
+    if not api_key or not model:
+        return None
+    if base_url is None and vendor not in OPENAI_COMPATIBLE_PRESETS:
+        return None
+    return build_openai_compatible(
+        vendor, api_key=api_key, model=model, base_url=base_url
     )

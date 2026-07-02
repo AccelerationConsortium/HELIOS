@@ -42,6 +42,7 @@ from app.services.llm_candidate_proposer import (
     space_centroid,
     validate_proposal,
 )
+from app.services.llm_providers import resolve_proposer_provider
 from app.services.primitives_registry import get_registry
 from app.services.round_context import build_campaign_round_context
 
@@ -228,7 +229,9 @@ async def _maybe_record_llm_proposer_shadow(
             return None
 
         space = space_from_dimensions(list(dimensions), protocol_template)
-        active_proposer = proposer or LLMCandidateProposer()
+        active_proposer = proposer or LLMCandidateProposer(
+            provider=resolve_proposer_provider()
+        )
         proposal = await active_proposer.propose(
             campaign_id=campaign_id,
             round_index=round_index,

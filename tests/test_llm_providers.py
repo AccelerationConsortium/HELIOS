@@ -11,6 +11,7 @@ from app.services.llm_providers import (
     RecordingProvider,
     ReplayProvider,
     build_openai_compatible,
+    resolve_proposer_provider,
 )
 
 
@@ -164,6 +165,40 @@ async def test_adapter_drives_proposer_end_to_end():
 
     assert proposal.points[0].params == {"x": 0.3}
     assert validated.accepted_points == [{"x": 0.3}]
+
+
+class _FakeSettings:
+    def __init__(self, **kw):
+        self.llm_proposer_provider = kw.get("provider", "")
+        self.llm_proposer_model = kw.get("model", "")
+        self.llm_proposer_base_url = kw.get("base_url", "")
+        self.llm_proposer_api_key = kw.get("api_key", "")
+        self.llm_api_key = kw.get("llm_api_key", "")
+
+
+def test_resolve_proposer_provider_unconfigured_returns_none():
+    assert resolve_proposer_provider(_FakeSettings()) is None
+
+
+def test_resolve_proposer_provider_missing_key_returns_none():
+    settings = _FakeSettings(provider="kimi", model="kimi-test")
+    assert resolve_proposer_provider(settings) is None
+
+
+def test_resolve_proposer_provider_builds_kimi_adapter():
+    settings = _FakeSettings(provider="kimi", model="kimi-test", api_key="k")
+    provider = resolve_proposer_provider(settings)
+
+    assert isinstance(provider, OpenAICompatibleProvider)
+    assert provider._base_url == "https://api.moonshot.ai/v1"
+
+
+def test_resolve_proposer_provider_falls_back_to_llm_api_key():
+    settings = _FakeSettings(provider="deepseek", model="deepseek-chat", llm_api_key="k2")
+    provider = resolve_proposer_provider(settings)
+
+    assert isinstance(provider, OpenAICompatibleProvider)
+    assert provider._base_url == "https://api.deepseek.com/v1"
 
 
 def test_import_smoke():

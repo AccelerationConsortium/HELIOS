@@ -115,6 +115,15 @@ class Settings:
             "LLM_PROPOSER_CANARY_ENABLED", "false"
         ).lower() in ("true", "1", "yes")
 
+        # ---- LLM proposer provider selection ----
+        # Which pluggable adapter the proposer uses (e.g. "kimi", "moonshot",
+        # "deepseek", "openai"); empty => none configured (proposer fail-opens).
+        # api_key falls back to LLM_API_KEY; base_url overrides the vendor preset.
+        self.llm_proposer_provider: str = os.getenv("LLM_PROPOSER_PROVIDER", "")
+        self.llm_proposer_model: str = os.getenv("LLM_PROPOSER_MODEL", "")
+        self.llm_proposer_base_url: str = os.getenv("LLM_PROPOSER_BASE_URL", "")
+        self.llm_proposer_api_key: str = os.getenv("LLM_PROPOSER_API_KEY", "")
+
     @staticmethod
     def _load_puda_machine_map(raw: str) -> dict[str, str]:
         try:
