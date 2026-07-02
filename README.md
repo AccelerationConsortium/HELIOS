@@ -103,6 +103,34 @@ round is backed by `StrategyTrace`, `StrategyEvidence`, `StrategyOutcome`,
 `StrategyReward`, typed `FailureEvent` attribution, and replay/validation
 records so strategy changes remain inspectable after the fact.
 
+### Optimization Code Map
+
+The merged optimization stack is split by authority boundary:
+
+- `app/services/optimization_intelligence.py` enriches strategy selection with
+  optional Nexus diagnostics, similar-campaign evidence, and backend
+  recommendations. It emits structured evidence; it does not choose a live
+  candidate.
+- `app/optimization/nexus_provider.py` and `app/optimization/nexus_backend.py`
+  adapt Nexus profiling and `nexus_*` algorithm plugins behind HELIOS provider
+  and backend interfaces. Nexus remains an advisor/backend, not campaign
+  authority.
+- `app/optimization/service.py`, `app/optimization/pool_service.py`, and
+  `app/optimization/candidate_pool.py` build the multi-source candidate
+  portfolio: Nexus top-k, local baseline, archetype-scored candidates, BO MCP
+  hints, replicates, and recovery probes where available.
+- `app/optimization/decision_policy.py` is the hard gate and arbitration
+  authority for concrete candidates. It enforces bounds, deduplication, safety
+  hook results, and then ranks survivors with the strategy decision's utility
+  model.
+- `app/optimization/loop_integration.py` is the campaign-loop seam. Deep
+  candidate-pool arbitration is controlled by `ENABLE_CANDIDATE_ARBITRATION`
+  and defaults off; when disabled or failed, the loop keeps the legacy
+  generation path.
+- `app/optimization/provenance.py` records the selected portfolio, rejected
+  candidates, scored pool, and strategy decision so "why this candidate, not
+  that one?" can be audited after the round.
+
 ### Adaptive Campaign Substrate (shadow)
 
 On top of the meta-controller sits a **shadow-only** adaptive decision
@@ -421,6 +449,7 @@ HELIOS/
 ├── app/
 │   ├── agents/              # 27 specialist agents + swarm/control-plane runtime
 │   ├── api/v1/endpoints/    # FastAPI route handlers
+│   ├── optimization/        # Nexus/local provider facade, candidate pools, arbitration
 │   ├── services/            # 85+ domain services
 │   │   ├── bayesian_opt.py  # Bayesian Optimization (Ax)
 │   │   ├── campaign_loop.py # Campaign execution loop

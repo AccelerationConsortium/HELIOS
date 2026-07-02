@@ -19,7 +19,14 @@ Legend: **not started** · **partial** (some infra exists, not wired/proven).
   [adaptive_campaign_substrate.md](adaptive_campaign_substrate.md).
 - **Dynamic strategy meta-controller** — two-layer action taxonomy
   (`CampaignIntent` + `OptimizationMode`), phase posterior, evidence-based
-  scoring, safety gates. See README → Architecture.
+  scoring, safety gates, Nexus optimization-intelligence evidence, backend
+  recommendations, and replay/validation accounting. See README ->
+  Architecture.
+- **Nexus/local candidate arbitration** — provider facade, Nexus backend
+  adapters, multi-source candidate-pool builder, hard-gated decision policy,
+  scored arbitration portfolio, provenance logging, and the
+  `ENABLE_CANDIDATE_ARBITRATION` loop seam. Nexus remains advisory/backend
+  input; HELIOS retains campaign decision authority.
 - **Context / memory / logging** — campaign context, objective stack + proxy
   gap, typed failure taxonomy (`failure_signatures`), backend performance memory
   + `ContextualStrategyBandit`, candidate-pool memory (recall), cross-campaign
@@ -49,7 +56,7 @@ not change live candidate selection by default.
 | # | Item | Origin | Status | Notes |
 |---|------|--------|--------|-------|
 | C1 | **OptimizationDataContract** — unify the 8 scattered contract types (ResultPacket / Candidate / ObjectiveSpec / OutcomeConstraint / Observation / FailureRegionModel / DecisionResult / ProvenanceLogger) into one spec | data_layer §1 | not started | High-risk consolidation; left last |
-| C2 | **Independent decision-evidence field + "why A not B" score comparison** | data_layer §5 rem. | partial | Evidence currently rides inside `strategy_trace`; A-vs-B needs `build_candidate_pool` on the live path |
+| C2 | **Independent decision-evidence field + "why A not B" score comparison** | data_layer §5 rem. | partial | Candidate-pool arbitration now records a scored portfolio and provenance; remaining work is a first-class evidence field/report surface outside the arbitration record |
 | C3 | **Measurement layer** — measurement contract, calibration/blank/control/replicate/batch records, per-KPI uncertainty/LOD/LOQ/censoring, raw-signal → processed-KPI traceable pipeline | enh L4 | partial | QC store exists; formal measurement contract does not |
 | C4 | **Representation layer / unified experiment ontology** — typed material/formulation/device/protocol/environment/measurement schema, composition simplex + process graph + forbidden regions, multimodal evidence bundle, cross-campaign ontology | enh L5 | not started | Determines "tuner" vs "experiment knowledge system" |
 | C5 | **Layered constraint & policy layer** — physical / operational / safety / epistemic / governance constraints, versionable + explainable + dynamically editable | enh L6 | partial | Safety gates exist; layered versionable constraint model does not |
