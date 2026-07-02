@@ -43,6 +43,7 @@ __all__ = [
     "PointValidation",
     "ValidatedProposal",
     "compare_llm_proposal_to_selection",
+    "count_point_overlaps",
     "make_safety_bounds_rejector",
     "parse_llm_proposer_shadow_log_line",
     "should_invoke_llm_proposer",
@@ -197,6 +198,21 @@ def compare_llm_proposal_to_selection(
         overlap_count=overlap,
         overlap_rate=(overlap / n_selected) if n_selected else 0.0,
         created_at=timestamp,
+    )
+
+
+def count_point_overlaps(
+    points: list[dict[str, Any]],
+    candidates: list[dict[str, Any]],
+    *,
+    space: ParameterSpace,
+    tol: float = _FAILURE_ZONE_TOL,
+) -> int:
+    """Number of ``points`` within ``tol`` normalized distance of any candidate."""
+    return sum(
+        1
+        for point in points
+        if any(_normalized_distance(point, cand, space) <= tol for cand in candidates)
     )
 
 
