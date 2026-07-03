@@ -31,6 +31,12 @@ Legend: **not started** · **partial** (some infra exists, not wired/proven).
   gap, typed failure taxonomy (`failure_signatures`), backend performance memory
   + `ContextualStrategyBandit`, candidate-pool memory (recall), cross-campaign
   failure-zone memory, decision trace / evidence / outcome / reward / replay.
+- **Loop / goal harness primitives (pure service layer)** —
+  `loop_engineering` records observe-decide-act-evaluate iterations, reward, and
+  replay summaries; `goal_harness` adds persistent goal state, normalized
+  observations, tool descriptors, proposed tool actions, reflection notes,
+  human blockers, and bad-path kill records. These layers are side-effect-free:
+  they do not call PUDA, write DB state, execute tools, or promote policies.
 
 Everything shipped is read-only / fail-open / shadow or approval-gated and does
 not change live candidate selection by default.
@@ -112,3 +118,25 @@ part of E3 offline; the rest needs real campaign runs.
 - **heat metadata**: `heat` lacks an `instrument` in `agent/skills/utility.md`
   and is kept `experiment` via a temporary pending-set so its
   `experiment_without_capability` calibration flag stays a true positive.
+
+---
+
+## G. Backlog — autonomous optimization decision agent
+
+Target shape:
+
+`Goal -> Observe -> Decide -> Act -> Evaluate -> Reflect -> Continue/Stop/Human gate`
+
+The first pure layers are in place, but the live autonomous agent remains
+guardrailed and incomplete by design.
+
+| # | Item | Status | Notes |
+|---|------|--------|-------|
+| G1 | **Persistent Goal-Oriented Harness** — durable mission/goal owner with status, budget, blockers, next-action proposals, and stop conditions | partial | `app/services/goal_harness.py` provides pure state transitions; persistence, scheduler ownership, and API surfaces are not wired |
+| G2 | **Unified perception layer** — normalize PUDA responses, API feedback, logs, artifacts, images, QC signals, and human notes into one observation stream | partial | `ObservationEnvelope` exists; no live adapters yet for PUDA telemetry, vision, SSE logs, or analyzer outputs |
+| G3 | **Agent-facing tool registry** — typed tools with capability, schema, risk, timeout, permissions, rollback, and output observation contract | partial | `ToolDescriptor` exists in the harness; it is not connected to primitives registry, PUDA backend, MCP tools, or hardware adapters |
+| G4 | **Action executor bridge** — route proposed `ToolAction` through approval, safety, PUDA/run creation, execution, and returned observations | not started | Must stay separate from the pure harness; live hardware requires human/governance gates |
+| G5 | **Campaign-level multi-step correction** — kill bad optimization paths, revise strategy, request calibration, switch backend, or narrow/expand parameter space | partial | Harness can record bad-path kills; no campaign-loop consumer yet excludes killed paths from future candidate/proposal generation |
+| G6 | **Agent notebook / reflection memory** — structured notes for failed paths, disproven hypotheses, unreliable tools, human overrides, and future constraints | partial | `ReflectionNote` exists; notes are not persisted into semantic/procedural memory or forced into next-round context |
+| G7 | **Live self-optimization promotion** — learned policy moves from replay/shadow/canary into bounded live influence after evidence thresholds | not started | Existing learned-policy path remains conservative; no automatic live promotion without explicit approval workflow |
+| G8 | **Long-running daemon / scheduler integration** — wake on external events, resume after restart, wait for PUDA or human, and continue the goal | not started | Existing durable run/campaign pieces exist, but no single autonomous goal daemon owns the full lifecycle |

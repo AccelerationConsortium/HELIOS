@@ -103,6 +103,21 @@ round is backed by `StrategyTrace`, `StrategyEvidence`, `StrategyOutcome`,
 `StrategyReward`, typed `FailureEvent` attribution, and replay/validation
 records so strategy changes remain inspectable after the fact.
 
+### Loop Engineering Layer
+
+HELIOS treats the campaign loop itself as an engineered object, not just a
+control-flow pattern. The loop-engineering layer records each
+observe-decide-act-evaluate unit as a replayable episode: loop spec, signals,
+decision, outcome, reward, and replay summary. This makes real workflow data
+usable for offline evaluation, shadow/canary promotion, failure attribution,
+and future policy improvement without changing the live execution path.
+
+The first pure service layer is `app/services/loop_engineering.py`. It is
+dependency-light and side-effect-free by design: it does not call PUDA, mutate
+campaign state, write to the database, or promote learned policies. Runtime
+hooks can feed it later with PUDA responses, strategy traces, artifacts, and
+observations.
+
 ### Optimization Code Map
 
 The merged optimization stack is split by authority boundary:
