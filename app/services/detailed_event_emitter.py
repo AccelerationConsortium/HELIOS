@@ -48,6 +48,29 @@ class DetailedEventEmitter:
             "timestamp": time.time(),
         })
 
+    def emit_decision_reward(self, reward, *, decision_id: str = None):
+        """Emit the per-signal verifiable reward for one decision (RLVR wedge).
+
+        Makes the inner evaluation loop visible on the event stream: not just
+        "reward = 0.55" but every verifier's passed/score/evidence, plus the
+        process/outcome split and the rubric version that scored it. Duck-typed
+        over CampaignDecisionReward / LoopReward to avoid a service dependency.
+        """
+        verifications = [
+            v.model_dump() for v in getattr(reward, "verifications", []) or []
+        ]
+        self.emit(self.campaign_id, {
+            "type": "decision_reward",
+            "indent": self.indent_level,
+            "decision_id": decision_id,
+            "rubric_version": getattr(reward, "rubric_version", None),
+            "reward": getattr(reward, "reward", None),
+            "process_reward": getattr(reward, "process_reward", None),
+            "outcome_reward": getattr(reward, "outcome_reward", None),
+            "verifications": verifications,
+            "timestamp": time.time(),
+        })
+
     def emit_agent_result(self, agent_name: str, success: bool, message: str, data: dict = None):
         """Agent完成"""
         self.indent_level = max(0, self.indent_level - 1)

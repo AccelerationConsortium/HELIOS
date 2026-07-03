@@ -14,6 +14,36 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 from app.services.decision_trace import CampaignDecisionTrace
+from app.services.verifiable_reward import (
+    RUBRIC_VERSION_DEFAULT,
+    RewardVerification,
+    split_reward,
+    verify_context,
+    verify_execution,
+    verify_failure,
+    verify_objective,
+    verify_proxy_gap,
+    verify_safety,
+    verify_validation,
+)
+from app.services.verifiable_reward import (
+    clamp as _shared_clamp,
+)
+from app.services.verifiable_reward import (
+    execution_score as _shared_execution,
+)
+from app.services.verifiable_reward import (
+    objective_score as _shared_objective,
+)
+from app.services.verifiable_reward import (
+    proxy_gap_score as _shared_proxy_gap,
+)
+from app.services.verifiable_reward import (
+    round_component as _shared_round_component,
+)
+from app.services.verifiable_reward import (
+    validation_score as _shared_validation,
+)
 
 __all__ = [
     "CampaignDecisionAccounting",
@@ -68,6 +98,13 @@ class CampaignDecisionReward(BaseModel):
     proxy_gap_reward: float = 0.0
     validation_reward: float = 0.0
     context_reward: float = 0.0
+    # Phase A (RLVR wedge): version the rubric, split process vs outcome credit,
+    # and carry the per-signal verifiable records. Defaults keep older callers
+    # and persisted rows loading unchanged.
+    rubric_version: str = RUBRIC_VERSION_DEFAULT
+    process_reward: float = 0.0
+    outcome_reward: float = 0.0
+    verifications: list[RewardVerification] = Field(default_factory=list)
     rationale: str
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -132,26 +169,30 @@ class CampaignDecisionRewardCalculator:
     """Calculate deterministic reward components from observed outcomes."""
 
     def calculate(self, outcome: CampaignDecisionOutcome) -> CampaignDecisionReward:
-        execution_reward = _execution_reward(outcome.execution_success)
-        failure_penalty = _round_component(-0.1 * outcome.failure_count)
-        safety_penalty = _round_component(-0.5 * outcome.safety_incident_count)
-        objective_reward = _objective_reward(outcome.objective_delta)
-        proxy_gap_reward = _proxy_gap_reward(outcome.proxy_gap_delta)
-        validation_reward = _validation_reward(outcome.validation_success)
-        context_reward = (
-            0.1 if outcome.context_request_fulfilled is True else 0.0
-        )
-        raw_reward = (
-            execution_reward
-            + failure_penalty
-            + safety_penalty
-            + objective_reward
-            + proxy_gap_reward
-            + validation_reward
-            + context_reward
-        )
+        # Build the per-signal verifications once; every scalar component and the
+        # process/outcome split derive from them, so there is a single source of
+        # truth and the numbers stay bit-identical to the pre-wedge calculator.
+        verifications = [
+            verify_execution(outcome.execution_success),
+            verify_failure(outcome.failure_count),
+            verify_safety(outcome.safety_incident_count),
+            verify_objective(outcome.objective_delta),
+            verify_proxy_gap(outcome.proxy_gap_delta),
+            verify_validation(outcome.validation_success),
+            verify_context(outcome.context_request_fulfilled),
+        ]
+        scores = {v.name: v.score for v in verifications}
+        execution_reward = scores["execution"]
+        failure_penalty = scores["failure"]
+        safety_penalty = scores["safety"]
+        objective_reward = scores["objective"]
+        proxy_gap_reward = scores["proxy_gap"]
+        validation_reward = scores["validation"]
+        context_reward = scores["context"]
+        raw_reward = sum(v.score for v in verifications)
         reward = _clamp(raw_reward)
         regret = max(0.0, -reward)
+        process_reward, outcome_reward = split_reward(verifications)
         return CampaignDecisionReward(
             trace_id=outcome.trace_id,
             reward=reward,
@@ -162,6 +203,10 @@ class CampaignDecisionRewardCalculator:
             proxy_gap_reward=proxy_gap_reward,
             validation_reward=validation_reward,
             context_reward=context_reward,
+            rubric_version=RUBRIC_VERSION_DEFAULT,
+            process_reward=process_reward,
+            outcome_reward=outcome_reward,
+            verifications=verifications,
             rationale=_reward_rationale(
                 execution_reward=execution_reward,
                 failure_penalty=failure_penalty,
@@ -217,36 +262,23 @@ def build_campaign_decision_accounting(**kwargs: Any) -> CampaignDecisionAccount
     return CampaignDecisionAccountingBuilder().build(**kwargs)
 
 
+# Reward components delegate to the shared verifiable-reward core so the two
+# calculators (here and loop_engineering) share one source of truth. Values are
+# bit-for-bit identical to the former local copies (regression IRON RULE).
 def _execution_reward(execution_success: bool | None) -> float:
-    if execution_success is True:
-        return 0.2
-    if execution_success is False:
-        return -0.3
-    return 0.0
+    return _shared_execution(execution_success)
 
 
 def _objective_reward(objective_delta: float | None) -> float:
-    if objective_delta is None:
-        return 0.0
-    if objective_delta > 0:
-        return _round_component(min(objective_delta, 1.0) * 0.3)
-    return _round_component(objective_delta * 0.3)
+    return _shared_objective(objective_delta)
 
 
 def _proxy_gap_reward(proxy_gap_delta: float | None) -> float:
-    if proxy_gap_delta is None:
-        return 0.0
-    if proxy_gap_delta < 0:
-        return _round_component(abs(proxy_gap_delta) * 0.3)
-    return _round_component(-proxy_gap_delta * 0.3)
+    return _shared_proxy_gap(proxy_gap_delta)
 
 
 def _validation_reward(validation_success: bool | None) -> float:
-    if validation_success is True:
-        return 0.2
-    if validation_success is False:
-        return -0.2
-    return 0.0
+    return _shared_validation(validation_success)
 
 
 def _reward_rationale(
@@ -282,8 +314,8 @@ def _reward_rationale(
 
 
 def _clamp(value: float) -> float:
-    return _round_component(max(-1.0, min(1.0, value)))
+    return _shared_clamp(value)
 
 
 def _round_component(value: float) -> float:
-    return round(value, 10)
+    return _shared_round_component(value)
