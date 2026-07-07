@@ -53,9 +53,9 @@ The live path is conservative by design: rule-based, auditable, and bounded by e
 ## Core Capabilities
 
 - **Orchestrator-agnostic campaign decision layer** — keeps campaign-level decision authority separate from any downstream backend.
-- **Context-aware policy** — uses objective hierarchy, proxy-gap state, failure attribution, backend memory, Nexus diagnostics, BO MCP availability, candidate/failure-zone memory, and bandit/learned-policy signals.
+- **Context-aware policy** — uses objective hierarchy, proxy-gap state, failure attribution, backend memory, Nexus diagnostics, candidate/failure-zone memory, and bandit/learned-policy signals.
 - **Dynamic action vocabulary** — represents optimization, validation, calibration, failure diagnosis, context seeking, human observation, safety-constraint tightening, stopping, and future scale/fidelity choices.
-- **Candidate and backend arbitration** — combines local baselines, Nexus/BO MCP signals, candidate pools, safety gates, and provenance into a traceable portfolio.
+- **Candidate and backend arbitration** — combines local baselines, Nexus signals, candidate pools, safety gates, and provenance into a traceable portfolio.
 - **Failure-aware recovery** — separates scientific negative evidence from measurement, backend, constraint, and downstream tool failures.
 - **Trace, reward, and replay** — records `StrategyTrace`, `StrategyEvidence`, `StrategyOutcome`, `StrategyReward`, typed `FailureEvent`, and replay summaries.
 - **LLM boundary discipline** — LLMs can help translate intent, gather context, or generate review notes; they do not steer the live optimization loop.
@@ -75,7 +75,7 @@ The live path is conservative by design: rule-based, auditable, and bounded by e
 
 ### Adaptive Campaign Decision Layer
 
-HELIOS uses scientific context, objective hierarchy, typed failure attribution, backend performance memory, candidate/failure-zone memory, Nexus diagnostics, BO MCP availability, and bandit/learned-policy signals to decide which campaign-level action should happen next. Today that includes `CampaignIntent`, `OptimizationMode`, and candidate-generation backend selection; the same layer owns validation, failure-aware recovery, context acquisition, human/LLM query, dynamic objective/constraint handling, and future scale/fidelity-aware decisions.
+HELIOS uses scientific context, objective hierarchy, typed failure attribution, backend performance memory, candidate/failure-zone memory, Nexus diagnostics and bandit/learned-policy signals to decide which campaign-level action should happen next. Today that includes `CampaignIntent`, `OptimizationMode`, and candidate-generation backend selection; the same layer owns validation, failure-aware recovery, context acquisition, human/LLM query, dynamic objective/constraint handling, and future scale/fidelity-aware decisions.
 
 ### Optimization Code Map
 
@@ -148,7 +148,7 @@ pytest \
 
 ## Validation Evidence
 
-HELIOS is framed as an orchestrator-agnostic adaptive campaign decision layer. The product boundary is campaign-level decision authority rather than ownership of downstream automation or presentation surfaces. The live campaign policy remains rule-based and auditable by default; Nexus and BO MCP are optimization advisor/backend/tool paths, not campaign decision authorities. Learned policy and self-evolution paths are offline, shadow, canary, and approval-gated; their metadata does not change default BO MCP/Nexus/backend behavior.
+HELIOS is framed as an orchestrator-agnostic adaptive campaign decision layer. The product boundary is campaign-level decision authority rather than ownership of downstream automation or presentation surfaces. The live campaign policy remains rule-based and auditable by default; Nexus is optimization advisor/backend/tool paths, not campaign decision authorities. Learned policy and self-evolution paths are offline, shadow, canary, and approval-gated.
 
 The architecture validation report is version-controlled at [docs/HELIOS_ARCHITECTURE_VALIDATION.md](docs/HELIOS_ARCHITECTURE_VALIDATION.md). It is a static evidence pack for the current validation boundary.
 
@@ -198,25 +198,6 @@ HELIOS/
 
 ---
 
-## External Decision Inputs
-
-| Integration | Role in HELIOS |
-|-------------|----------------|
-| **Nexus** | Optimization diagnostics, profiling, and backend/candidate evidence |
-| **BO MCP / Ax / local BO** | Optimization backend signals and candidate proposals |
-| **Anthropic / OpenAI** | Language/knowledge-boundary tasks such as intent parsing, context requests, and review notes |
-| **Campaign memory** | Similar-campaign priors, backend history, failure zones, and replay evidence |
-
----
-
-## Contributing
-
-1. Keep decision authority explicit: backends advise, HELIOS decides.
-2. Preserve typed traces, evidence, outcomes, rewards, and replay records for every new decision path.
-3. Keep learned policies gated by replay, shadow/canary evidence, and explicit promotion controls.
-4. Add tests beside changes to policy, arbitration, reward, replay, or validation logic.
-
----
 
 ## License
 
