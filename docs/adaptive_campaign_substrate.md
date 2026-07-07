@@ -4,10 +4,11 @@ Status: **shadow-only, observational**. Nothing in this document affects live
 routing, strategy selection, candidate selection, or action execution. Every
 component is gated, deterministic, JSON-safe, replayable, and fail-open.
 
-This is the code map for the campaign-level adaptive decision *substrate* added
-on top of the existing dynamic strategy meta-controller. It answers, per round,
-"what kind of scientific activity does the campaign need next, and how should
-the action space and candidate value be viewed?" — as an **advisory** artifact
+This is the code map for a campaign-level adaptive decision *substrate* aligned
+with HELIOS's new positioning: an orchestrator-agnostic adaptive campaign
+decision layer for closed-loop experimentation. It answers, per round, "what
+kind of scientific activity does the campaign need next, and how should the
+action space and candidate value be viewed?" — as an **advisory** artifact
 recorded alongside the campaign, never as a control signal.
 
 ---

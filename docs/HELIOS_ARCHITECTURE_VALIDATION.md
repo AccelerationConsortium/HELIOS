@@ -4,14 +4,15 @@ This evidence pack summarizes the current HELIOS architecture and validation bou
 
 ## Architecture
 
-- HELIOS is agent-native, hierarchical, graph/state-machine routed, and role-based.
-- The campaign controller coordinates specialist roles through typed state, traces, outcomes, and safety/proposal contracts.
-- The live controller remains rule-based and auditable by default.
+- HELIOS is an orchestrator-agnostic adaptive campaign decision layer for closed-loop experimentation.
+- The campaign decision layer coordinates specialist roles through typed state, traces, outcomes, and safety/proposal contracts.
+- The live campaign policy remains rule-based and auditable by default.
 
-## Optimization And Backend Boundaries
+## Decision Layer And Backend Boundaries
 
 - Nexus is an advisor/backend/evidence source, not campaign decision authority.
-- BO MCP is a backend/tool, not the top-level controller.
+- BO MCP is a backend/tool, not campaign decision authority.
+- Lab orchestrators, simulators, and execution runtimes are action channels, not the campaign decision layer.
 - Backend failures are represented through typed failure attribution and deterministic fallback paths.
 - Default BO MCP/Nexus/backend behavior is not changed by the validation-report layer.
 

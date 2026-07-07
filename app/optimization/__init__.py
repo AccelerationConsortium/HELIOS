@@ -1,9 +1,10 @@
 """HELIOS optimization-intelligence integration layer.
 
-HELIOS delegates *optimization intelligence* (algorithm portfolio, problem
+HELIOS can delegate *optimization intelligence* (algorithm portfolio, problem
 profiling, candidate generation) to Nexus (``optimization_copilot``) while
-retaining authority over the scientific campaign loop: validation, safety,
-recovery, execution, and provenance.
+retaining authority as the adaptive campaign decision layer: optimization
+strategy, validation, safety, recovery, context acquisition, objective and
+constraint handling, execution routing, and provenance.
 
 Importing this package is safe even when Nexus is not installed -- the Nexus
 backends simply report ``is_available() is False`` and HELIOS falls back to its
