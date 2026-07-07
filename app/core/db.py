@@ -486,6 +486,31 @@ def init_db() -> None:
     CREATE INDEX IF NOT EXISTS idx_campaign_metrics_cid
         ON campaign_metrics(campaign_id, round_number);
 
+    -- Decision trajectories (RLVR wedge): append-only record of each scored
+    -- decision — state, candidate actions, selected action, per-signal verifier
+    -- report, process/outcome split, final reward. Feeds offline policy
+    -- evaluation and group-relative ranking. No FK: decision ids are not always
+    -- rows in campaign_state, and the trajectory must survive independently.
+
+    CREATE TABLE IF NOT EXISTS decision_trajectories (
+        id                        TEXT PRIMARY KEY,
+        campaign_id               TEXT NOT NULL,
+        trace_id                  TEXT,
+        round_index               INTEGER,
+        layer                     TEXT NOT NULL,
+        rubric_version            TEXT NOT NULL,
+        reward                    REAL NOT NULL,
+        process_reward            REAL NOT NULL DEFAULT 0,
+        outcome_reward            REAL NOT NULL DEFAULT 0,
+        verifier_report_json      TEXT NOT NULL DEFAULT '[]',
+        trajectory_json           TEXT NOT NULL DEFAULT '{}',
+        trajectory_schema_version TEXT NOT NULL DEFAULT '1',
+        created_at                TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_decision_traj_cid
+        ON decision_trajectories(campaign_id);
+
     -- QueryPlan cache (DB Retrieval Agent)
 
     CREATE TABLE IF NOT EXISTS query_plan_cache (

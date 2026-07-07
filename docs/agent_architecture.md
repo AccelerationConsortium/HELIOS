@@ -1,17 +1,18 @@
-# HELIOS Agent Architecture — and where the LLM sits
+# HELIOS Agent Architecture Inside the Decision Layer — and where the LLM sits
 
 ## TL;DR
 
-HELIOS is an **autonomous experimentation agent**, not an "LLM agent". Its
-per-round decision loop is **LLM-free by design**: strategy and candidate
+HELIOS is an **orchestrator-agnostic adaptive campaign decision layer**, not an
+"LLM agent". Its per-round decision loop is **LLM-free by design**: campaign
+action choice, strategy selection, validation/recovery decisions, and candidate
 selection are classical Bayesian optimization + rule-based scoring + optional
-learned (non-LLM) policies. The LLM is used **only at the language/knowledge
-boundary** (turning human intent into plans/code, injecting priors, scoring
-runs after the fact) and never steers a live optimization round.
+learned (non-LLM) policies. The LLM is used **only at the
+language/knowledge boundary** (turning human intent into plans/code, injecting
+priors, scoring runs after the fact) and never steers a live optimization round.
 
-If someone asks "so where is the agent?" — the agency is in the closed loop
-that **perceives → decides → acts on real instruments → learns**, under bounded
-authority, not in a chat model calling tools.
+If someone asks "so where is the agent?" — the agency is in the campaign-level
+closed loop that **perceives → decides → acts through an orchestrator/runtime →
+learns**, under bounded authority, not in a chat model calling tools.
 
 ---
 
@@ -69,16 +70,18 @@ explicitly configured to `anthropic`/`openai`.
 
 ## Where the agency lives
 
-HELIOS is agentic in the classical (autonomous-systems) sense — a goal-directed
-closed loop:
+HELIOS is agentic in the classical (autonomous-systems) sense — a
+goal-directed campaign decision loop:
 
 - **Perceive** — diagnostics (uncertainty, noise, convergence, drift), QC
   results, typed failure signals.
-- **Decide** — campaign intent / optimization mode / backend, under **bounded
-  authority** (HELIOS keeps campaign-level decision authority; Nexus and BO are
-  backends + advisors, not the top decision-maker).
-- **Act** — compile and execute protocols on real or simulated hardware; recover
-  from failures.
+- **Decide** — campaign intent, optimization mode, backend, validation,
+  recovery, context acquisition, human/LLM query, and objective/constraint
+  handling under **bounded authority** (HELIOS keeps campaign-level decision
+  authority; Nexus, BO, simulators, and lab orchestrators are backends +
+  advisors, not the top decision-maker).
+- **Act** — compile and execute protocols through real or simulated
+  orchestrators/runtimes; recover from failures.
 - **Learn** — candidate / failure-zone memory, contextual bandit, optional RL,
   replay/evaluation.
 
@@ -118,10 +121,10 @@ on purpose.
 
 ## One-paragraph answer to "where is the agent?"
 
-> HELIOS is an autonomous experimentation agent: it closed-loop plans, executes
-> on real instruments, senses, recovers, and adapts from feedback, built as a
-> multi-agent system of typed specialist agents. It is deliberately **not** an
-> "LLM agent" — the LLM works only at the human-language and domain-knowledge
-> boundary (intent → plan, NL → code, priors), while the scientific decision
-> loop stays deterministic, auditable, and safe. Agency comes from autonomy +
-> action + goal-directed adaptation, not from an LLM running in a while-loop.
+> HELIOS is an orchestrator-agnostic adaptive campaign decision layer: it
+> closed-loop decides what campaign-level action should happen next, including
+> optimization, validation, recovery, context acquisition, human/LLM query, and
+> objective/constraint adaptation. It is implemented with typed specialist
+> services and is deliberately **not** an "LLM agent" — the LLM works only at
+> the human-language and domain-knowledge boundary, while the scientific
+> decision loop stays deterministic, auditable, and safe.

@@ -1,4 +1,4 @@
-"""Base Agent protocol for the HELIOS multi-agent orchestrator.
+"""Base Agent protocol for HELIOS's internal campaign decision services.
 
 All agents implement the same interface. Agents are Python classes,
 not microservices. Communication is via typed Pydantic models (contracts).

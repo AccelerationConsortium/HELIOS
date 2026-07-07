@@ -13,6 +13,52 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.services.verifiable_reward import (
+    RUBRIC_VERSION_DEFAULT as _RUBRIC_VERSION_DEFAULT,
+)
+from app.services.verifiable_reward import (
+    RewardVerification as _RewardVerification,
+)
+from app.services.verifiable_reward import (
+    clamp as _shared_clamp,
+)
+from app.services.verifiable_reward import (
+    execution_score as _shared_execution,
+)
+from app.services.verifiable_reward import (
+    objective_score as _shared_objective,
+)
+from app.services.verifiable_reward import (
+    recovery_score as _shared_recovery,
+)
+from app.services.verifiable_reward import (
+    round_component as _shared_round_component,
+)
+from app.services.verifiable_reward import (
+    split_reward as _split_reward,
+)
+from app.services.verifiable_reward import (
+    validation_score as _shared_validation,
+)
+from app.services.verifiable_reward import (
+    verify_execution as _verify_execution,
+)
+from app.services.verifiable_reward import (
+    verify_failure as _verify_failure,
+)
+from app.services.verifiable_reward import (
+    verify_objective as _verify_objective,
+)
+from app.services.verifiable_reward import (
+    verify_recovery as _verify_recovery,
+)
+from app.services.verifiable_reward import (
+    verify_safety as _verify_safety,
+)
+from app.services.verifiable_reward import (
+    verify_validation as _verify_validation,
+)
+
 __all__ = [
     "LoopDecision",
     "LoopEpisode",
@@ -100,6 +146,12 @@ class LoopReward(BaseModel):
     recovery_reward: float = 0.0
     failure_penalty: float = 0.0
     safety_penalty: float = 0.0
+    # Phase A (RLVR wedge): rubric versioning, process/outcome split, and the
+    # per-signal verifiable records. Defaults keep older callers unchanged.
+    rubric_version: str = _RUBRIC_VERSION_DEFAULT
+    process_reward: float = 0.0
+    outcome_reward: float = 0.0
+    verifications: list[_RewardVerification] = Field(default_factory=list)
     rationale: str
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -188,25 +240,31 @@ class LoopRewardCalculator:
         iteration_id: str,
         outcome: LoopOutcome,
     ) -> LoopReward:
-        execution_reward = _execution_reward(outcome.execution_success)
-        objective_reward = _objective_reward(outcome.objective_delta)
-        validation_reward = _validation_reward(outcome.validation_success)
-        recovery_reward = _recovery_reward(
-            attempted=outcome.recovery_attempted,
-            success=outcome.recovery_success,
-        )
-        failure_penalty = _round_component(-0.1 * outcome.failure_count)
-        safety_penalty = _round_component(-0.5 * outcome.safety_incident_count)
-        raw_reward = (
-            execution_reward
-            + objective_reward
-            + validation_reward
-            + recovery_reward
-            + failure_penalty
-            + safety_penalty
-        )
+        # Per-signal verifications are the single source of truth; the loop layer
+        # scales the raw objective delta (positive_clamp=False). Scalars and the
+        # process/outcome split derive from them, bit-identical to before.
+        verifications = [
+            _verify_execution(outcome.execution_success),
+            _verify_objective(outcome.objective_delta, positive_clamp=False),
+            _verify_validation(outcome.validation_success),
+            _verify_recovery(
+                attempted=outcome.recovery_attempted,
+                success=outcome.recovery_success,
+            ),
+            _verify_failure(outcome.failure_count),
+            _verify_safety(outcome.safety_incident_count),
+        ]
+        scores = {v.name: v.score for v in verifications}
+        execution_reward = scores["execution"]
+        objective_reward = scores["objective"]
+        validation_reward = scores["validation"]
+        recovery_reward = scores["recovery"]
+        failure_penalty = scores["failure"]
+        safety_penalty = scores["safety"]
+        raw_reward = sum(v.score for v in verifications)
         reward = _clamp(raw_reward)
         regret = max(0.0, -reward)
+        process_reward, outcome_reward = _split_reward(verifications)
         return LoopReward(
             iteration_id=iteration_id,
             reward=reward,
@@ -217,6 +275,10 @@ class LoopRewardCalculator:
             recovery_reward=recovery_reward,
             failure_penalty=failure_penalty,
             safety_penalty=safety_penalty,
+            rubric_version=_RUBRIC_VERSION_DEFAULT,
+            process_reward=process_reward,
+            outcome_reward=outcome_reward,
+            verifications=verifications,
             rationale=_reward_rationale(
                 execution_reward=execution_reward,
                 objective_reward=objective_reward,
@@ -382,36 +444,24 @@ def summarize_loop_replay(
     return LoopReplayAnalyzer().analyze(iterations, **kwargs)
 
 
+# Reward components delegate to the shared verifiable-reward core. The loop
+# layer scales the raw objective delta (no positive clamp) — hence
+# positive_clamp=False. Values are bit-for-bit identical to the former local
+# copies (regression IRON RULE).
 def _execution_reward(value: bool | None) -> float:
-    if value is True:
-        return 0.2
-    if value is False:
-        return -0.3
-    return 0.0
+    return _shared_execution(value)
 
 
 def _objective_reward(delta: float | None) -> float:
-    if delta is None:
-        return 0.0
-    return _round_component(float(delta) * 0.3)
+    return _shared_objective(delta, positive_clamp=False)
 
 
 def _validation_reward(value: bool | None) -> float:
-    if value is True:
-        return 0.2
-    if value is False:
-        return -0.2
-    return 0.0
+    return _shared_validation(value)
 
 
 def _recovery_reward(*, attempted: bool, success: bool | None) -> float:
-    if not attempted:
-        return 0.0
-    if success is True:
-        return 0.1
-    if success is False:
-        return -0.1
-    return 0.0
+    return _shared_recovery(attempted=attempted, success=success)
 
 
 def _reward_rationale(
@@ -460,7 +510,7 @@ def _mean(values: list[float]) -> float:
 
 
 def _round_component(value: float) -> float:
-    return round(value, 10)
+    return _shared_round_component(value)
 
 
 def _round_metric(value: float) -> float:
@@ -468,4 +518,4 @@ def _round_metric(value: float) -> float:
 
 
 def _clamp(value: float) -> float:
-    return _round_component(max(-1.0, min(1.0, value)))
+    return _shared_clamp(value)

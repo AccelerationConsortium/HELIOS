@@ -13,15 +13,19 @@
   </sub>
 </p>
 
-# HELIOS — Holistic Experiment Learning Intelligent Orchestration System
+# HELIOS — Hierarchical Experimental Learning and Intelligent Optimization System
 
-HELIOS is an **agent-native orchestrator** for self-driving laboratories (SDLs). It composes 27 specialist agents into 4 cooperating swarms behind a single natural-language interface — so scientists describe experiments in plain language, and HELIOS plans, validates, executes, and iterates autonomously, closing the loop between hypothesis and hardware.
+Helios (Hierarchical Experimental Learning and Intelligent Optimization System) is an orchestrator-agnostic adaptive campaign decision layer for closed-loop experimentation.
 
-Most "AI lab assistants" are LLM wrappers: a human stays in the driver's seat and the model translates their words into button clicks. HELIOS inverts that — **agents are the operators**. Contracts, leases, skills, the event bus, and recovery are all designed for agents as first-class citizens. The cleanest test: mock out the LLM (`LLM_PROVIDER=mock`) and the entire campaign loop still closes, because the intelligence lives in the orchestration and optimization layers, not in prompt glue.
+Helios decides which campaign-level action should happen next, including optimization strategy selection, validation, failure-aware recovery, context acquisition, human/LLM query, dynamic objective/constraint handling, and future scale/fidelity-aware decisions.
+
+HELIOS sits above lab orchestrators, optimizers, simulators, and hardware runtimes. It does not require any one execution backend to be the center of the system: PUDA, Opentrons, BO MCP, Nexus, local Bayesian optimization, simulation, or future scale/fidelity services can all appear as tools, backends, evidence sources, or execution paths. HELIOS keeps the campaign-level decision authority: what to try next, when to validate, when to recover, when to ask for context, and when to tighten objectives or constraints.
+
+Most "AI lab assistants" are LLM wrappers: a human stays in the driver's seat and the model translates their words into button clicks. HELIOS inverts that at the campaign layer. Contracts, leases, skills, the event bus, and recovery are all designed so decisions are typed, auditable, replayable, and backend-agnostic. The cleanest test: mock out the LLM (`LLM_PROVIDER=mock`) and the campaign decision loop still closes, because the intelligence lives in the adaptive decision and optimization layers, not in prompt glue.
 
 ---
 
-## How a Campaign Flows Through the Agents
+## How a Campaign Flows Through HELIOS
 
 What actually happens between a scientist typing one sentence and HELIOS handing back an optimized recipe:
 
@@ -31,8 +35,8 @@ The user writes, e.g., *"Screen OER catalysts to minimize overpotential at 10 mA
 **2. Devices are exposed as skills.**
 Every instrument registers a skill (`agent/skills/*.md`): its primitives, their typed parameters, a safety class (e.g. `HAZARDOUS`), and precondition/effect contracts ("channel must be idle"). Agents can only invoke declared primitives with type-checked arguments — **the machine's capabilities are fixed, so the LLM cannot hallucinate an operation that doesn't exist**. New instruments are onboarded by the **OnboardingAgent**, which discovers primitives, generates integration code and the skill definition, and writes them to disk after human review — hours, not weeks.
 
-**3. The orchestrator runs the round loop.**
-The **OrchestratorAgent** takes over and drives one pipeline per round, each stage a dedicated agent:
+**3. The decision layer runs the round loop.**
+The internal **OrchestratorAgent** drives one pipeline per round, but it is an implementation component rather than the product boundary. The adaptive campaign decision layer decides whether the next campaign-level action is optimization, validation, recovery, context acquisition, human/LLM query, objective/constraint revision, or a future scale/fidelity transition:
 
 ```
 PlannerAgent          expands the contract into a round plan
@@ -65,11 +69,12 @@ Results, uncertainties, and decision chains land in campaign memory — queryabl
 ## Features
 
 - **Natural language intake** — a multi-turn clarification dialogue turns a free-text experiment description into a versioned, schema-validated `TaskContract`
-- **Agent-native orchestration** — 27 specialist agents grouped into 4 swarms (Scientist / Engineer / Analyst / Validator), composed as a stage graph that branches, retries, and remembers; all cross-agent calls go through a ControlPlane with agent leases and a full audit trail
+- **Adaptive campaign decision layer** — orchestrator-agnostic campaign control that decides what should happen next across optimization, validation, recovery, context acquisition, human/LLM query, dynamic objectives/constraints, and future scale/fidelity choices
+- **Typed internal agent services** — 27 specialist agents grouped into 4 swarms (Scientist / Engineer / Analyst / Validator), composed as a stage graph that branches, retries, and remembers; all cross-agent calls go through a ControlPlane with agent leases and a full audit trail
 - **Devices as skills** — instruments expose typed primitives with safety classes and precondition/effect contracts; agents cannot invoke operations that don't exist
 - **Real-time reasoning stream** — every agent step emits SSE events with exactly-once delivery and DB-backed replay; the browser shows a live decision tree of what each agent considered and why
 - **Hardware agnostic** — runs in `simulated` mode for development; switches to live Opentrons OT-2, PLC relays, and electrochemistry sensors by changing one env var
-- **Context-aware dynamic strategy** — a scientific campaign meta-controller selects campaign intent, optimization mode, and candidate-generation backend from scientific context, objective hierarchy, failure attribution, backend memory, Nexus diagnostics, BO MCP availability, and shadow learning signals
+- **Context-aware campaign policy** — campaign intent, optimization mode, candidate backend, validation, recovery, context requests, and objective/constraint handling are selected from scientific context, objective hierarchy, failure attribution, backend memory, Nexus diagnostics, BO MCP availability, and shadow learning signals
 - **Safety-first** — contract safety envelopes, per-primitive safety classes, preflight checks before every round, and human-in-the-loop gates as resumable pause states
 - **Durable execution** — SQLite-backed campaign checkpoints survive restarts; crashed campaigns resume from the last completed round
 
@@ -77,23 +82,26 @@ Results, uncertainties, and decision chains land in campaign memory — queryabl
 
 ## Architecture
 
-### Four Layers
+### Four Internal Layers
 
 | Layer | Role | Key Components |
 |-------|------|----------------|
-| **L3 Orchestration** | Task contracts, admission control, agent lease pool | `OrchestratorAgent`, `ControlPlane`, `RequirementParserAgent` |
-| **L2 Planning** | Experimental design & adaptive strategy | `PlannerAgent`, `DesignAgent`, `SafetyAgent`, inner RL strategy router |
+| **L3 Campaign Decision** | Task contracts, campaign action choice, admission control, agent lease pool | `OrchestratorAgent`, `ControlPlane`, `RequirementParserAgent`, `decision_layer` |
+| **L2 Planning & Policy** | Experimental design, adaptive strategy, validation/recovery/context choices | `PlannerAgent`, `DesignAgent`, `SafetyAgent`, strategy router |
 | **L1 Execution** | Protocol compilation & hardware abstraction | `CompilerAgent`, `CodeWriterAgent`, `DeckLayoutAgent`, hardware dispatcher |
 | **L0 Evidence** | Campaign memory, uncertainty, causal updates | `AnalyzerAgent`, `SensingAgent`, `MonitorAgent`, `RecoveryAgent` |
 
-### Dynamic Strategy Meta-Controller
+### Adaptive Campaign Decision Layer
 
-HELIOS dynamic strategy selection is a context-aware scientific campaign
-meta-controller. It uses scientific context, objective hierarchy, typed failure
+HELIOS is positioned as an orchestrator-agnostic adaptive campaign decision
+layer. It uses scientific context, objective hierarchy, typed failure
 attribution, backend performance memory, candidate/failure-zone memory, Nexus
-diagnostics, BO MCP availability, and bandit/learned-policy signals to choose
-three things each round: `CampaignIntent`, `OptimizationMode`, and the
-candidate-generation backend.
+diagnostics, BO MCP availability, and bandit/learned-policy signals to decide
+which campaign-level action should happen next. Today that includes
+`CampaignIntent`, `OptimizationMode`, and candidate-generation backend
+selection; the same layer also owns validation, failure-aware recovery, context
+acquisition, human/LLM query, dynamic objective/constraint handling, and future
+scale/fidelity-aware decisions.
 
 The default live path is conservative: rule-based, auditable, and bounded by
 explicit safety gates. Learning-based policies do not replace this path by
@@ -148,8 +156,8 @@ The merged optimization stack is split by authority boundary:
 
 ### Adaptive Campaign Substrate (shadow)
 
-On top of the meta-controller sits a **shadow-only** adaptive decision
-substrate that, per round, proposes a scientific-activity `CampaignMode`
+Alongside the live policy sits a **shadow-only** adaptive decision substrate
+that, per round, proposes a scientific-activity `CampaignMode`
 (optimization, validation, calibration, failure diagnosis, context seeking,
 human observation, safety-constraint tightening, stop), assesses the action
 space, and scores candidate value-of-information — as an **advisory** artifact
@@ -163,12 +171,13 @@ by `ADAPTIVE_SUBSTRATE_SHADOW_ENABLED` (default off). See
 
 ### Agent Model
 
-HELIOS is an **autonomous multi-agent experimentation system**, not an "LLM
-agent". Agents are typed input→output services orchestrated in a deterministic
-L3→L2→L1→L0 pipeline; the per-round optimization/decision loop is **LLM-free by
-design** (classical BO/GP + rule-based scoring + optional non-LLM learned
-policies). The LLM is used only at the language/knowledge boundary (NL→plan,
-NL→code, priors, post-run review) and never steers a live round. See
+HELIOS is an **adaptive campaign decision layer** implemented with typed
+specialist services, not an "LLM agent". Agents are typed input→output services
+coordinated in a deterministic L3→L2→L1→L0 pipeline; the per-round
+optimization/decision loop is **LLM-free by design** (classical BO/GP +
+rule-based scoring + optional non-LLM learned policies). The LLM is used only
+at the language/knowledge boundary (NL→plan, NL→code, priors, post-run review)
+and never steers a live round. See
 [docs/agent_architecture.md](docs/agent_architecture.md).
 
 ### Agent Roster
@@ -405,12 +414,15 @@ ruff format app/
 
 ### Validation Evidence Pack
 
-HELIOS is framed as an agent-native, hierarchical, graph/state-machine routed,
-role-based multi-agent SDL controller. The live campaign controller remains
+HELIOS is framed as an orchestrator-agnostic adaptive campaign decision layer.
+Its internal implementation is hierarchical, graph/state-machine routed, and
+role-based, but the product boundary is campaign-level decision authority rather
+than ownership of any single orchestrator. The live campaign policy remains
 rule-based and auditable by default; Nexus and BO MCP are optimization
-advisor/backend/tool paths, not top-level campaign decision authorities. Learned
-policy and self-evolution paths are offline, shadow, canary, and approval-gated;
-their metadata does not change default BO MCP/Nexus/backend behavior.
+advisor/backend/tool paths, not top-level campaign decision authorities.
+Learned policy and self-evolution paths are offline, shadow, canary, and
+approval-gated; their metadata does not change default BO MCP/Nexus/backend
+behavior.
 
 The architecture validation report is version-controlled at
 `docs/HELIOS_ARCHITECTURE_VALIDATION.md`. It is a static evidence pack for the

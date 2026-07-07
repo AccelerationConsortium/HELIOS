@@ -81,10 +81,12 @@ def test_report_states_architecture_and_dynamic_strategy_boundaries():
     dynamic = build_dynamic_strategy_summary()
     text = _flatten_text({"architecture": architecture, "dynamic": dynamic}).lower()
 
-    assert "agent-native" in text
+    assert "orchestrator-agnostic adaptive campaign decision layer" in text
+    assert "closed-loop experimentation" in text
     assert "hierarchical" in text
     assert "graph/state-machine" in text
-    assert "role-based multi-agent controller" in text
+    assert "specialist role boundaries" in text
+    assert "human/llm query" in text
     assert "rule-based / auditable by default" in text
     assert "strategydecision" in text
     assert "strategytrace" in text
@@ -95,7 +97,7 @@ def test_report_states_nexus_and_bomcp_are_not_campaign_authority():
     text = _flatten_text(backend).lower()
 
     assert "nexus is advisor/backend/evidence source, not campaign decision authority" in text
-    assert "bo mcp is backend/tool, not the top-level controller" in text
+    assert "bo mcp is backend/tool, not campaign decision authority" in text
 
 
 def test_report_states_learned_policy_is_not_default_live_override():

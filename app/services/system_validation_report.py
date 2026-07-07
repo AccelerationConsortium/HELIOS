@@ -67,19 +67,22 @@ class HELIOSSystemValidationReport:
 def build_architecture_summary() -> dict[str, Any]:
     return {
         "claim": (
-            "HELIOS is agent-native, hierarchical, graph/state-machine routed, "
-            "role-based multi-agent controller."
+            "HELIOS is an orchestrator-agnostic adaptive campaign decision "
+            "layer for closed-loop experimentation."
         ),
-        "controller_shape": "hierarchical graph/state-machine routing with specialist role boundaries",
+        "implementation_shape": "hierarchical graph/state-machine routing with specialist role boundaries",
         "agent_contract": "shared typed campaign state, traces, outcomes, and safety/proposal contracts",
-        "decision_authority": "campaign controller and auditable strategy policy retain decision authority",
+        "decision_authority": (
+            "adaptive campaign policy retains authority over optimization strategy, validation, "
+            "failure-aware recovery, context acquisition, human/LLM query, and objective/constraint handling"
+        ),
         "runtime_boundary": "reporting-only evidence; no runtime behavior is modified",
     }
 
 
 def build_dynamic_strategy_summary() -> dict[str, Any]:
     return {
-        "default_controller": "Live controller remains rule-based / auditable by default.",
+        "default_controller": "Live campaign policy remains rule-based / auditable by default.",
         "decision_trace": "StrategyDecision and StrategyTrace record intent, mode, backend, evidence, proposals, outcome, and reward.",
         "dynamic_context": (
             "CampaignContext includes objective hierarchy, failure taxonomy, route, budget, "
@@ -96,7 +99,7 @@ def build_backend_integration_summary() -> dict[str, Any]:
             "HELIOS uses lightweight in-process Nexus optimization core/advisor paths where configured; "
             "server/API/MCP/platform/LLM Nexus components stay outside the default runtime path."
         ),
-        "bomcp_boundary": "BO MCP is backend/tool, not the top-level controller.",
+        "bomcp_boundary": "BO MCP is backend/tool, not campaign decision authority.",
         "fallback_behavior": "Backend failures degrade through typed failure attribution and deterministic fallback paths.",
         "default_behavior": "Default BO MCP/Nexus/backend behavior remains unchanged by this report layer.",
     }

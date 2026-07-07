@@ -17,11 +17,14 @@ Legend: **not started** · **partial** (some infra exists, not wired/proven).
   SAFETY_CONSTRAINT_TIGHTENING), DynamicActionSpace, Value-of-Information,
   aggregate snapshot, shadow-trace comparison. See
   [adaptive_campaign_substrate.md](adaptive_campaign_substrate.md).
-- **Dynamic strategy meta-controller** — two-layer action taxonomy
-  (`CampaignIntent` + `OptimizationMode`), phase posterior, evidence-based
-  scoring, safety gates, Nexus optimization-intelligence evidence, backend
-  recommendations, and replay/validation accounting. See README ->
-  Architecture.
+- **Adaptive campaign decision layer** — orchestrator-agnostic campaign action
+  selection across optimization strategy, validation, failure-aware recovery,
+  context acquisition, human/LLM query, dynamic objective/constraint handling,
+  and future scale/fidelity decisions. The shipped core includes the
+  (`CampaignIntent` + `OptimizationMode`) taxonomy, phase posterior,
+  evidence-based scoring, safety gates, Nexus optimization-intelligence
+  evidence, backend recommendations, and replay/validation accounting. See
+  README -> Architecture.
 - **Nexus/local candidate arbitration** — provider facade, Nexus backend
   adapters, multi-source candidate-pool builder, hard-gated decision policy,
   scored arbitration portfolio, provenance logging, and the
@@ -79,7 +82,7 @@ Path (from v2.md): rule selector → +decision trace → contextual bandit →
 | # | Item | Origin | Status | Notes |
 |---|------|--------|--------|-------|
 | D1 | **Offline meta-policy proof** — imitation / offline RL / policy evaluation / counterfactual replay showing learned policy ≥ heuristic | v2 P5 | partial | `policy_evaluation` / `learned_policy` / RL selectors exist; the *proof* and promotion do not |
-| D2 | **Trained meta-RL policy network** — guardrailed meta-controller (propose → rule/safety validate → execute → trace), gated by offline-eval evidence | v2 P6 | not started | Only after D1 + stable reward + replay env + hard guardrails |
+| D2 | **Trained meta-RL policy network** — guardrailed campaign decision policy (propose → rule/safety validate → execute → trace), gated by offline-eval evidence | v2 P6 | not started | Only after D1 + stable reward + replay env + hard guardrails |
 
 ---
 

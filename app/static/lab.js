@@ -535,6 +535,8 @@ function connectSSE(campaignId) {
         // Detailed execution events
         'agent_decision', 'tool_call', 'hardware_action',
         'protocol_step', 'safety_check', 'thinking', 'log',
+        // Verifiable decision reward (RLVR wedge — inner evaluation loop)
+        'decision_reward',
         // Instrument status
         'instrument_status',
         // Agent decision trees
@@ -876,6 +878,25 @@ function handleSSEEvent(type, data) {
                 const reasoning = data.reasoning || '';
                 addDetailStep(roundId, 'decision', data.agent || 'agent',
                     `💡 ${decision}`, reasoning, data.indent || 0);
+            }
+            break;
+        }
+
+        case 'decision_reward': {
+            // Verifiable reward — surface the inner evaluation loop: total,
+            // process/outcome split, rubric version, and every signal's verdict.
+            if (roundId) {
+                const verifications = data.verifications || [];
+                const mark = (p) => (p === true ? '✅' : p === false ? '❌' : '➖');
+                const signals = verifications
+                    .map((v) => `${mark(v.passed)} ${v.name}=${v.score}`)
+                    .join('  ');
+                const rubric = data.rubric_version || 'v0.1_static';
+                const title = `🧪 reward ${data.reward} `
+                    + `(process ${data.process_reward} / outcome ${data.outcome_reward}) `
+                    + `[${rubric}]`;
+                addDetailStep(roundId, 'decision', 'evaluator',
+                    title, signals, data.indent || 0);
             }
             break;
         }
