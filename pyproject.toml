@@ -52,7 +52,7 @@ all = [
 # HELIOS uses only Nexus's pure-Python core (backends/plugins/profiler/
 # diagnostics/core/dsl) -- never its server/LLM stack.  Nexus declares those
 # server deps as core, so install the core WITHOUT them:
-#     uv pip install -e /path/to/Nexus --no-deps
+#     uv pip install -e /path/to/HELIOS_Nexus --no-deps
 # When absent, HELIOS falls back to the built-in optimizer automatically.
 
 [tool.setuptools.packages.find]
