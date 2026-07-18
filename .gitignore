@@ -7,6 +7,7 @@ data/orchestrator.db
 data/orchestrator.db-shm
 data/orchestrator.db-wal
 data/object_store/
+data/scientific_ledger/
 .env
 
 # macOS
@@ -36,6 +37,7 @@ docs/*
 !docs/adaptive_campaign_substrate.md
 !docs/development_progress.md
 !docs/agent_architecture.md
+!docs/scientific_decision_ledger.md
 
 # Planning / design notes
 plan/

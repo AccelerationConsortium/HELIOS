@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 
 def test_electrochem_surrogate_is_deterministic_and_structured():
@@ -61,6 +62,9 @@ async def test_e2e_study_runs_real_orchestrator_path(monkeypatch, tmp_path):
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("DB_PATH", str(tmp_path / "data" / "orchestrator.db"))
     monkeypatch.setenv("OBJECT_STORE_DIR", str(tmp_path / "objects"))
+    monkeypatch.setenv("SCIENTIFIC_LEDGER_ROOT", str(tmp_path / "scientific-ledger"))
+    monkeypatch.setenv("SCIENTIFIC_LEDGER_ENABLED", "true")
+    monkeypatch.setenv("SCIENTIFIC_LEDGER_GIT_ENABLED", "false")
     get_settings.cache_clear()
 
     from benchmarks.e2e_study import StudySpec, run_study
@@ -86,3 +90,18 @@ async def test_e2e_study_runs_real_orchestrator_path(monkeypatch, tmp_path):
     assert random.trace.score == 0.0
     assert summary["helios_full"]["trace_completeness_rate"] == 1.0
     assert summary["random"]["n"] == 1
+
+    # The real orchestrator path must close its live Pending Decision Card,
+    # persist typed accounting, and make the trajectory exportable for RLVR.
+    from app.services.scientific_ledger import get_scientific_ledger
+
+    campaign_id = helios.metadata["campaign_id"]
+    ledger = get_scientific_ledger()
+    campaign_dir = Path(ledger.campaign_directory(campaign_id))
+    card = campaign_dir / "rounds/001/decision_001.md"
+    assert card.is_file()
+    card_text = card.read_text(encoding="utf-8")
+    assert "status: completed" in card_text
+    assert "selected_backend: adaptive" in card_text
+    assert "## Reward and Verification" in card_text
+    assert len(ledger.export_rlvr_records(campaign_id)) == 1

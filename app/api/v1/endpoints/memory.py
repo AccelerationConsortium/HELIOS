@@ -10,13 +10,86 @@ Read-only. Writes happen via the `MemoryListener` on the event bus.
 """
 from __future__ import annotations
 
+from pathlib import Path, PurePosixPath
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import PlainTextResponse
 
 from app.core.db import parse_json, run_txn
 
 router = APIRouter(prefix="/memory", tags=["memory"])
+
+
+@router.get("/scientific/search")
+async def scientific_memory_search(
+    q: str = Query(..., min_length=1, max_length=500),
+    campaign_id: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+) -> dict[str, Any]:
+    """Search Decision Cards, failures, recoveries, and evidence as Markdown."""
+    from app.services.scientific_ledger import get_scientific_ledger
+
+    try:
+        hits = get_scientific_ledger().search(
+            q,
+            campaign_id=campaign_id,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "query": q,
+        "campaign_id": campaign_id,
+        "count": len(hits),
+        "hits": [
+            {
+                "campaign_id": hit.campaign_id,
+                "path": hit.path,
+                "title": hit.title,
+                "line_number": hit.line_number,
+                "snippet": hit.snippet,
+            }
+            for hit in hits
+        ],
+    }
+
+
+@router.get("/scientific/{campaign_id}/artifact", response_class=PlainTextResponse)
+async def scientific_memory_artifact(
+    campaign_id: str,
+    path: str = Query("index.md", min_length=1, max_length=500),
+) -> PlainTextResponse:
+    """Read one campaign Markdown artifact with traversal protection."""
+    from app.services.scientific_ledger import get_scientific_ledger
+
+    ledger = get_scientific_ledger()
+    campaign_dir = ledger.campaign_directory(campaign_id)
+    pure = PurePosixPath(path)
+    if (
+        pure.is_absolute()
+        or ".." in pure.parts
+        or ".git" in pure.parts
+        or pure.suffix.casefold() != ".md"
+    ):
+        raise HTTPException(status_code=400, detail="Artifact path must be campaign-local Markdown")
+    target = (campaign_dir / Path(*pure.parts)).resolve()
+    try:
+        target.relative_to(campaign_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Artifact path escapes campaign directory") from exc
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Scientific artifact not found")
+    return PlainTextResponse(target.read_text(encoding="utf-8"), media_type="text/markdown")
+
+
+@router.get("/scientific/{campaign_id}/rlvr", response_class=PlainTextResponse)
+async def scientific_memory_rlvr(campaign_id: str) -> PlainTextResponse:
+    """Export deterministic JSONL from the typed decision trajectory store."""
+    from app.services.scientific_ledger import get_scientific_ledger
+
+    text = get_scientific_ledger().export_rlvr_jsonl(campaign_id)
+    return PlainTextResponse(text, media_type="application/x-ndjson")
 
 
 @router.get("/snapshot")

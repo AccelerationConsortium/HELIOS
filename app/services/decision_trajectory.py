@@ -23,6 +23,7 @@ from app.services.decision_outcome import CampaignDecisionAccounting
 __all__ = [
     "TRAJECTORY_SCHEMA_VERSION",
     "persist_campaign_trajectory",
+    "persist_loop_trajectory",
     "load_trajectories",
     "export_trajectories_jsonl",
 ]
@@ -30,22 +31,18 @@ __all__ = [
 TRAJECTORY_SCHEMA_VERSION = "1"
 
 
-def persist_campaign_trajectory(
-    accounting: CampaignDecisionAccounting, *, layer: str = "campaign"
+def _insert_row(
+    *,
+    campaign_id: str,
+    trace_id: str | None,
+    round_index: int | None,
+    layer: str,
+    reward: Any,
+    trajectory: dict[str, Any],
 ) -> str:
-    """Insert one append-only trajectory row from a decision accounting bundle.
-
-    Returns the new row id. Never updates or deletes.
-    """
-    outcome = accounting.outcome
-    reward = accounting.reward
+    """Insert one append-only trajectory row. Returns the new row id."""
     row_id = f"traj-{uuid4().hex}"
-    verifier_report = [v.model_dump() for v in reward.verifications]
-    trajectory = {
-        "trace": accounting.trace.model_dump(mode="json"),
-        "outcome": outcome.model_dump(mode="json"),
-        "reward": reward.model_dump(mode="json"),
-    }
+    verifier_report = [v.model_dump() for v in getattr(reward, "verifications", []) or []]
 
     def _insert(conn: Any) -> None:
         conn.execute(
@@ -59,14 +56,14 @@ def persist_campaign_trajectory(
             """,
             (
                 row_id,
-                outcome.campaign_id,
-                outcome.trace_id,
-                outcome.round_index,
+                campaign_id,
+                trace_id,
+                round_index,
                 layer,
-                reward.rubric_version,
+                getattr(reward, "rubric_version", "v0.1_static"),
                 reward.reward,
-                reward.process_reward,
-                reward.outcome_reward,
+                getattr(reward, "process_reward", 0.0),
+                getattr(reward, "outcome_reward", 0.0),
                 db.json_dumps(verifier_report),
                 db.json_dumps(trajectory),
                 TRAJECTORY_SCHEMA_VERSION,
@@ -76,6 +73,45 @@ def persist_campaign_trajectory(
 
     db.run_txn(_insert)
     return row_id
+
+
+def persist_loop_trajectory(
+    campaign_id: str, round_index: int, reward: Any, *, state: dict | None = None
+) -> str:
+    """Persist a live loop-layer decision (LoopReward) as a trajectory row."""
+    return _insert_row(
+        campaign_id=campaign_id,
+        trace_id=getattr(reward, "iteration_id", None),
+        round_index=round_index,
+        layer="loop",
+        reward=reward,
+        trajectory={
+            "reward": reward.model_dump(mode="json"),
+            "state": state or {},
+        },
+    )
+
+
+def persist_campaign_trajectory(
+    accounting: CampaignDecisionAccounting, *, layer: str = "campaign"
+) -> str:
+    """Insert one append-only trajectory row from a decision accounting bundle.
+
+    Returns the new row id. Never updates or deletes.
+    """
+    outcome = accounting.outcome
+    return _insert_row(
+        campaign_id=outcome.campaign_id,
+        trace_id=outcome.trace_id,
+        round_index=outcome.round_index,
+        layer=layer,
+        reward=accounting.reward,
+        trajectory={
+            "trace": accounting.trace.model_dump(mode="json"),
+            "outcome": outcome.model_dump(mode="json"),
+            "reward": accounting.reward.model_dump(mode="json"),
+        },
+    )
 
 
 def load_trajectories(campaign_id: str | None = None) -> list[dict[str, Any]]:

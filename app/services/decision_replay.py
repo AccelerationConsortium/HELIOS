@@ -41,9 +41,11 @@ class CampaignDecisionReplaySummary(BaseModel):
     average_objective_reward: float = 0.0
     average_proxy_gap_reward: float = 0.0
     average_validation_reward: float = 0.0
+    average_recovery_reward: float = 0.0
     average_context_reward: float = 0.0
     context_request_fulfillment_rate: float | None = None
     validation_success_rate: float | None = None
+    recovery_success_rate: float | None = None
     human_override_rate: float | None = None
     rationale: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -118,6 +120,9 @@ class CampaignDecisionReplayAnalyzer:
             average_validation_reward=_mean(
                 [accounting.reward.validation_reward for accounting in accountings]
             ),
+            average_recovery_reward=_mean(
+                [accounting.reward.recovery_reward for accounting in accountings]
+            ),
             average_context_reward=_mean(
                 [accounting.reward.context_reward for accounting in accountings]
             ),
@@ -129,6 +134,13 @@ class CampaignDecisionReplayAnalyzer:
             ),
             validation_success_rate=_optional_bool_rate(
                 [accounting.outcome.validation_success for accounting in accountings]
+            ),
+            recovery_success_rate=_optional_bool_rate(
+                [
+                    accounting.outcome.recovery_success
+                    for accounting in accountings
+                    if accounting.outcome.recovery_attempted
+                ]
             ),
             human_override_rate=_optional_bool_rate(
                 [accounting.outcome.human_override for accounting in accountings]

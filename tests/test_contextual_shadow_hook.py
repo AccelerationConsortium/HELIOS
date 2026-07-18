@@ -4,8 +4,15 @@ import logging
 
 
 class _Settings:
-    def __init__(self, enabled: bool) -> None:
+    def __init__(
+        self,
+        enabled: bool,
+        ledger_enabled: bool = False,
+        authority_enabled: bool = False,
+    ) -> None:
         self.contextual_decision_shadow_enabled = enabled
+        self.scientific_ledger_enabled = ledger_enabled
+        self.campaign_decision_authority_enabled = authority_enabled
 
 
 def test_contextual_shadow_hook_disabled_does_not_call_services(monkeypatch):
@@ -49,6 +56,83 @@ def test_contextual_shadow_hook_enabled_builds_and_logs_trace(monkeypatch, caplo
     assert trace.decision_plan.candidate_generation_backend == "bo_mcp"
     assert trace.actual_action == "propose_candidates"
     assert "contextual_shadow_decision_trace" in caplog.text
+
+
+def test_scientific_ledger_builds_trace_without_legacy_shadow_log(monkeypatch, caplog):
+    import app.agents.orchestrator as orch
+
+    monkeypatch.setattr(orch, "get_settings", lambda: _Settings(False, True))
+
+    with caplog.at_level(logging.INFO):
+        trace = orch._maybe_record_contextual_shadow_decision(
+            campaign_id="campaign-ledger",
+            round_index=2,
+            strategy_selection_result={
+                "campaign_intent": "optimize",
+                "optimization_mode": "explore",
+                "candidate_generation_backend": "random",
+            },
+        )
+
+    assert trace is not None
+    assert trace.context.campaign_id == "campaign-ledger"
+    assert trace.context.round_index == 2
+    assert "contextual_shadow_decision_trace" not in caplog.text
+
+
+def test_live_authority_builds_trace_without_shadow_or_ledger(monkeypatch, caplog):
+    import app.agents.orchestrator as orch
+
+    monkeypatch.setattr(
+        orch, "get_settings", lambda: _Settings(False, False, True)
+    )
+
+    with caplog.at_level(logging.INFO):
+        trace = orch._maybe_record_contextual_shadow_decision(
+            campaign_id="campaign-authority",
+            round_index=3,
+            strategy_selection_result={
+                "campaign_intent": "optimize",
+                "optimization_mode": "exploit",
+                "candidate_generation_backend": "bo_mcp",
+            },
+        )
+
+    assert trace is not None
+    assert trace.context.campaign_id == "campaign-authority"
+    assert trace.context.round_index == 3
+    assert "contextual_shadow_decision_trace" not in caplog.text
+
+
+def test_recovery_event_projection_deduplicates_episode_ids():
+    import app.agents.orchestrator as orch
+
+    episode = {
+        "episode_id": "recovery-1",
+        "phase": "exit",
+        "attempts": [{"action": "retry_original", "result": "success"}],
+    }
+    events = orch._recovery_events_from_steps(
+        [
+            {"step_key": "aspirate", "recovery_episode": episode},
+            {"step_key": "aspirate", "recovery_episode": episode},
+            {"step_key": "measure"},
+        ]
+    )
+
+    assert events == [episode]
+    assert events[0] is not episode
+
+
+def test_planned_strategy_decision_keeps_first_round_explainable():
+    import app.agents.orchestrator as orch
+
+    decision = orch._planned_strategy_decision("lhs")
+
+    assert decision["campaign_intent"] == "optimize"
+    assert decision["optimization_mode"] == "explore"
+    assert decision["candidate_generation_backend"] == "lhs"
+    assert decision["strategy_trace"]["selected_backend"] == "lhs"
 
 
 def test_contextual_shadow_hook_swallows_and_logs_exceptions(monkeypatch, caplog):
