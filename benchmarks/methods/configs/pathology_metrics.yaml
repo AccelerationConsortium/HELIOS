@@ -1,0 +1,47 @@
+# Pathology-benchmark metric thresholds and response-class mappings.
+#
+# Everything the adaptation metrics depend on lives here, versioned, so a
+# reviewer can audit (or replace) it and so old studies never silently mix
+# with results computed under different definitions -- matrix.json records
+# this file's content hash and schema_version in the study identity.
+schema_version: 1
+author: benchmark
+description: >
+  Thresholds for the event-grounded adaptation metrics (recovery efficiency,
+  adaptation lag, constraint adaptation latency, decision quality) and the
+  event-type -> response-class mapping used by decision quality.  The mapping
+  encodes interpretable response classes, NOT optimal policies: it says which
+  observable reactions count as "responding to" a condition, without claiming
+  any of them is the best possible action.
+
+thresholds:
+  # ratio guard for recovery efficiency: (post_rate + eps) / (pre_rate + eps)
+  epsilon: 1.0e-6
+  # evals before/after a failure event used for regret-improvement rates
+  recovery_window: 5
+  # windowed-min size for post-event regret in adaptation lag
+  lag_window: 5
+  # relative recovery tolerance (with an absolute floor of 1.0 regret unit):
+  # recovered when regret_now <= regret_before + lag_delta * max(|regret_before|, 1)
+  lag_delta: 0.1
+  # consecutive evals the recovery condition must hold
+  lag_sustain: 3
+  # rolling-window size for the in-region proposal rate
+  constraint_window: 8
+  # adapted when rolling rate < constraint_ratio_threshold * pre-event rate
+  constraint_ratio_threshold: 0.5
+  # consecutive evals the constraint condition must hold
+  constraint_sustain: 3
+  # evals after an event within which a relevant response class counts as a hit
+  decision_window: 5
+
+# Observable response classes (detected from the trace's backend_history):
+#   backend_switch     -- the delegated backend changed between rounds
+#   constraint_filter  -- the early-stage danger-zone filter dropped proposals
+#   exploration_action -- an exploration phase/backend (lhs / random) was chosen
+response_class_mapping:
+  noise_drift: [backend_switch, exploration_action]
+  spatial_failure: [backend_switch, constraint_filter, exploration_action]
+  censoring: [exploration_action, backend_switch]
+  proxy_gap_shift: [backend_switch, exploration_action]
+  objective_shift: [backend_switch, exploration_action]

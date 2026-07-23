@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import csv
 import io
+from collections import defaultdict
+from typing import Any
 
 from benchmarks.methods.recommend import Recommendation
 from benchmarks.methods.scoreboard import MethodScore
@@ -30,19 +32,8 @@ def scoreboard_to_markdown(scores: list[MethodScore]) -> str:
     rows = [header, sep]
     for s in scores:
         rows.append(
-            "| {pid} | {be} | {ns} | {reg} | {auc} | {ett} | {hit} | "
-            "{rob} | {cost} | {err} |".format(
-                pid=s.problem_id,
-                be=s.backend,
-                ns=s.n_seeds,
-                reg=_fmt(s.mean_regret),
-                auc=_fmt(s.mean_auc),
-                ett=_fmt(s.mean_evals_to_target, 1),
-                hit=_fmt(s.target_hit_rate, 2),
-                rob=_fmt(s.regret_robustness),
-                cost=_fmt(s.mean_cost_s, 5),
-                err=s.errors,
-            )
+            f"| {s.problem_id} | {s.backend} | {s.n_seeds} | {_fmt(s.mean_regret)} | {_fmt(s.mean_auc)} | {_fmt(s.mean_evals_to_target, 1)} | {_fmt(s.target_hit_rate, 2)} | "
+            f"{_fmt(s.regret_robustness)} | {_fmt(s.mean_cost_s, 5)} | {s.errors} |"
         )
     return "\n".join(rows)
 
@@ -78,6 +69,95 @@ def scoreboard_to_csv(scores: list[MethodScore]) -> str:
                 s.regret_robustness,
                 s.mean_cost_s,
                 s.errors,
+            ]
+        )
+    return buf.getvalue()
+
+
+def benchmark_family(score: MethodScore) -> str:
+    """Classify a benchmark problem into the family that should drive conclusions."""
+    tags = score.tags
+    if tags.surface_class.startswith("early_stage"):
+        return "early_stage_imperfect_data"
+    if tags.has_categorical:
+        return "mixed_categorical"
+    if tags.n_dims <= 3 and tags.noise_std <= 0.0:
+        return "clean_low_dim_bo"
+    if tags.n_dims > 3 and tags.noise_std <= 0.0:
+        return "clean_high_dim"
+    return "analytic_other"
+
+
+def family_summary(scores: list[MethodScore]) -> list[dict[str, Any]]:
+    """Average method performance within each benchmark family."""
+    grouped: dict[tuple[str, str], list[MethodScore]] = defaultdict(list)
+    for score in scores:
+        grouped[(benchmark_family(score), score.backend)].append(score)
+
+    rows: list[dict[str, Any]] = []
+    for (family, backend), items in sorted(grouped.items()):
+        n = len(items)
+        rows.append(
+            {
+                "family": family,
+                "backend": backend,
+                "n_problems": n,
+                "mean_regret": sum(s.mean_regret for s in items) / n,
+                "mean_auc": sum(s.mean_auc for s in items) / n,
+                "target_hit_rate": sum(s.target_hit_rate for s in items) / n,
+                "mean_cost_s": sum(s.mean_cost_s for s in items) / n,
+                "errors": sum(s.errors for s in items),
+            }
+        )
+    rows.sort(key=lambda row: (str(row["family"]), float(row["mean_regret"])))
+    return rows
+
+
+def family_summary_to_markdown(scores: list[MethodScore]) -> str:
+    """Render family-level method performance as a markdown table."""
+    header = (
+        "| family | method | problems | mean_regret | mean_auc | "
+        "hit_rate | cost_s | errors |"
+    )
+    sep = "|" + "|".join(["---"] * 8) + "|"
+    rows = [header, sep]
+    for row in family_summary(scores):
+        rows.append(
+            f"| {row['family']} | {row['backend']} | {row['n_problems']} | "
+            f"{_fmt(float(row['mean_regret']))} | {_fmt(float(row['mean_auc']))} | "
+            f"{_fmt(float(row['target_hit_rate']), 2)} | "
+            f"{_fmt(float(row['mean_cost_s']), 5)} | {row['errors']} |"
+        )
+    return "\n".join(rows)
+
+
+def family_summary_to_csv(scores: list[MethodScore]) -> str:
+    """Render family-level method performance as CSV."""
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(
+        [
+            "family",
+            "backend",
+            "n_problems",
+            "mean_regret",
+            "mean_auc",
+            "target_hit_rate",
+            "mean_cost_s",
+            "errors",
+        ]
+    )
+    for row in family_summary(scores):
+        writer.writerow(
+            [
+                row["family"],
+                row["backend"],
+                row["n_problems"],
+                row["mean_regret"],
+                row["mean_auc"],
+                row["target_hit_rate"],
+                row["mean_cost_s"],
+                row["errors"],
             ]
         )
     return buf.getvalue()

@@ -17,10 +17,10 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from app.services.candidate_gen import ParameterSpace, SearchDimension
-
 
 # ---------------------------------------------------------------------------
 # Types
@@ -50,6 +50,43 @@ class OptProblem:
     optimum: float                      # f(optimum_x), the global minimum
     optimum_x: dict | None              # argmin (None if not in closed form)
     tags: ProblemTags
+    evaluator: Callable[[dict], ProblemEvaluation] | None = None
+
+    def evaluate(self, params: dict) -> ProblemEvaluation:
+        """Return the benchmark evaluation seen by scoring and optimizers."""
+        if self.evaluator is not None:
+            return self.evaluator(params)
+        value = float(self.objective(params))
+        return ProblemEvaluation(raw_value=value, observed_value=value)
+
+
+@dataclass(frozen=True)
+class ProblemEvaluation:
+    """One evaluation with true score plus imperfect early-stage observation."""
+
+    raw_value: float
+    observed_value: float | None = None
+    execution_success: bool = True
+    qc_passed: bool = True
+    failure_type: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    objective_values: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def optimizer_value(self) -> float:
+        """Minimization value exposed to ordinary optimizers."""
+        return self.raw_value if self.observed_value is None else self.observed_value
+
+    def observation_objectives(self) -> dict[str, float]:
+        """JSON-safe numeric metrics attached to an optimizer observation."""
+        values = {
+            "true_objective": -float(self.raw_value),
+            "observed_objective": -float(self.optimizer_value),
+            "execution_success": 1.0 if self.execution_success else 0.0,
+            "qc_passed": 1.0 if self.qc_passed else 0.0,
+        }
+        values.update({str(k): float(v) for k, v in self.objective_values.items()})
+        return values
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +195,175 @@ def _mixed_categorical(p: dict) -> float:
     x = p["x"]
     offset = {"circle": 0.0, "square": 1.5, "triangle": 3.0}.get(shape, 5.0)
     return (x - 0.5) ** 2 + offset
+
+
+def _early_stage_controllability(p: dict) -> float:
+    target = float(p["target_temp"])
+    flow = float(p["flow_rate"])
+    actual = _actual_temperature(target, flow)
+    control_error = abs(actual - target)
+    failure = control_error > 8.0
+    return ((actual - 72.0) / 12.0) ** 2 + ((flow - 4.0) / 3.0) ** 2 + (4.0 if failure else 0.0)
+
+
+def _early_stage_controllability_eval(p: dict) -> ProblemEvaluation:
+    target = float(p["target_temp"])
+    flow = float(p["flow_rate"])
+    actual = _actual_temperature(target, flow)
+    control_error = abs(actual - target)
+    failure = control_error > 8.0
+    raw = _early_stage_controllability(p)
+    return ProblemEvaluation(
+        raw_value=raw,
+        observed_value=raw,
+        execution_success=not failure,
+        qc_passed=control_error <= 6.0,
+        failure_type="controllability" if failure else None,
+        metadata={
+            "target_temp": target,
+            "actual_temp": actual,
+            "control_error": control_error,
+        },
+        objective_values={
+            "actual_temp": actual,
+            "control_error": control_error,
+        },
+    )
+
+
+def _actual_temperature(target: float, flow: float) -> float:
+    undershoot = max(0.0, target - 78.0) * 0.75 + max(0.0, flow - 6.0) * 1.8
+    return target - undershoot
+
+
+def _hardware_zone(p: dict) -> float:
+    temp = float(p["temp"])
+    pressure = float(p["pressure"])
+    design = str(p["reactor_design"])
+    failure = design == "thin_wall" and temp >= 78.0 and pressure >= 4.0
+    design_offset = 0.0 if design == "thick_wall" else 0.25
+    return ((temp - 70.0) / 12.0) ** 2 + ((pressure - 3.0) / 2.0) ** 2 + design_offset + (5.0 if failure else 0.0)
+
+
+def _hardware_zone_eval(p: dict) -> ProblemEvaluation:
+    raw = _hardware_zone(p)
+    temp = float(p["temp"])
+    pressure = float(p["pressure"])
+    design = str(p["reactor_design"])
+    failure = design == "thin_wall" and temp >= 78.0 and pressure >= 4.0
+    return ProblemEvaluation(
+        raw_value=raw,
+        observed_value=raw,
+        execution_success=not failure,
+        qc_passed=not failure,
+        failure_type="hardware" if failure else None,
+        metadata={
+            "reactor_design": design,
+            "temp": temp,
+            "pressure": pressure,
+        },
+    )
+
+
+def _objective_uncertain_true(p: dict) -> float:
+    temp = float(p["temp"])
+    dwell = float(p["dwell_h"])
+    additive = str(p["additive"])
+    additive_penalty = 0.0 if additive == "stabilizer" else 0.8
+    return ((temp - 62.0) / 10.0) ** 2 + ((dwell - 5.0) / 3.0) ** 2 + additive_penalty
+
+
+def _objective_uncertain_proxy(p: dict) -> float:
+    temp = float(p["temp"])
+    dwell = float(p["dwell_h"])
+    additive = str(p["additive"])
+    additive_bonus = -0.35 if additive == "fast_yield" else 0.0
+    return ((temp - 86.0) / 12.0) ** 2 + ((dwell - 1.2) / 2.5) ** 2 + additive_bonus
+
+
+def _objective_uncertain_eval(p: dict) -> ProblemEvaluation:
+    true_value = _objective_uncertain_true(p)
+    proxy_value = _objective_uncertain_proxy(p)
+    return ProblemEvaluation(
+        raw_value=true_value,
+        observed_value=proxy_value,
+        execution_success=True,
+        qc_passed=True,
+        metadata={"proxy_objective": "fast_yield", "true_objective": "stability"},
+        objective_values={
+            "candidate_kpi_stability": -true_value,
+            "candidate_kpi_fast_yield": -proxy_value,
+        },
+    )
+
+
+def _batch_effect_true(p: dict) -> float:
+    temp = float(p["temp"])
+    hold = float(p["hold_h"])
+    ligand = str(p["ligand"])
+    protocol = str(p["screen_protocol"])
+    ligand_penalty = 0.0 if ligand == "L2" else 0.7
+    protocol_penalty = 0.0 if protocol == "replicate_qc" else 0.25
+    return ((temp - 64.0) / 9.0) ** 2 + ((hold - 3.5) / 1.8) ** 2 + ligand_penalty + protocol_penalty
+
+
+def _batch_effect_observed(p: dict) -> float:
+    temp = float(p["temp"])
+    hold = float(p["hold_h"])
+    ligand = str(p["ligand"])
+    protocol = str(p["screen_protocol"])
+    fast_bias = -1.1 if protocol == "fast_screen" else 0.0
+    ligand_bias = -0.25 if ligand == "L1" else 0.0
+    return ((temp - 82.0) / 12.0) ** 2 + ((hold - 1.2) / 1.4) ** 2 + fast_bias + ligand_bias
+
+
+def _batch_effect_eval(p: dict) -> ProblemEvaluation:
+    true_value = _batch_effect_true(p)
+    observed_value = _batch_effect_observed(p)
+    protocol = str(p["screen_protocol"])
+    return ProblemEvaluation(
+        raw_value=true_value,
+        observed_value=observed_value,
+        execution_success=True,
+        qc_passed=protocol == "replicate_qc",
+        failure_type=None if protocol == "replicate_qc" else "batch_effect",
+        metadata={
+            "screen_protocol": protocol,
+            "observed_bias": observed_value - true_value,
+        },
+        objective_values={
+            "corrected_objective": -true_value,
+            "batch_biased_objective": -observed_value,
+        },
+    )
+
+
+def _prior_warm_start(p: dict) -> float:
+    temp = float(p["temp"])
+    residence = float(p["residence_min"])
+    catalyst = str(p["catalyst"])
+    solvent = str(p["solvent"])
+    catalyst_penalty = {"cat_c": 0.0, "cat_b": 0.35, "cat_d": 0.8}.get(catalyst, 1.2)
+    solvent_penalty = 0.0 if solvent == "polar" else 0.45
+    return ((temp - 68.0) / 8.0) ** 2 + ((residence - 7.0) / 3.0) ** 2 + catalyst_penalty + solvent_penalty
+
+
+def _early_stage_report(
+    *,
+    mode: str,
+    risk_flags: list[str],
+    recommendations: list[dict[str, Any]],
+    **extra: Any,
+) -> dict[str, Any]:
+    report = {
+        "contract_version": "early_stage_system_characterization.v1",
+        "recommended_campaign_mode": mode,
+        "confidence": 0.9,
+        "risk_flags": risk_flags,
+        "diagnostic_recommendations": recommendations,
+    }
+    report.update(extra)
+    return report
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +539,340 @@ def _build_registry() -> dict[str, OptProblem]:
                 separable=False,
                 has_categorical=True,
                 surface_class="mixed",
+            ),
+        )
+    )
+
+    controllability_space = ParameterSpace(
+        dimensions=(
+            SearchDimension(
+                param_name="target_temp",
+                param_type="number",
+                min_value=58.0,
+                max_value=96.0,
+            ),
+            SearchDimension(
+                param_name="flow_rate",
+                param_type="number",
+                min_value=1.0,
+                max_value=9.0,
+            ),
+        ),
+        protocol_template={
+            "early_stage_report": _early_stage_report(
+                mode="controllability_mapping",
+                risk_flags=["poor_controllability", "target_reachability_low"],
+                recommendations=[
+                    {"action_type": "run_controllability_mapping", "priority": "high"},
+                    {"action_type": "validate_target_reachability", "priority": "high"},
+                ],
+                target_feasibility_summary=[
+                    {
+                        "parameter": "target_temp",
+                        "infeasible_target_min": 84.0,
+                        "infeasible_target_max": 96.0,
+                    }
+                ],
+                insights=["Actual temperature undershoots high target settings."],
+            )
+        },
+    )
+    problems.append(
+        OptProblem(
+            id="early_stage_controllability",
+            name="Early-stage target-vs-actual controllability",
+            space=controllability_space,
+            objective=_early_stage_controllability,
+            optimum=0.0,
+            optimum_x={"target_temp": 72.0, "flow_rate": 4.0},
+            tags=ProblemTags(
+                n_dims=2,
+                multimodal=False,
+                noise_std=0.0,
+                separable=False,
+                has_categorical=False,
+                surface_class="early_stage_controllability",
+            ),
+            evaluator=_early_stage_controllability_eval,
+        )
+    )
+
+    hardware_space = ParameterSpace(
+        dimensions=(
+            SearchDimension(
+                param_name="reactor_design",
+                param_type="categorical",
+                choices=("thin_wall", "thick_wall"),
+            ),
+            SearchDimension(
+                param_name="temp",
+                param_type="number",
+                min_value=55.0,
+                max_value=92.0,
+            ),
+            SearchDimension(
+                param_name="pressure",
+                param_type="number",
+                min_value=1.0,
+                max_value=6.0,
+            ),
+        ),
+        protocol_template={
+            "early_stage_report": _early_stage_report(
+                mode="hardware_feasibility_discovery",
+                risk_flags=["hardware_failures_dominate", "hardware_design_changed"],
+                recommendations=[
+                    {"action_type": "map_hardware_feasibility", "priority": "high"},
+                    {"action_type": "shrink_or_annotate_action_space", "priority": "high"},
+                ],
+                feasibility_summary={
+                    "danger_zones": [
+                        {
+                            "bounds": {
+                                "reactor_design": ["thin_wall"],
+                                "temp": [78.0, 92.0],
+                                "pressure": [4.0, 6.0],
+                            },
+                            "reason": "thin_wall timeout and leak region",
+                        }
+                    ]
+                },
+                hardware_summary={"worst_design_id": "thin_wall"},
+                insights=["Thin-wall hardware fails under high temp and pressure."],
+            )
+        },
+    )
+    problems.append(
+        OptProblem(
+            id="early_stage_hardware_zone",
+            name="Early-stage hardware infeasible zone",
+            space=hardware_space,
+            objective=_hardware_zone,
+            optimum=0.0,
+            optimum_x={"reactor_design": "thick_wall", "temp": 70.0, "pressure": 3.0},
+            tags=ProblemTags(
+                n_dims=3,
+                multimodal=True,
+                noise_std=0.0,
+                separable=False,
+                has_categorical=True,
+                surface_class="early_stage_hardware",
+            ),
+            evaluator=_hardware_zone_eval,
+        )
+    )
+
+    objective_space = ParameterSpace(
+        dimensions=(
+            SearchDimension(
+                param_name="additive",
+                param_type="categorical",
+                choices=("fast_yield", "stabilizer"),
+            ),
+            SearchDimension(
+                param_name="temp",
+                param_type="number",
+                min_value=45.0,
+                max_value=95.0,
+            ),
+            SearchDimension(
+                param_name="dwell_h",
+                param_type="number",
+                min_value=0.5,
+                max_value=8.0,
+            ),
+        ),
+        protocol_template={
+            "early_stage_report": _early_stage_report(
+                mode="objective_discovery",
+                risk_flags=["objective_missing", "low_confidence_objective_candidates"],
+                recommendations=[
+                    {"action_type": "run_objective_discovery", "priority": "high"}
+                ],
+                candidate_kpis=[
+                    {
+                        "name": "candidate_kpi_stability",
+                        "direction": "maximize",
+                        "confidence": 0.86,
+                    },
+                    {
+                        "name": "candidate_kpi_fast_yield",
+                        "direction": "maximize",
+                        "confidence": 0.42,
+                    },
+                ],
+                insights=["Fast yield is a misleading proxy for stability."],
+            )
+        },
+    )
+    problems.append(
+        OptProblem(
+            id="early_stage_objective_uncertainty",
+            name="Early-stage objective uncertainty",
+            space=objective_space,
+            objective=_objective_uncertain_true,
+            optimum=0.0,
+            optimum_x={"additive": "stabilizer", "temp": 62.0, "dwell_h": 5.0},
+            tags=ProblemTags(
+                n_dims=3,
+                multimodal=True,
+                noise_std=0.0,
+                separable=False,
+                has_categorical=True,
+                surface_class="early_stage_objective_uncertainty",
+            ),
+            evaluator=_objective_uncertain_eval,
+        )
+    )
+
+    batch_effect_space = ParameterSpace(
+        dimensions=(
+            SearchDimension(
+                param_name="screen_protocol",
+                param_type="categorical",
+                choices=("fast_screen", "replicate_qc"),
+            ),
+            SearchDimension(
+                param_name="ligand",
+                param_type="categorical",
+                choices=("L1", "L2", "L3"),
+            ),
+            SearchDimension(
+                param_name="temp",
+                param_type="number",
+                min_value=45.0,
+                max_value=90.0,
+            ),
+            SearchDimension(
+                param_name="hold_h",
+                param_type="number",
+                min_value=0.5,
+                max_value=6.0,
+            ),
+        ),
+        protocol_template={
+            "early_stage_report": _early_stage_report(
+                mode="data_quality_diagnostic",
+                risk_flags=["low_data_quality", "batch_effect_detected"],
+                recommendations=[
+                    {"action_type": "run_data_quality_diagnostic", "priority": "high"},
+                    {"action_type": "replicate_suspicious_hits", "priority": "high"},
+                ],
+                data_quality_summary={
+                    "preferred_levels": {
+                        "screen_protocol": "replicate_qc",
+                        "ligand": "L2",
+                    },
+                    "biased_protocol": "fast_screen",
+                },
+                insights=["Fast-screen observations are batch-biased and overstate yield."],
+            )
+        },
+    )
+    problems.append(
+        OptProblem(
+            id="early_stage_batch_effect",
+            name="Early-stage batch effect and data-quality drift",
+            space=batch_effect_space,
+            objective=_batch_effect_true,
+            optimum=0.0,
+            optimum_x={
+                "screen_protocol": "replicate_qc",
+                "ligand": "L2",
+                "temp": 64.0,
+                "hold_h": 3.5,
+            },
+            tags=ProblemTags(
+                n_dims=4,
+                multimodal=True,
+                noise_std=0.0,
+                separable=False,
+                has_categorical=True,
+                surface_class="early_stage_batch_effect",
+            ),
+            evaluator=_batch_effect_eval,
+        )
+    )
+
+    prior_space = ParameterSpace(
+        dimensions=(
+            SearchDimension(
+                param_name="catalyst",
+                param_type="categorical",
+                choices=("cat_a", "cat_b", "cat_c", "cat_d"),
+            ),
+            SearchDimension(
+                param_name="solvent",
+                param_type="categorical",
+                choices=("polar", "apolar"),
+            ),
+            SearchDimension(
+                param_name="temp",
+                param_type="number",
+                min_value=35.0,
+                max_value=95.0,
+            ),
+            SearchDimension(
+                param_name="residence_min",
+                param_type="number",
+                min_value=1.0,
+                max_value=20.0,
+            ),
+        ),
+        protocol_template={
+            "early_stage_report": _early_stage_report(
+                mode="optimization_ready",
+                risk_flags=["prior_case_similarity_high", "sparse_initial_data"],
+                recommendations=[
+                    {"action_type": "seed_from_prior_cases", "priority": "high"},
+                    {"action_type": "proceed_with_guarded_optimization", "priority": "medium"},
+                ],
+                prior_successful_regions=[
+                    {
+                        "params": {
+                            "catalyst": "cat_c",
+                            "solvent": "polar",
+                            "temp": 68.0,
+                            "residence_min": 7.0,
+                        },
+                        "source": "similar-literature-case",
+                        "confidence": 0.88,
+                    },
+                    {
+                        "params": {
+                            "catalyst": "cat_b",
+                            "solvent": "polar",
+                            "temp": 66.0,
+                            "residence_min": 8.5,
+                        },
+                        "source": "neighboring-substrate-case",
+                        "confidence": 0.72,
+                    },
+                ],
+                insights=["Similar prior cases suggest a narrow productive region."],
+            )
+        },
+    )
+    problems.append(
+        OptProblem(
+            id="early_stage_prior_warm_start",
+            name="Early-stage prior-case warm start",
+            space=prior_space,
+            objective=_prior_warm_start,
+            optimum=0.0,
+            optimum_x={
+                "catalyst": "cat_c",
+                "solvent": "polar",
+                "temp": 68.0,
+                "residence_min": 7.0,
+            },
+            tags=ProblemTags(
+                n_dims=4,
+                multimodal=True,
+                noise_std=0.0,
+                separable=False,
+                has_categorical=True,
+                surface_class="early_stage_prior_warm_start",
             ),
         )
     )

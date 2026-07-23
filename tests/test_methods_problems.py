@@ -33,6 +33,11 @@ def test_registry_non_empty():
         ("ackley_5d", 0.0, 1e-9),
         ("rosenbrock_2d", 0.0, 1e-9),
         ("rastrigin_2d", 0.0, 1e-9),
+        ("early_stage_controllability", 0.0, 1e-9),
+        ("early_stage_hardware_zone", 0.0, 1e-9),
+        ("early_stage_objective_uncertainty", 0.0, 1e-9),
+        ("early_stage_batch_effect", 0.0, 1e-9),
+        ("early_stage_prior_warm_start", 0.0, 1e-9),
     ],
 )
 def test_objective_at_optimum_equals_known_value(problem_id, expected, tol):
@@ -43,6 +48,52 @@ def test_objective_at_optimum_equals_known_value(problem_id, expected, tol):
         f"{problem_id}: f(optimum_x)={value} != {expected}"
     )
     assert math.isclose(p.optimum, expected, abs_tol=tol)
+
+
+def test_early_stage_reports_are_attached_to_problem_spaces():
+    for problem_id in (
+        "early_stage_controllability",
+        "early_stage_hardware_zone",
+        "early_stage_objective_uncertainty",
+        "early_stage_batch_effect",
+        "early_stage_prior_warm_start",
+    ):
+        p = get_problem(problem_id)
+        report = p.space.protocol_template.get("early_stage_report")
+        assert report["contract_version"] == "early_stage_system_characterization.v1"
+        assert report["risk_flags"]
+        assert report["diagnostic_recommendations"]
+
+
+def test_objective_uncertainty_exposes_misleading_observed_proxy():
+    p = get_problem("early_stage_objective_uncertainty")
+    misleading_proxy = p.evaluate(
+        {"additive": "fast_yield", "temp": 86.0, "dwell_h": 1.2}
+    )
+    true_optimum = p.evaluate(p.optimum_x)
+
+    assert true_optimum.raw_value == 0.0
+    assert misleading_proxy.raw_value > true_optimum.raw_value
+    assert misleading_proxy.optimizer_value < true_optimum.optimizer_value
+    assert "candidate_kpi_stability" in misleading_proxy.observation_objectives()
+
+
+def test_batch_effect_exposes_biased_observed_objective_and_correction():
+    p = get_problem("early_stage_batch_effect")
+    biased = p.evaluate(
+        {
+            "screen_protocol": "fast_screen",
+            "ligand": "L1",
+            "temp": 82.0,
+            "hold_h": 1.2,
+        }
+    )
+    optimum = p.evaluate(p.optimum_x)
+
+    assert optimum.raw_value == 0.0
+    assert biased.optimizer_value < optimum.optimizer_value
+    assert biased.raw_value > optimum.raw_value
+    assert "corrected_objective" in biased.observation_objectives()
 
 
 def test_optimum_x_keys_match_space_dimensions():

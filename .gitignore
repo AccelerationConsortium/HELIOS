@@ -55,6 +55,9 @@ tests/**/__pycache__/
 # Node modules
 node_modules/
 
+# Benchmark run artifacts (studies are reproducible from tracked configs)
+/benchmark_results/
+
 # Runtime logs
 logs/
 *.log
