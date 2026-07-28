@@ -14,14 +14,12 @@ the study continues with the other cells (one bad method never kills the run).
 from __future__ import annotations
 
 import logging
-import random
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.services.candidate_gen import ParameterSpace, sample_random
 from app.services.optimization_backends import Observation, get_backend
-
 from benchmarks.methods.problems import OptProblem
 
 logger = logging.getLogger(__name__)
@@ -43,13 +41,15 @@ class RunTrace:
     seed: int
     best_so_far: list[float] = field(default_factory=list)
     evals: list[int] = field(default_factory=list)
+    backend_history: list[str] = field(default_factory=list)
+    evaluation_history: list[dict[str, Any]] = field(default_factory=list)
     wall_s: float = 0.0
     error: str | None = None
 
 
-def _evaluate(problem: OptProblem, params: dict[str, Any]) -> float:
+def _evaluate(problem: OptProblem, params: dict[str, Any]):
     """Evaluate the raw (minimization) objective at ``params``."""
-    return float(problem.objective(params))
+    return problem.evaluate(params)
 
 
 def run_cell(
@@ -66,23 +66,46 @@ def run_cell(
     best_so_far: list[float] = []
     evals: list[int] = []
     observations: list[Observation] = []
+    backend_history: list[str] = []
+    evaluation_history: list[dict[str, Any]] = []
     best: float | None = None
     t0 = time.perf_counter()
 
     def _record(params: dict[str, Any]) -> None:
         nonlocal best
-        f = _evaluate(problem, params)
+        evaluation = _evaluate(problem, params)
+        f = float(evaluation.raw_value)
         best = f if best is None else min(best, f)
         best_so_far.append(best)
         evals.append(len(best_so_far))
-        # Backends maximize -> store the negated value.
-        observations.append(Observation(params=dict(params), objective=-f))
+        # Backends maximize. Early-stage problems may expose an imperfect
+        # observed/proxy value while true regret still uses raw_value.
+        observations.append(
+            Observation(
+                params=dict(params),
+                objective=-float(evaluation.optimizer_value),
+                objectives=evaluation.observation_objectives(),
+            )
+        )
+        evaluation_history.append(
+            {
+                "params": dict(params),
+                "raw_value": f,
+                "observed_value": float(evaluation.optimizer_value),
+                "execution_success": evaluation.execution_success,
+                "qc_passed": evaluation.qc_passed,
+                "failure_type": evaluation.failure_type,
+                "metadata": dict(evaluation.metadata),
+            }
+        )
 
     try:
         # 1. Initial random design.
         n_first = min(n_init, budget)
         for params in sample_random(space, n_first, seed=seed):
             _record(params)
+        if n_first:
+            backend_history.append("initial_random")
 
         # 2. Optimizer loop.
         backend = get_backend(backend_name)
@@ -92,6 +115,9 @@ def run_cell(
             take = min(batch, budget - len(best_so_far))
             candidates = backend.suggest(
                 space, take, observations, seed=round_seed
+            )
+            backend_history.append(
+                str(getattr(backend, "last_selected_backend", backend_name))
             )
             if not candidates:
                 logger.warning(
@@ -114,6 +140,8 @@ def run_cell(
             seed=seed,
             best_so_far=best_so_far,
             evals=evals,
+            backend_history=backend_history,
+            evaluation_history=evaluation_history,
             wall_s=time.perf_counter() - t0,
             error=f"{type(exc).__name__}: {exc}",
         )
@@ -124,6 +152,8 @@ def run_cell(
         seed=seed,
         best_so_far=best_so_far,
         evals=evals,
+        backend_history=backend_history,
+        evaluation_history=evaluation_history,
         wall_s=time.perf_counter() - t0,
     )
 

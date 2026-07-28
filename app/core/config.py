@@ -15,6 +15,30 @@ class Settings:
         self.object_store_dir = Path(
             os.getenv("OBJECT_STORE_DIR", str(self.data_dir / "object_store"))
         )
+        # Human-readable scientific provenance. Markdown projection is enabled
+        # by default because it is reporting-only and never changes live routes.
+        # Git history is separately opt-in and always campaign-local.
+        self.scientific_ledger_root = Path(
+            os.getenv(
+                "SCIENTIFIC_LEDGER_ROOT",
+                str(self.data_dir / "scientific_ledger"),
+            )
+        )
+        self.scientific_ledger_enabled: bool = os.getenv(
+            "SCIENTIFIC_LEDGER_ENABLED", "true"
+        ).lower() in ("true", "1", "yes")
+        self.scientific_ledger_git_enabled: bool = os.getenv(
+            "SCIENTIFIC_LEDGER_GIT_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+        self.scientific_ledger_git_auto_init: bool = os.getenv(
+            "SCIENTIFIC_LEDGER_GIT_AUTO_INIT", "true"
+        ).lower() in ("true", "1", "yes")
+        self.scientific_ledger_git_author_name: str = os.getenv(
+            "SCIENTIFIC_LEDGER_GIT_AUTHOR_NAME", "HELIOS Scientific Ledger"
+        )
+        self.scientific_ledger_git_author_email: str = os.getenv(
+            "SCIENTIFIC_LEDGER_GIT_AUTHOR_EMAIL", "helios-ledger@localhost"
+        )
         self.scheduler_poll_seconds = float(os.getenv("SCHEDULER_POLL_SECONDS", "2"))
         # Upper bound on concurrently-executing worker threads. Defaults to the
         # CPU count clamped to [2, 8] so a busy queue cannot spawn unbounded
@@ -92,12 +116,36 @@ class Settings:
         self.nexus_advisor_enabled: bool = os.getenv(
             "NEXUS_ADVISOR_ENABLED", "false"
         ).lower() in ("true", "1", "yes")
+        self.nexus_url: str = self._normalize_nexus_api_url(
+            os.getenv("NEXUS_URL", "http://localhost:8000/api")
+        )
+        self.nexus_timeout_seconds: float = float(os.getenv("NEXUS_TIMEOUT_SECONDS", "10"))
+        self.nexus_api_key: str = os.getenv("NEXUS_API_KEY", "")
+
+        # Nexus supplies advisory evidence for cross-route characterization.
+        # Calling the endpoint and applying a route are intentionally separate
+        # gates so operators can run a shadow campaign before promoting it.
+        self.nexus_experimental_routes_enabled: bool = os.getenv(
+            "NEXUS_EXPERIMENTAL_ROUTES_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+        self.experimental_route_authority_enabled: bool = os.getenv(
+            "EXPERIMENTAL_ROUTE_AUTHORITY_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
 
         # ---- Contextual SDL decision layer ----
         # Shadow-only by default. When enabled, orchestrator records contextual
         # decision traces but never changes the live campaign route.
         self.contextual_decision_shadow_enabled: bool = os.getenv(
             "CONTEXTUAL_DECISION_SHADOW_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+
+        # ---- Campaign decision authority ----
+        # Explicit promotion gate for the contextual decision layer.  Off by
+        # default: existing live routing stays unchanged.  When enabled, the
+        # orchestrator consumes non-candidate campaign decisions before candidate
+        # generation and records the action as auditable state.
+        self.campaign_decision_authority_enabled: bool = os.getenv(
+            "CAMPAIGN_DECISION_AUTHORITY_ENABLED", "false"
         ).lower() in ("true", "1", "yes")
 
         # ---- Adaptive campaign substrate (Phase 1-5) shadow logging ----
@@ -126,6 +174,11 @@ class Settings:
                 continue
             values.add(int(value))
         return values
+
+    @staticmethod
+    def _normalize_nexus_api_url(raw: str) -> str:
+        value = raw.rstrip("/")
+        return value if value.endswith("/api") else f"{value}/api"
 
 
 @lru_cache(maxsize=1)

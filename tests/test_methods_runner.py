@@ -14,6 +14,7 @@ def test_run_cell_well_formed():
     assert trace.error is None
     assert len(trace.best_so_far) == 8
     assert trace.evals == list(range(1, 9))
+    assert len(trace.evaluation_history) == 8
     assert trace.wall_s >= 0.0
 
 
@@ -47,3 +48,14 @@ def test_run_study_isolates_bad_backend():
     traces = run_study(problems, ["definitely_not_a_backend"], [0], budget=4)
     assert len(traces) == 1
     assert traces[0].error is not None
+
+
+def test_runner_records_early_stage_evaluation_metadata():
+    problem = get_problem("early_stage_controllability")
+    trace = run_cell(problem, "random_sampling", seed=3, budget=8)
+
+    assert trace.error is None
+    assert len(trace.evaluation_history) == 8
+    assert all("execution_success" in row for row in trace.evaluation_history)
+    assert all("observed_value" in row for row in trace.evaluation_history)
+    assert any("actual_temp" in row["metadata"] for row in trace.evaluation_history)

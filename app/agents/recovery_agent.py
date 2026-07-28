@@ -77,7 +77,7 @@ class RecoveryInput(BaseModel):
     stage: str | None = None
     retry_count: int = 0
     safety_packet: dict[str, Any] | None = None
-    episode: "RecoveryEpisode | None" = None
+    episode: RecoveryEpisode | None = None
     last_attempt_result: dict[str, Any] | None = None
 
 

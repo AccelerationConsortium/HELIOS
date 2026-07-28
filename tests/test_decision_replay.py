@@ -51,6 +51,8 @@ def _accounting(
     objective_delta: float | None = None,
     proxy_gap_delta: float | None = None,
     validation_success: bool | None = None,
+    recovery_attempted: bool = False,
+    recovery_success: bool | None = None,
     context_request_fulfilled: bool | None = None,
     human_override: bool | None = None,
 ):
@@ -69,6 +71,8 @@ def _accounting(
         objective_delta=objective_delta,
         proxy_gap_delta=proxy_gap_delta,
         validation_success=validation_success,
+        recovery_attempted=recovery_attempted,
+        recovery_success=recovery_success,
         context_request_fulfilled=context_request_fulfilled,
         human_override=human_override,
     )
@@ -164,6 +168,8 @@ def test_component_averages():
                 objective_delta=0.5,
                 proxy_gap_delta=-0.2,
                 validation_success=True,
+                recovery_attempted=True,
+                recovery_success=True,
                 context_request_fulfilled=True,
             ),
             _accounting(
@@ -173,6 +179,8 @@ def test_component_averages():
                 objective_delta=-0.5,
                 proxy_gap_delta=0.2,
                 validation_success=False,
+                recovery_attempted=True,
+                recovery_success=False,
                 context_request_fulfilled=False,
             ),
         ],
@@ -184,7 +192,9 @@ def test_component_averages():
     assert summary.average_objective_reward == 0.0
     assert summary.average_proxy_gap_reward == 0.0
     assert summary.average_validation_reward == 0.0
+    assert summary.average_recovery_reward == 0.0
     assert summary.average_context_reward == 0.05
+    assert summary.recovery_success_rate == 0.5
 
 
 def test_optional_rates_ignore_none():

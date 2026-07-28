@@ -7,6 +7,7 @@ data/orchestrator.db
 data/orchestrator.db-shm
 data/orchestrator.db-wal
 data/object_store/
+data/scientific_ledger/
 .env
 
 # macOS
@@ -36,6 +37,7 @@ docs/*
 !docs/adaptive_campaign_substrate.md
 !docs/development_progress.md
 !docs/agent_architecture.md
+!docs/scientific_decision_ledger.md
 !docs/plans/
 docs/plans/*
 !docs/plans/2026-07-06-helios-experiment-planner-and-hybrid-switching-plan.md
@@ -58,6 +60,9 @@ tests/**/__pycache__/
 
 # Node modules
 node_modules/
+
+# Benchmark run artifacts (studies are reproducible from tracked configs)
+/benchmark_results/
 
 # Runtime logs
 logs/

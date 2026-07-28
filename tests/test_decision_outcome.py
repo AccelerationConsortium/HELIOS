@@ -83,6 +83,19 @@ def test_failure_count_penalty():
     assert reward.failure_penalty == -0.3
 
 
+def test_recovery_is_verifiable_and_rewarded():
+    outcome = build_campaign_decision_outcome(
+        trace=_trace(),
+        recovery_attempted=True,
+        recovery_success=True,
+    )
+    reward = calculate_campaign_decision_reward(outcome)
+    assert reward.recovery_reward == 0.1
+    recovery = next(item for item in reward.verifications if item.name == "recovery")
+    assert recovery.passed is True
+    assert recovery.score == 0.1
+
+
 def test_proxy_gap_delta_semantics():
     improved = calculate_campaign_decision_reward(
         build_campaign_decision_outcome(trace=_trace(), proxy_gap_delta=-0.5)

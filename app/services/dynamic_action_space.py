@@ -324,6 +324,74 @@ def _label_for_mode(
             f"Action '{action.name}' may proceed while awaiting human observation."
         )
 
+    if mode == CampaignMode.OBJECTIVE_DISCOVERY:
+        if kind in {"objective_discovery", "kpi_discovery", "diagnostic"}:
+            return ActionShadowLabel.PREFERRED, (
+                f"Objective-discovery mode prefers action '{action.name}'."
+            )
+        if kind in {"optimization", "experiment"}:
+            return ActionShadowLabel.RISKY, (
+                f"Objective-discovery mode holds '{kind}' action '{action.name}' "
+                "until the campaign objective is clarified."
+            )
+        return ActionShadowLabel.NEUTRAL, (
+            f"Action '{action.name}' does not clarify the campaign objective."
+        )
+
+    if mode == CampaignMode.CONTROLLABILITY_MAPPING:
+        if kind in {"controllability_mapping", "control_probe", "calibration", "diagnostic"}:
+            return ActionShadowLabel.PREFERRED, (
+                f"Controllability-mapping mode prefers action '{action.name}'."
+            )
+        if kind == "optimization":
+            return ActionShadowLabel.RISKY, (
+                f"Controllability-mapping mode gates optimization action '{action.name}'."
+            )
+        return ActionShadowLabel.NEUTRAL, (
+            f"Action '{action.name}' does not map target-vs-actual control."
+        )
+
+    if mode == CampaignMode.HARDWARE_FEASIBILITY_DISCOVERY:
+        if kind in {"hardware_feasibility", "feasibility_mapping", "diagnostic"}:
+            return ActionShadowLabel.PREFERRED, (
+                f"Hardware-feasibility mode prefers action '{action.name}'."
+            )
+        if kind in {"optimization", "experiment"} and touches_implicated:
+            return ActionShadowLabel.RISKY, (
+                f"Action '{action.name}' touches implicated hardware before "
+                "feasibility is mapped."
+            )
+        return ActionShadowLabel.NEUTRAL, (
+            f"Action '{action.name}' does not map hardware feasibility."
+        )
+
+    if mode == CampaignMode.DATA_QUALITY_DIAGNOSTIC:
+        if kind in {"data_quality_diagnostic", "replicate", "sensor_qc", "diagnostic"}:
+            return ActionShadowLabel.PREFERRED, (
+                f"Data-quality diagnostic mode prefers action '{action.name}'."
+            )
+        if kind == "optimization":
+            return ActionShadowLabel.RISKY, (
+                f"Data-quality diagnostic mode gates optimization action '{action.name}'."
+            )
+        return ActionShadowLabel.NEUTRAL, (
+            f"Action '{action.name}' does not diagnose data quality."
+        )
+
+    if mode == CampaignMode.EARLY_STAGE_SYSTEM_CHARACTERIZATION:
+        if kind in {"diagnostic", "characterization", "replicate", "control_probe"}:
+            return ActionShadowLabel.PREFERRED, (
+                f"Early-stage characterization mode prefers action '{action.name}'."
+            )
+        if kind == "optimization":
+            return ActionShadowLabel.RISKY, (
+                f"Early-stage characterization mode delays optimization action "
+                f"'{action.name}'."
+            )
+        return ActionShadowLabel.NEUTRAL, (
+            f"Action '{action.name}' is neutral for early-stage characterization."
+        )
+
     # Default: BO_OPTIMIZATION.
     if kind in {"experiment", "optimization"}:
         floor = _SAFETY_RISK_FLOOR.get((action.safety_class or "").lower(), 0.0)

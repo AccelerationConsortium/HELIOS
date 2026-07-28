@@ -23,17 +23,32 @@ Legend: **not started** · **partial** (some infra exists, not wired/proven).
   and future scale/fidelity decisions. The shipped core includes the
   (`CampaignIntent` + `OptimizationMode`) taxonomy, phase posterior,
   evidence-based scoring, safety gates, Nexus optimization-intelligence
-  evidence, backend recommendations, and replay/validation accounting. See
-  README -> Architecture.
+  evidence, backend recommendations, replay/validation accounting, and a
+  default-off live authority gate (`CAMPAIGN_DECISION_AUTHORITY_ENABLED`) that
+  can defer candidate generation for validation/recovery/context/objective/
+  constraint actions while persisting the requested state update. See README ->
+  Architecture.
 - **Nexus/local candidate arbitration** — provider facade, Nexus backend
   adapters, multi-source candidate-pool builder, hard-gated decision policy,
   scored arbitration portfolio, provenance logging, and the
   `ENABLE_CANDIDATE_ARBITRATION` loop seam. Nexus remains advisory/backend
   input; HELIOS retains campaign decision authority.
+- **Experimental-node active learning** — Nexus advisory route-evidence client,
+  HELIOS-owned route scoring and capability/safety/budget/approval gates,
+  default-off live authority, per-node parameter/protocol execution mapping,
+  route-labelled observations, campaign-context checkpoints, replayable
+  Scientific Decision Ledger metadata, and a live cross-repository contract
+  test against Nexus `/api/experimental-routes/analyze`.
 - **Context / memory / logging** — campaign context, objective stack + proxy
   gap, typed failure taxonomy (`failure_signatures`), backend performance memory
   + `ContextualStrategyBandit`, candidate-pool memory (recall), cross-campaign
   failure-zone memory, decision trace / evidence / outcome / reward / replay.
+- **Scientific Decision Ledger** — live Pending -> Outcome -> Reward Decision
+  Cards; deterministic/redacted Markdown projections for objective,
+  observations, strategy, evidence, failure, recovery, and summary; policy and
+  Nexus version snapshots; exact-text scientific-memory retrieval; typed RLVR
+  JSONL export; and optional per-campaign local Git history that never pushes.
+  See [scientific_decision_ledger.md](scientific_decision_ledger.md).
 - **Loop / goal harness primitives (pure service layer)** —
   `loop_engineering` records observe-decide-act-evaluate iterations, reward, and
   replay summaries; `goal_harness` adds persistent goal state, normalized
@@ -41,8 +56,11 @@ Legend: **not started** · **partial** (some infra exists, not wired/proven).
   human blockers, and bad-path kill records. These layers are side-effect-free:
   they do not call PUDA, write DB state, execute tools, or promote policies.
 
-Everything shipped is read-only / fail-open / shadow or approval-gated and does
-not change live candidate selection by default.
+By default, shipped campaign-decision features are read-only / fail-open /
+shadow or approval-gated and do not change live candidate selection. The
+explicit live authority flag promotes selected campaign decisions into bounded
+pre-candidate routing, but still does not execute hardware or auto-apply
+objective/space changes.
 
 ---
 
@@ -55,8 +73,8 @@ not change live candidate selection by default.
 | B3 | **OperationalAbstractionLearner** (Phase 6) — promote repeated successful action sequences to reusable ops (proposal-only) | v3 §8 | not started | Explicitly deferred until several real shadow logs are reviewed |
 | B4 | **Campaign-level memory beyond candidate/failure** — objective patterns, strategy-success-by-phase, hypothesis-resolution patterns, useful context queries, per-instrument reliability | v3 §9 | not started | Higher tier than failure-zone memory |
 | B5 | **StrategyClass scientific-action dimension** on the selector (PARAMETER_OPTIMIZATION / HYPOTHESIS_DISCRIMINATION / CALIBRATION / …) | v3 §10 | partial | `OptimizationMode`/`CampaignIntent` exist but not this explicit class |
-| B6 | **Objective staging / fidelity escalation + ObjectiveManager** — proxy → mechanism → functional → deployment ladder, staged scoring, objective versioning wired into selection | data_layer §4; enh L7 | partial | `ObjectiveStack`/`ObjectiveState`/proxy_gap exist; staging/escalation and `objective_transitions` consumption not wired |
-| B7 | **Parameter-space / synthesis-route revision as first-class** — `SpaceRevision`, `ParameterSpacePolicy`, route switching | enh L14; v3-adjacent | partial | `revise_space` intent + `space_revision` records exist but not consumed |
+| B6 | **Objective staging / fidelity escalation + ObjectiveManager** — proxy → mechanism → functional → deployment ladder, staged scoring, objective versioning wired into selection | data_layer §4; enh L7 | partial | `ObjectiveStack`/`ObjectiveState`/proxy_gap exist; authority gate can persist objective-transition requests, but staged ObjectiveManager execution is not wired |
+| B7 | **Parameter-space / synthesis-route revision as first-class** — `SpaceRevision`, `ParameterSpacePolicy`, route switching | enh L14; v3-adjacent | partial | `revise_space` intent + `space_revision` records exist and authority gate can persist constraint/space requests; no route-switch/space-policy executor yet |
 
 ---
 
@@ -139,7 +157,7 @@ guardrailed and incomplete by design.
 | G2 | **Unified perception layer** — normalize PUDA responses, API feedback, logs, artifacts, images, QC signals, and human notes into one observation stream | partial | `ObservationEnvelope` exists; no live adapters yet for PUDA telemetry, vision, SSE logs, or analyzer outputs |
 | G3 | **Agent-facing tool registry** — typed tools with capability, schema, risk, timeout, permissions, rollback, and output observation contract | partial | `ToolDescriptor` exists in the harness; it is not connected to primitives registry, PUDA backend, MCP tools, or hardware adapters |
 | G4 | **Action executor bridge** — route proposed `ToolAction` through approval, safety, PUDA/run creation, execution, and returned observations | not started | Must stay separate from the pure harness; live hardware requires human/governance gates |
-| G5 | **Campaign-level multi-step correction** — kill bad optimization paths, revise strategy, request calibration, switch backend, or narrow/expand parameter space | partial | Harness can record bad-path kills; no campaign-loop consumer yet excludes killed paths from future candidate/proposal generation |
+| G5 | **Campaign-level multi-step correction** — kill bad optimization paths, revise strategy, request calibration, switch backend, or narrow/expand parameter space | partial | Authority gate can defer a round and persist validation/recovery/context/objective/constraint requests; no campaign-loop consumer yet excludes killed paths from future candidate/proposal generation |
 | G6 | **Agent notebook / reflection memory** — structured notes for failed paths, disproven hypotheses, unreliable tools, human overrides, and future constraints | partial | `ReflectionNote` exists; notes are not persisted into semantic/procedural memory or forced into next-round context |
 | G7 | **Live self-optimization promotion** — learned policy moves from replay/shadow/canary into bounded live influence after evidence thresholds | not started | Existing learned-policy path remains conservative; no automatic live promotion without explicit approval workflow |
 | G8 | **Long-running daemon / scheduler integration** — wake on external events, resume after restart, wait for PUDA or human, and continue the goal | not started | Existing durable run/campaign pieces exist, but no single autonomous goal daemon owns the full lifecycle |

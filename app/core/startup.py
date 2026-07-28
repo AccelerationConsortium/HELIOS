@@ -107,10 +107,16 @@ def check_data_directories() -> CheckResult:
     settings = get_settings()
     issues: list[str] = []
 
-    for label, dirpath in [
+    directories = [
         ("data_dir", settings.data_dir),
         ("object_store_dir", settings.object_store_dir),
-    ]:
+    ]
+    if settings.scientific_ledger_enabled:
+        directories.append(
+            ("scientific_ledger_root", settings.scientific_ledger_root)
+        )
+
+    for label, dirpath in directories:
         try:
             dirpath.mkdir(parents=True, exist_ok=True)
             # Verify write access via a temp file
@@ -136,6 +142,11 @@ def check_data_directories() -> CheckResult:
         details={
             "data_dir": str(settings.data_dir),
             "object_store_dir": str(settings.object_store_dir),
+            **(
+                {"scientific_ledger_root": str(settings.scientific_ledger_root)}
+                if settings.scientific_ledger_enabled
+                else {}
+            ),
         },
     )
 

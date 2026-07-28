@@ -122,7 +122,7 @@ def recommend(
     for key, bucket_scores in sorted(by_bucket.items()):
         agg = _aggregate_by_backend(bucket_scores)
 
-        def _finite(metric: str) -> list[float]:
+        def _finite(metric: str, agg=agg) -> list[float]:
             return [m[metric] for m in agg.values() if m[metric] != float("inf")]
 
         # Per-bucket normalization ranges (ignore inf for the range).

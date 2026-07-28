@@ -25,7 +25,7 @@ def test_campaign_new_fields_present_with_defaults():
     assert reward.verifications  # non-empty
     assert {v.name for v in reward.verifications} == {
         "execution", "failure", "safety", "objective", "proxy_gap",
-        "validation", "context",
+        "validation", "recovery", "context",
     }
 
 

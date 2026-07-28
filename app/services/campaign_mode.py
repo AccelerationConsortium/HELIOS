@@ -53,6 +53,11 @@ class CampaignMode(StrEnum):
     """Scientific-activity mode proposed for the next round."""
 
     BO_OPTIMIZATION = "bo_optimization"
+    EARLY_STAGE_SYSTEM_CHARACTERIZATION = "early_stage_system_characterization"
+    HARDWARE_FEASIBILITY_DISCOVERY = "hardware_feasibility_discovery"
+    CONTROLLABILITY_MAPPING = "controllability_mapping"
+    DATA_QUALITY_DIAGNOSTIC = "data_quality_diagnostic"
+    OBJECTIVE_DISCOVERY = "objective_discovery"
     VALIDATION = "validation"
     CALIBRATION = "calibration"
     FAILURE_DIAGNOSIS = "failure_diagnosis"

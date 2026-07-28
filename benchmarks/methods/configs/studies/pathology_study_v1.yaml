@@ -1,0 +1,116 @@
+# Canonical pathology study v1 -- the preregistered problem tiers, pathology
+# set, ablation contrasts, and comparison families for the evaluation layer.
+#
+# Run:  python -m benchmarks.methods pathology-study \
+#           --study-config benchmarks/methods/configs/studies/pathology_study_v1.yaml
+#
+# Pairing note: comparisons are seed-paired within (problem, pathology bundle);
+# the pathology RNG seed derives deterministically from (bundle_id, cell_seed),
+# so every config faces the identical corruption sequence in a paired cell.
+#
+# Ablation variants are the mechanisms actually wired in the helios_full
+# benchmark backend (honest knobs only) -- drift-monitor / backend-memory
+# knobs are NOT claimed because the benchmark backend does not wire them.
+schema_version: 1
+study_name: pathology-study-v1
+description: >
+  Preregistered pathology/ablation study: negative-control clean problems,
+  early-stage problems (observation correction + constraint controller
+  engage), and high-dim/multimodal problems (strategy selection is not
+  overridden by clean-low-dim routing), each crossed with stationary and
+  non-stationary experimental conditions.
+
+problem_groups:
+  clean_low_dim:
+    # Negative control: _is_clean_low_dim_bo_space routes helios_full to GP;
+    # expectation is HELIOS ~= gp_backend, no framework-conferred advantage.
+    - sphere_2d
+    - branin
+    - rosenbrock_2d
+  high_dim:
+    # Strategy selection / portfolio behavior is live here.
+    - hartmann6
+    - ackley_5d
+    - rastrigin_2d
+    - mixed_categorical
+  early_stage:
+    # Observation correction and the constraint controller engage here.
+    - early_stage_controllability
+    - early_stage_hardware_zone
+    - early_stage_objective_uncertainty
+    - early_stage_batch_effect
+    - early_stage_prior_warm_start
+
+pathologies:
+  - id: clean
+    specs: []
+  - id: exec_failure
+    specs:
+      - type: spatial_failure
+        params:
+          center: {x1: 0.35, x2: 0.65}
+          radius: 0.3
+          p_max: 0.85
+          p_base: 0.05
+          observed_penalty: 8.0
+  - id: proxy_shift
+    specs:
+      - type: proxy_gap_shift
+        params: {shift_eval: 12, bias: 4.0, scale: 1.0}
+  - id: objective_shift
+    # Epoch-local / dynamic regret rulers apply to this bundle.
+    specs:
+      - type: objective_shift
+        params:
+          shift_eval: 12
+          delta: {x1: 0.15}
+  - id: noise_drift
+    specs:
+      - type: noise_drift
+        params: {start_eval: 8, rate: 0.25, mode: linear}
+  - id: censoring
+    specs:
+      - type: censoring
+        params: {lod: 1.5}
+
+configs:
+  - gp_backend
+  - lhs
+  - helios_full
+  - helios_full/no-strategy
+  - helios_full/no-failure-memory
+  - helios_full/no-observation-correction
+  - helios_full/no-constraint-controller
+
+seeds: "0..19"
+budget: 30
+reference: helios_full
+
+# Holm correction is applied within each family, not across the full pool.
+# decision_quality is an intermediate mechanism metric (event-appropriate
+# logged responses); regret / recovery / lag / latency are the outcome
+# metrics that close the loop on mechanism value.
+comparison_families:
+  common_performance:
+    methods: [gp_backend, lhs]
+    metrics: [final_regret, regret_auc, evals_to_target]
+  failure_mechanism:
+    pathologies: [exec_failure]
+    contrasts:
+      - [helios_full, helios_full/no-failure-memory]
+      - [helios_full, helios_full/no-constraint-controller]
+    metrics: [recovery_efficiency, constraint_adaptation, regret_auc]
+  drift_mechanism:
+    pathologies: [proxy_shift, objective_shift, noise_drift, censoring]
+    contrasts:
+      - [helios_full, helios_full/no-strategy]
+      - [helios_full, helios_full/no-observation-correction]
+    metrics: [adaptation_lag, dynamic_regret_auc, final_epoch_regret]
+  helios_decisions:
+    methods:
+      - helios_full
+      - helios_full/no-strategy
+      - helios_full/no-failure-memory
+      - helios_full/no-observation-correction
+      - helios_full/no-constraint-controller
+    metrics: [decision_quality]

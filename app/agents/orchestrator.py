@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -30,6 +31,10 @@ from app.services.adaptive_substrate_inputs import (
     failure_attribution_from_events,
     objective_state_from_input,
 )
+from app.services.campaign_decision_authority import (
+    CampaignAuthorityVerdict,
+    evaluate_campaign_decision_authority,
+)
 from app.services.decision_layer import CampaignDecisionLayer
 from app.services.decision_trace import CampaignDecisionTraceBuilder
 from app.services.primitives_registry import get_registry
@@ -41,6 +46,23 @@ logger = logging.getLogger(__name__)
 #: each round, to bound shadow-log payload size. Instrument-less actions
 #: (report / informational / diagnostic) are always retained.
 _ADAPTIVE_SUBSTRATE_ACTION_CAP = 24
+
+
+class RecoveryExecutionError(RuntimeError):
+    """Terminal recovery outcome carrying its audit episode across layers."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        episode: dict[str, Any] | None = None,
+        failure_type: str = "recovery_abort",
+        chemical_safety: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.episode = dict(episode or {})
+        self.failure_type = failure_type
+        self.chemical_safety = chemical_safety
 
 
 def _maybe_record_contextual_shadow_decision(
@@ -66,7 +88,13 @@ def _maybe_record_contextual_shadow_decision(
 ) -> Any | None:
     """Record a contextual decision trace without affecting live routing."""
     try:
-        if not get_settings().contextual_decision_shadow_enabled:
+        settings = get_settings()
+        shadow_enabled = getattr(settings, "contextual_decision_shadow_enabled", False)
+        ledger_enabled = getattr(settings, "scientific_ledger_enabled", False)
+        authority_enabled = getattr(
+            settings, "campaign_decision_authority_enabled", False
+        )
+        if not shadow_enabled and not ledger_enabled and not authority_enabled:
             return None
 
         context = build_campaign_round_context(
@@ -95,10 +123,11 @@ def _maybe_record_contextual_shadow_decision(
             actual_action=actual_action or "propose_candidates",
             metadata=metadata,
         )
-        logger.info(
-            "contextual_shadow_decision_trace %s",
-            json.dumps(trace.model_dump(mode="json"), sort_keys=True),
-        )
+        if shadow_enabled:
+            logger.info(
+                "contextual_shadow_decision_trace %s",
+                json.dumps(trace.model_dump(mode="json"), sort_keys=True),
+            )
         return trace
     except Exception:
         logger.warning(
@@ -106,6 +135,284 @@ def _maybe_record_contextual_shadow_decision(
             exc_info=True,
         )
         return None
+
+
+def _maybe_record_pending_scientific_decision(
+    trace: Any | None,
+    *,
+    campaign_metadata: dict[str, Any] | None = None,
+    policy_snapshot: dict[str, Any] | None = None,
+) -> Any | None:
+    """Best-effort pre-execution Decision Card projection."""
+    if trace is None:
+        return None
+    try:
+        from app.services.scientific_ledger_runtime import (
+            record_pending_scientific_decision,
+        )
+
+        return record_pending_scientific_decision(
+            trace,
+            campaign_metadata=campaign_metadata,
+            policy_snapshot=policy_snapshot,
+        )
+    except Exception:
+        logger.warning(
+            "Scientific ledger pending-card hook failed; continuing live campaign",
+            exc_info=True,
+        )
+        return None
+
+
+def _maybe_finalize_scientific_decision(
+    trace: Any | None,
+    **outcome: Any,
+) -> Any | None:
+    """Best-effort live Trace -> Outcome -> Reward -> Markdown closure."""
+    if trace is None:
+        return None
+    try:
+        from app.services.scientific_ledger_runtime import finalize_scientific_decision
+
+        return finalize_scientific_decision(trace, **outcome)
+    except Exception:
+        logger.warning(
+            "Scientific ledger accounting hook failed; continuing live campaign",
+            exc_info=True,
+        )
+        return None
+
+
+def _scientific_policy_snapshot(
+    strategy_trace: dict[str, Any] | None,
+    runtime_policy: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Keep policy identity/governance separate from per-round scientific state."""
+    trace = dict(strategy_trace or {})
+    return {
+        "action_policy": trace.get("action_policy"),
+        "bandit_decision": trace.get("bandit_decision"),
+        "learned_policy_shadow": trace.get("learned_policy_shadow"),
+        "learned_policy_influence": trace.get("learned_policy_influence"),
+        "ranking_influences": trace.get("ranking_influences", []),
+        "runtime_policy_snapshot": dict(runtime_policy or {}),
+    }
+
+
+def _recovery_events_from_steps(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        episode = step.get("recovery_episode")
+        if not isinstance(episode, dict):
+            continue
+        episode_id = str(episode.get("episode_id") or "")
+        if episode_id and episode_id in seen:
+            continue
+        if episode_id:
+            seen.add(episode_id)
+        events.append(dict(episode))
+    return events
+
+
+def _planned_strategy_decision(strategy: str) -> dict[str, Any]:
+    """Describe a planner-selected route when no adaptive selector ran yet."""
+    normalized = str(strategy or "adaptive")
+    if normalized in {"lhs", "random", "grid"}:
+        mode = "explore"
+    elif normalized == "prior_guided":
+        mode = "warm_start"
+    elif normalized in {"bayesian", "bo", "bo_mcp"}:
+        mode = "exploit"
+    else:
+        mode = "refine"
+    reason = "Campaign plan selected this candidate-generation route."
+    return {
+        "campaign_intent": "optimize",
+        "optimization_mode": mode,
+        "candidate_generation_backend": normalized,
+        "backend": normalized,
+        "phase": "planned",
+        "reason": reason,
+        "strategy_trace": {
+            "selected_intent": "optimize",
+            "selected_mode": mode,
+            "selected_backend": normalized,
+            "reason": reason,
+        },
+    }
+
+
+# Map the round's design strategy to a campaign mode for phase-aware rubric
+# weighting (Phase B). Exploration-flavoured strategies value information;
+# exploitation-flavoured ones value objective improvement.
+_STRATEGY_TO_MODE = {
+    "explore": "calibration",
+    "lhs": "calibration",
+    "random": "calibration",
+    "prior_guided": "calibration",
+    "exploit": "bo_optimization",
+    "bayesian": "bo_optimization",
+    "bo_mcp": "bo_optimization",
+    "adaptive": "bo_optimization",
+}
+
+
+def _maybe_emit_verifiable_reward(
+    *,
+    emit,
+    campaign_id: str,
+    round_num: int,
+    round_strategy: str,
+    direction: str,
+    objective_kpi: str,
+    best_kpi: float | None,
+    prev_best: float | None,
+    round_batch_kpis: list,
+    dimensions: list,
+    max_rounds: int,
+) -> None:
+    """Score the round with the verifiable reward, persist the trajectory, and
+    emit it to /lab — the inner evaluation loop made visible (Phases A/B/C).
+
+    Best-effort: any failure is logged and the campaign continues untouched.
+    """
+    try:
+        from app.services.campaign_mode import CampaignMode
+        from app.services.decision_trajectory import persist_loop_trajectory
+        from app.services.loop_engineering import LoopOutcome, calculate_loop_reward
+        from app.services.rubric import rescore, rubric_for_mode
+
+        kpis = list(round_batch_kpis or [])
+        execution_success = any(k is not None for k in kpis) if kpis else None
+        failure_count = sum(1 for k in kpis if k is None)
+        if prev_best is None or best_kpi is None:
+            objective_delta: float | None = None
+        elif direction == "maximize":
+            objective_delta = best_kpi - prev_best
+        else:
+            objective_delta = prev_best - best_kpi
+
+        outcome = LoopOutcome(
+            execution_success=execution_success,
+            objective_delta=objective_delta,
+            failure_count=failure_count,
+        )
+        reward = calculate_loop_reward(
+            iteration_id=f"{campaign_id}-r{round_num}", outcome=outcome
+        )
+
+        # B: re-score under the round's phase-aware rubric.
+        mode_value = _STRATEGY_TO_MODE.get(round_strategy, "bo_optimization")
+        phase_rubric = rubric_for_mode(CampaignMode(mode_value))
+        phase = rescore(reward.verifications, phase_rubric)
+
+        try:
+            persist_loop_trajectory(
+                campaign_id, round_num, reward,
+                state={"strategy": round_strategy, "best_kpi": best_kpi},
+            )
+        except Exception:
+            logger.debug("trajectory persist skipped", exc_info=True)
+
+        emit({
+            "type": "decision_reward",
+            "round": round_num,
+            "reward": reward.reward,
+            "process_reward": reward.process_reward,
+            "outcome_reward": reward.outcome_reward,
+            "rubric_version": reward.rubric_version,
+            "phase_rubric_version": phase.rubric_version,
+            "phase_reward": phase.total,
+            "verifications": [
+                {"name": v.name, "passed": v.passed, "score": v.score}
+                for v in reward.verifications
+            ],
+            "message": (
+                f"reward {reward.reward} (process {reward.process_reward} / "
+                f"outcome {reward.outcome_reward}); phase[{mode_value}] {phase.total}"
+            ),
+        })
+
+        # C: plateau → propose reframing the objective / widening the space.
+        plateaued = objective_delta is not None and abs(objective_delta) < 1e-9
+        if plateaued and round_num >= 2:
+            _maybe_emit_space_proposals(
+                emit=emit, campaign_id=campaign_id, round_num=round_num,
+                direction=direction, objective_kpi=objective_kpi,
+                dimensions=dimensions, max_rounds=max_rounds,
+            )
+    except Exception:
+        logger.warning(
+            "Verifiable-reward hook failed; continuing live campaign",
+            exc_info=True,
+        )
+
+
+def _maybe_emit_space_proposals(
+    *, emit, campaign_id, round_num, direction, objective_kpi, dimensions, max_rounds
+) -> None:
+    """Run the space-evolution advisor on a plateau and emit gated proposals."""
+    try:
+        from app.contracts.task_contract import (
+            DimensionDef,
+            ExplorationSpace,
+            HumanGatePolicy,
+            ObjectiveSpec,
+            SafetyEnvelope,
+            StopCondition,
+            TaskContract,
+        )
+        from app.core.db import utcnow_iso
+        from app.services.space_evolution import SpaceEvolutionAdvisor
+        from app.services.space_overlay import review_space_change
+
+        dims = []
+        for d in dimensions or []:
+            name = d.get("name") or d.get("param_name")
+            if not name:
+                continue
+            dims.append(DimensionDef(
+                param_name=name,
+                param_type=d.get("param_type", "number"),
+                min_value=d.get("min_value", d.get("min")),
+                max_value=d.get("max_value", d.get("max")),
+                choices=d.get("choices"),
+            ))
+        if not dims:
+            return
+        contract = TaskContract(
+            contract_id=f"{campaign_id}-live",
+            created_at=utcnow_iso(),
+            created_by="orchestrator",
+            objective=ObjectiveSpec(
+                objective_type="single", primary_kpi=objective_kpi, direction=direction,
+            ),
+            exploration_space=ExplorationSpace(dimensions=dims),
+            stop_conditions=StopCondition(max_rounds=max_rounds),
+            safety_envelope=SafetyEnvelope(),
+            human_gate=HumanGatePolicy(),
+            protocol_pattern_id="live",
+        )
+        proposals = SpaceEvolutionAdvisor().propose(
+            {"plateaued": True, "confidence": 0.75}, contract
+        )
+        for p in proposals:
+            verdict = review_space_change(p, contract)
+            emit({
+                "type": "space_proposal",
+                "round": round_num,
+                "proposal_id": p.proposal_id,
+                "reason": p.reason,
+                "confidence": p.confidence,
+                "verdict": verdict.status,
+                "verdict_reason": verdict.reason,
+                "message": f"space proposal [{verdict.status}]: {p.reason}",
+            })
+    except Exception:
+        logger.debug("space-proposal hook skipped", exc_info=True)
 
 
 def _maybe_record_adaptive_campaign_substrate_snapshot(
@@ -196,6 +503,12 @@ class OrchestratorInput(BaseModel):
     # Parameter space
     dimensions: list[dict[str, Any]]
     protocol_template: dict[str, Any]
+
+    # Optional graph of materially different experimental approaches. Nexus
+    # characterizes its evidence; HELIOS remains the only route-selection
+    # authority and maps the selected node to executable campaign inputs.
+    experimental_route_graph: dict[str, Any] = Field(default_factory=dict)
+    available_capabilities: list[str] | None = None
 
     # Safety
     policy_snapshot: dict[str, Any] = Field(default_factory=dict)
@@ -375,7 +688,17 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 "batch_size": input_data.batch_size,
             },
             "human_preferences": dict(input_data.policy_snapshot or {}),
-            "synthesis_routes": [],
+            "synthesis_routes": list(
+                (input_data.experimental_route_graph or {}).get("nodes", []) or []
+            ),
+            "experimental_route_graph": dict(
+                input_data.experimental_route_graph or {}
+            ),
+            "active_experimental_node_id": (
+                (input_data.experimental_route_graph or {}).get("active_node_id")
+            ),
+            "experimental_route_observations": [],
+            "experimental_route_decisions": [],
             "domain_hypotheses": [],
             "literature_priors": [],
             "human_observations": [],
@@ -644,6 +967,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         # --- Checkpoint: create campaign in DB ---
         from app.services.campaign_state import (
             append_failure_event,
+            append_objective_transition,
             append_space_revision,
             checkpoint_kpi,
             complete_candidate,
@@ -651,6 +975,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             create_campaign,
             get_completed_rounds,
             is_candidate_done,
+            save_campaign_context,
             save_plan,
             start_candidate,
             start_round,
@@ -672,6 +997,58 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 append_failure_event(campaign_id, event)
             except Exception:
                 logger.debug("Failed to persist failure event", exc_info=True)
+
+        def _record_experimental_route_observation(
+            *,
+            round_number: int,
+            candidate_index: int,
+            parameters: dict[str, Any],
+            kpi: float | None = None,
+            qc_passed: bool = True,
+            is_failure: bool = False,
+            failure_reason: str | None = None,
+            run_id: str | None = None,
+        ) -> None:
+            """Append a route-labelled Nexus observation and checkpoint it."""
+            node_id = campaign_context_dict.get("active_experimental_node_id")
+            if not node_id:
+                return
+            observation = {
+                "iteration": round_number,
+                "parameters": dict(parameters),
+                "kpi_values": (
+                    {input_data.objective_kpi: float(kpi)} if kpi is not None else {}
+                ),
+                "qc_passed": qc_passed,
+                "is_failure": is_failure,
+                "failure_reason": failure_reason,
+                "timestamp": time.time(),
+                "metadata": {
+                    "experimental_node_id": str(node_id),
+                    "round_number": round_number,
+                    "candidate_index": candidate_index,
+                    "run_id": run_id,
+                },
+            }
+            from app.services.nexus_experimental_routes import (
+                MAX_EXPERIMENTAL_ROUTE_OBSERVATIONS,
+            )
+
+            route_observations = campaign_context_dict.setdefault(
+                "experimental_route_observations", []
+            )
+            route_observations.append(observation)
+            if len(route_observations) > MAX_EXPERIMENTAL_ROUTE_OBSERVATIONS:
+                del route_observations[
+                    :-MAX_EXPERIMENTAL_ROUTE_OBSERVATIONS
+                ]
+            try:
+                save_campaign_context(campaign_id, campaign_context_dict)
+            except Exception:
+                logger.debug(
+                    "Failed to checkpoint experimental-route observation",
+                    exc_info=True,
+                )
 
         self._emit(campaign_id, {
             "type": "campaign_start",
@@ -998,6 +1375,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
         # The allocator tracks which destination well each (round, candidate)
         # pair is assigned to, preventing double-use across rounds.
         well_allocator = None
+        _well_allocator_route_id = "__campaign_default__"
+        _well_allocators_by_route: dict[str, Any] = {}
         try:
             _deck = plan_deck_layout(
                 protocol_steps=input_data.protocol_template.get("steps", []),
@@ -1005,6 +1384,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             )
             well_allocator = create_well_allocator_from_deck_plan(_deck, role="destination")
             if well_allocator:
+                _well_allocators_by_route[_well_allocator_route_id] = well_allocator
                 self._emit(campaign_id, {
                     "type": "well_allocator_init",
                     "labware": well_allocator.labware_name,
@@ -1026,6 +1406,317 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 logger.info("Skipping completed round %d on resume", round_num)
                 continue
 
+            # Resolve this round's experimental node before strategy selection.
+            # Nexus contributes evidence only; HELIOS performs all eligibility,
+            # approval, and live-authority checks locally.
+            round_dimensions = [dict(item) for item in input_data.dimensions]
+            round_protocol_template = dict(input_data.protocol_template or {})
+            round_protocol_pattern_id = input_data.protocol_pattern_id
+            experimental_route_decision_payload: dict[str, Any] = {}
+            route_graph = dict(
+                (campaign_context_dict or {}).get("experimental_route_graph")
+                or input_data.experimental_route_graph
+                or {}
+            )
+            active_experimental_node_id = (
+                (campaign_context_dict or {}).get("active_experimental_node_id")
+                or route_graph.get("active_node_id")
+            )
+            if active_experimental_node_id:
+                route_graph["active_node_id"] = active_experimental_node_id
+
+            if route_graph.get("nodes"):
+                try:
+                    from app.services.experimental_route_policy import (
+                        resolve_experimental_route_runtime,
+                        select_experimental_route,
+                    )
+                    from app.services.nexus_experimental_routes import (
+                        NexusExperimentalRouteClient,
+                        build_experimental_route_payload,
+                    )
+
+                    _nodes_by_id = {
+                        str(node.get("node_id")): node
+                        for node in route_graph.get("nodes", []) or []
+                        if isinstance(node, dict) and node.get("node_id")
+                    }
+                    _active_node = _nodes_by_id.get(
+                        str(active_experimental_node_id), {}
+                    )
+                    _active_runtime = resolve_experimental_route_runtime(
+                        node=_active_node,
+                        is_current=True,
+                        campaign_dimensions=input_data.dimensions,
+                        campaign_protocol_template=input_data.protocol_template,
+                        campaign_protocol_pattern_id=input_data.protocol_pattern_id,
+                    )
+                    if active_experimental_node_id and _active_runtime is None:
+                        _invalid_route_reason = (
+                            "Active experimental node has no executable HELIOS "
+                            "parameter/protocol mapping."
+                        )
+                        experimental_route_decision_payload = {
+                            "round": round_num,
+                            "active_node_id": active_experimental_node_id,
+                            "selected_node_id": None,
+                            "authority_enabled": get_settings().experimental_route_authority_enabled,
+                            "execution_allowed": False,
+                            "applied": False,
+                            "changed": False,
+                            "reason": _invalid_route_reason,
+                        }
+                        campaign_context_dict.setdefault(
+                            "experimental_route_decisions", []
+                        ).append(experimental_route_decision_payload)
+                        save_campaign_context(campaign_id, campaign_context_dict)
+                        update_campaign_status(
+                            campaign_id,
+                            "failed",
+                            error=_invalid_route_reason,
+                        )
+                        self._emit(campaign_id, {
+                            "type": "experimental_route_execution_blocked",
+                            **experimental_route_decision_payload,
+                            "message": _invalid_route_reason,
+                        })
+                        return OrchestratorOutput(
+                            campaign_id=campaign_id,
+                            status="failed",
+                            plan_summary=plan_summary,
+                            rounds_completed=round_num - 1,
+                            best_kpi=best_kpi,
+                            stop_reason="experimental_route_execution_blocked",
+                            agent_trace=agent_trace,
+                            errors=[_invalid_route_reason],
+                        )
+                    if _active_runtime is not None:
+                        round_dimensions = [
+                            dict(item) for item in _active_runtime.dimensions
+                        ]
+                        round_protocol_template = dict(
+                            _active_runtime.protocol_template
+                        )
+                        round_protocol_pattern_id = (
+                            _active_runtime.protocol_pattern_id
+                        )
+
+                    _route_settings = get_settings()
+                    if _route_settings.nexus_experimental_routes_enabled:
+                        _route_payload = build_experimental_route_payload(
+                            campaign_id=campaign_id,
+                            graph=route_graph,
+                            observations=list(
+                                (campaign_context_dict or {}).get(
+                                    "experimental_route_observations", []
+                                )
+                                or []
+                            ),
+                            objective=input_data.objective_kpi,
+                            direction=input_data.direction,
+                            available_capabilities=input_data.available_capabilities,
+                        )
+                        _nexus_route_response = await asyncio.to_thread(
+                            NexusExperimentalRouteClient().analyze,
+                            _route_payload,
+                        )
+                        if _nexus_route_response.ok and _nexus_route_response.report:
+                            _route_decision = select_experimental_route(
+                                report=_nexus_route_response.report,
+                                execution_graph=route_graph,
+                                campaign_dimensions=input_data.dimensions,
+                                campaign_protocol_template=input_data.protocol_template,
+                                campaign_protocol_pattern_id=input_data.protocol_pattern_id,
+                                direction=input_data.direction,
+                                authority_enabled=(
+                                    _route_settings.experimental_route_authority_enabled
+                                ),
+                                available_capabilities=(
+                                    input_data.available_capabilities
+                                ),
+                                policy_snapshot=input_data.policy_snapshot,
+                            )
+                            experimental_route_decision_payload = (
+                                _route_decision.to_dict()
+                            )
+                            experimental_route_decision_payload["round"] = round_num
+                            experimental_route_decision_payload[
+                                "nexus_report_confidence"
+                            ] = _nexus_route_response.report.get("confidence")
+                            experimental_route_decision_payload[
+                                "nexus_risk_flags"
+                            ] = list(
+                                _nexus_route_response.report.get("risk_flags", [])
+                                or []
+                            )
+                            campaign_context_dict["nexus_experimental_route_report"] = dict(
+                                _nexus_route_response.report
+                            )
+                            if _route_decision.applied:
+                                _selected = _route_decision.selected_option
+                                if _selected is not None and _selected.runtime is not None:
+                                    active_experimental_node_id = _selected.node_id
+                                    route_graph["active_node_id"] = _selected.node_id
+                                    round_dimensions = [
+                                        dict(item)
+                                        for item in _selected.runtime.dimensions
+                                    ]
+                                    round_protocol_template = dict(
+                                        _selected.runtime.protocol_template
+                                    )
+                                    round_protocol_pattern_id = (
+                                        _selected.runtime.protocol_pattern_id
+                                    )
+                        else:
+                            experimental_route_decision_payload = {
+                                "round": round_num,
+                                "active_node_id": active_experimental_node_id,
+                                "selected_node_id": active_experimental_node_id,
+                                "authority_enabled": (
+                                    _route_settings.experimental_route_authority_enabled
+                                ),
+                                "applied": False,
+                                "changed": False,
+                                "reason": (
+                                    "Nexus route characterization unavailable; "
+                                    "HELIOS retained the current route."
+                                ),
+                                "error_type": (
+                                    _nexus_route_response.error_type.value
+                                    if _nexus_route_response.error_type
+                                    else None
+                                ),
+                                "error_message": _nexus_route_response.error_message,
+                            }
+                    else:
+                        experimental_route_decision_payload = {
+                            "round": round_num,
+                            "active_node_id": active_experimental_node_id,
+                            "selected_node_id": active_experimental_node_id,
+                            "authority_enabled": (
+                                _route_settings.experimental_route_authority_enabled
+                            ),
+                            "applied": False,
+                            "changed": False,
+                            "reason": "Nexus experimental-route characterization is disabled.",
+                        }
+
+                    campaign_context_dict["experimental_route_graph"] = route_graph
+                    campaign_context_dict["active_experimental_node_id"] = (
+                        active_experimental_node_id
+                    )
+                    campaign_context_dict.setdefault(
+                        "experimental_route_decisions", []
+                    ).append(experimental_route_decision_payload)
+                    save_campaign_context(campaign_id, campaign_context_dict)
+                    self._emit(campaign_id, {
+                        "type": "experimental_route_decision",
+                        **experimental_route_decision_payload,
+                        "message": experimental_route_decision_payload.get("reason"),
+                    })
+
+                    if (
+                        experimental_route_decision_payload.get("execution_allowed")
+                        is False
+                        and "error_type" not in experimental_route_decision_payload
+                        and _route_settings.nexus_experimental_routes_enabled
+                    ):
+                        _blocked_reason = str(
+                            experimental_route_decision_payload.get("reason")
+                            or "No experimental route passed HELIOS execution gates."
+                        )
+                        update_campaign_status(
+                            campaign_id,
+                            "failed",
+                            error=_blocked_reason,
+                        )
+                        self._emit(campaign_id, {
+                            "type": "experimental_route_execution_blocked",
+                            **experimental_route_decision_payload,
+                            "message": _blocked_reason,
+                        })
+                        return OrchestratorOutput(
+                            campaign_id=campaign_id,
+                            status="failed",
+                            plan_summary=plan_summary,
+                            rounds_completed=round_num - 1,
+                            best_kpi=best_kpi,
+                            stop_reason="experimental_route_execution_blocked",
+                            agent_trace=agent_trace,
+                            errors=[_blocked_reason],
+                        )
+
+                    # A route may use a different deck. Start a separate
+                    # allocator when the active node changes; same-route rounds
+                    # continue sharing the allocator to prevent well reuse.
+                    _route_allocator_id = str(
+                        active_experimental_node_id or "__campaign_default__"
+                    )
+                    if _route_allocator_id != _well_allocator_route_id:
+                        if _route_allocator_id in _well_allocators_by_route:
+                            well_allocator = _well_allocators_by_route[
+                                _route_allocator_id
+                            ]
+                            _well_allocator_route_id = _route_allocator_id
+                        else:
+                            try:
+                                _route_deck = plan_deck_layout(
+                                    protocol_steps=round_protocol_template.get(
+                                        "steps", []
+                                    ),
+                                    batch_size=input_data.batch_size,
+                                )
+                                well_allocator = create_well_allocator_from_deck_plan(
+                                    _route_deck, role="destination"
+                                )
+                                _well_allocator_route_id = _route_allocator_id
+                                if well_allocator is not None:
+                                    _well_allocators_by_route[
+                                        _route_allocator_id
+                                    ] = well_allocator
+                            except Exception:
+                                logger.debug(
+                                    "Could not initialise route-specific well allocator",
+                                    exc_info=True,
+                                )
+                except Exception:
+                    logger.warning(
+                        "Experimental-route policy failed; retaining current route",
+                        exc_info=True,
+                    )
+                    experimental_route_decision_payload = {
+                        "round": round_num,
+                        "active_node_id": active_experimental_node_id,
+                        "selected_node_id": active_experimental_node_id,
+                        "authority_enabled": get_settings().experimental_route_authority_enabled,
+                        "applied": False,
+                        "changed": False,
+                        "reason": (
+                            "Experimental-route policy raised an internal error; "
+                            "HELIOS retained the current route."
+                        ),
+                        "error_type": "internal_error",
+                    }
+                    campaign_context_dict.setdefault(
+                        "experimental_route_decisions", []
+                    ).append(experimental_route_decision_payload)
+                    try:
+                        save_campaign_context(campaign_id, campaign_context_dict)
+                    except Exception:
+                        logger.debug(
+                            "Failed to checkpoint route-policy fallback",
+                            exc_info=True,
+                        )
+                    self._emit(campaign_id, {
+                        "type": "experimental_route_decision",
+                        **experimental_route_decision_payload,
+                        "message": experimental_route_decision_payload["reason"],
+                    })
+
+            # Bound the cumulative failure/step histories to this decision card.
+            _round_failure_start = len(failure_event_dicts)
+            _round_step_history_start = len(step_history)
+
             self._emit(campaign_id, {
                 "type": "round_start",
                 "round": round_num,
@@ -1034,11 +1725,15 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 "message": f"Starting round {round_num}/{len(plan.planned_rounds)} (strategy: {planned_round.strategy})",
             })
 
+            # Running best before this round runs — lets the verifiable-reward
+            # hook (below) measure this round's improvement (0 == plateau).
+            _best_kpi_at_round_start = best_kpi
+
             # 2a. Design parameters — if "adaptive", re-select strategy
             #     using real-time KPI history AND batch-level data for
             #     data-driven switching.
             round_strategy = planned_round.strategy
-            strategy_decision_info: dict[str, Any] = {}
+            strategy_decision_info = _planned_strategy_decision(round_strategy)
             strategy_decision: Any = None  # holds StrategyDecision if adaptive
 
             if round_strategy == "adaptive" and kpi_history:
@@ -1059,14 +1754,14 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         round_number=round_num,
                         max_rounds=input_data.max_rounds,
                         n_observations=total_runs,
-                        n_dimensions=len(input_data.dimensions),
+                        n_dimensions=len(round_dimensions),
                         has_categorical=any(
                             d.get("choices") is not None
-                            for d in input_data.dimensions
+                            for d in round_dimensions
                         ),
                         has_log_scale=any(
                             d.get("log_scale", False)
-                            for d in input_data.dimensions
+                            for d in round_dimensions
                         ),
                         kpi_history=tuple(kpi_history),
                         direction=input_data.direction,
@@ -1123,14 +1818,22 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     if round_strategy not in _BACKEND_PASSTHROUGH:
                         round_strategy = "adaptive"  # use adaptive path in candidate_gen
 
+                    _strategy_trace_payload = strategy_trace_to_dict(
+                        decision.strategy_trace
+                    )
                     strategy_decision_info = {
+                        "campaign_intent": _strategy_trace_payload.get(
+                            "selected_intent"
+                        ),
+                        "optimization_mode": _strategy_trace_payload.get(
+                            "selected_mode"
+                        ),
+                        "candidate_generation_backend": decision.backend_name,
                         "backend": decision.backend_name,
                         "phase": decision.phase,
                         "reason": decision.reason,
                         "confidence": decision.confidence,
-                        "strategy_trace": strategy_trace_to_dict(
-                            decision.strategy_trace
-                        ),
+                        "strategy_trace": _strategy_trace_payload,
                     }
                     latest_strategy_trace = strategy_decision_info.get(
                         "strategy_trace"
@@ -1242,11 +1945,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         exc_info=True,
                     )
 
-            _maybe_record_contextual_shadow_decision(
-                campaign_id=campaign_id,
-                round_index=round_num,
-                strategy_selection_result=strategy_decision_info,
-                failure_summary={
+            decision_context_kwargs = {
+                "campaign_id": campaign_id,
+                "round_index": round_num,
+                "strategy_selection_result": strategy_decision_info,
+                "failure_summary": {
                     "events": list(failure_event_dicts),
                     "requires_recovery": any(
                         event.get("failure_type") in {"hardware", "backend"}
@@ -1254,35 +1957,93 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         if isinstance(event, dict)
                     ),
                 },
-                safety_summary=dict(input_data.policy_snapshot or {}),
-                objective_summary={
+                "safety_summary": dict(input_data.policy_snapshot or {}),
+                "objective_summary": {
                     "objective_kpi": input_data.objective_kpi,
                     "direction": input_data.direction,
                     "target_value": input_data.target_value,
                     "max_rounds": input_data.max_rounds,
                 },
-                constraint_summary={
-                    "dimensions": list(input_data.dimensions),
+                "constraint_summary": {
+                    "dimensions": list(round_dimensions),
                     "policy_snapshot": dict(input_data.policy_snapshot or {}),
                 },
-                backend_memory_summary=dict(backend_performance_records),
-                bo_mcp_summary={
+                "backend_memory_summary": dict(backend_performance_records),
+                "bo_mcp_summary": {
                     "backend_state": bomcp_backend_state,
                 },
-                human_observations=list(
+                "nexus_diagnostics": dict(
+                    (campaign_context_dict or {}).get("nexus_diagnostics")
+                    or (campaign_context_dict or {}).get("nexus_early_stage_report")
+                    or {}
+                ),
+                "learning_policy_summary": dict(
+                    ((strategy_decision_info or {}).get("strategy_trace") or {}).get(
+                        "learned_policy_shadow"
+                    )
+                    or {}
+                ),
+                "validation_summary": dict(
+                    (campaign_context_dict or {}).get("validation_summary") or {}
+                ),
+                "human_observations": list(
                     (campaign_context_dict or {}).get("human_observations", []) or []
                 ),
-                literature_summary={
+                "literature_summary": {
                     "literature_priors": list(
                         (campaign_context_dict or {}).get("literature_priors", []) or []
                     ),
                 },
-                metadata={
+                "metadata": {
                     "round_strategy": round_strategy,
                     "planned_strategy": planned_round.strategy,
                     "shadow_only": True,
+                    "experimental_route_decision": dict(
+                        experimental_route_decision_payload
+                    ),
                 },
+            }
+
+            if experimental_route_decision_payload:
+                _strategy_trace = strategy_decision_info.setdefault(
+                    "strategy_trace", {}
+                )
+                _strategy_trace["experimental_route_decision"] = dict(
+                    experimental_route_decision_payload
+                )
+                decision_context_kwargs["nexus_diagnostics"] = {
+                    **decision_context_kwargs["nexus_diagnostics"],
+                    "experimental_route_report": dict(
+                        (campaign_context_dict or {}).get(
+                            "nexus_experimental_route_report", {}
+                        )
+                    ),
+                    "helios_route_decision": dict(
+                        experimental_route_decision_payload
+                    ),
+                }
+
+            round_decision_trace = _maybe_record_contextual_shadow_decision(
+                **decision_context_kwargs,
                 actual_stage="candidate_generation",
+            )
+            scientific_campaign_metadata = {
+                "objective": decision_context_kwargs["objective_summary"],
+                "constraints": decision_context_kwargs["constraint_summary"],
+                "campaign_context": dict(campaign_context_dict or {}),
+                "protocol_template": dict(round_protocol_template or {}),
+                "experimental_route_decision": dict(
+                    experimental_route_decision_payload
+                ),
+            }
+            scientific_policy_snapshot = _scientific_policy_snapshot(
+                (strategy_decision_info or {}).get("strategy_trace"),
+                dict(input_data.policy_snapshot or {}),
+            )
+            _maybe_record_pending_scientific_decision(
+                round_decision_trace,
+                campaign_metadata=scientific_campaign_metadata,
+                policy_snapshot=scientific_policy_snapshot,
             )
 
             # Parallel shadow track: adaptive campaign substrate snapshot.
@@ -1294,9 +2055,208 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 objective_kpi=input_data.objective_kpi,
                 max_rounds=input_data.max_rounds,
                 failure_event_dicts=failure_event_dicts,
-                protocol_template=input_data.protocol_template,
+                protocol_template=round_protocol_template,
                 safety_summary=dict(input_data.policy_snapshot or {}),
             )
+
+            # Optional live campaign-decision authority. This is the promotion
+            # boundary for the contextual decision layer: default-off, explicit,
+            # auditable, and consumed before candidate generation.
+            authority_verdict: CampaignAuthorityVerdict | None = None
+            try:
+                decision_context = build_campaign_round_context(
+                    **decision_context_kwargs
+                )
+                authority_plan = CampaignDecisionLayer().decide(decision_context)
+                authority_verdict = evaluate_campaign_decision_authority(
+                    authority_plan,
+                    enabled=get_settings().campaign_decision_authority_enabled,
+                )
+                if authority_verdict.enabled:
+                    self._emit(campaign_id, {
+                        "type": "campaign_decision_authority",
+                        "round": round_num,
+                        "consumed": authority_verdict.consumed,
+                        "proceed_to_candidates": authority_verdict.proceed_to_candidates,
+                        "terminal": authority_verdict.terminal,
+                        "round_status": authority_verdict.round_status,
+                        "reason": authority_verdict.reason,
+                        "state_updates": [
+                            {
+                                "update_type": update.update_type,
+                                "payload": update.payload,
+                            }
+                            for update in authority_verdict.state_updates
+                        ],
+                        **authority_verdict.event_payload,
+                    })
+            except Exception:
+                logger.warning(
+                    "Campaign decision authority failed; continuing candidate generation",
+                    exc_info=True,
+                )
+                authority_verdict = None
+
+            if authority_verdict is not None and authority_verdict.consumed:
+                _context_changed = False
+                for update in authority_verdict.state_updates:
+                    try:
+                        if update.update_type == "objective_transition":
+                            append_objective_transition(campaign_id, update.payload)
+                        elif update.update_type == "space_revision":
+                            append_space_revision(campaign_id, update.payload)
+                        elif update.update_type == "context_request":
+                            campaign_context_dict.setdefault(
+                                "pending_context_requests", []
+                            ).append(update.payload)
+                            _context_changed = True
+                        elif update.update_type in {
+                            "recovery_request",
+                            "validation_request",
+                        }:
+                            campaign_context_dict.setdefault(
+                                "pending_campaign_actions", []
+                            ).append(update.payload)
+                            _context_changed = True
+                    except Exception:
+                        logger.debug(
+                            "Failed to persist campaign authority update",
+                            exc_info=True,
+                        )
+                if _context_changed:
+                    try:
+                        save_campaign_context(campaign_id, campaign_context_dict)
+                    except Exception:
+                        logger.debug(
+                            "Failed to persist campaign authority context",
+                            exc_info=True,
+                        )
+
+                agent_trace.append({
+                    "agent": "campaign_decision_authority",
+                    "round": round_num,
+                    "action": authority_verdict.action_type.value,
+                    "terminal": authority_verdict.terminal,
+                    "round_status": authority_verdict.round_status,
+                })
+
+                if authority_verdict.terminal:
+                    _authority_failures = list(
+                        failure_event_dicts[_round_failure_start:]
+                    )
+                    _maybe_finalize_scientific_decision(
+                        round_decision_trace,
+                        observed_action=authority_verdict.action_type.value,
+                        observed_backend=None,
+                        candidate_count=0,
+                        execution_success=None,
+                        failure_count=len(_authority_failures),
+                        safety_incident_count=sum(
+                            1
+                            for event in _authority_failures
+                            if event.get("failure_type") in {"safety", "chemical_safety"}
+                        ),
+                        metadata={
+                            "authority_reason": authority_verdict.reason,
+                            "round_status": authority_verdict.round_status,
+                            "terminal": True,
+                        },
+                        campaign_metadata=scientific_campaign_metadata,
+                        policy_snapshot=scientific_policy_snapshot,
+                        failures=_authority_failures,
+                    )
+                    top_k = self._compute_top_k_ranking(
+                        all_params, all_kpis, all_rounds, input_data.direction,
+                    )
+                    try:
+                        update_campaign_status(
+                            campaign_id,
+                            "completed",
+                            stop_reason=authority_verdict.stop_reason,
+                            best_kpi=best_kpi,
+                        )
+                    except Exception:
+                        logger.debug(
+                            "Failed to checkpoint campaign authority stop",
+                            exc_info=True,
+                        )
+                    self._emit(campaign_id, {
+                        "type": "campaign_complete",
+                        "campaign_id": campaign_id,
+                        "status": "completed",
+                        "rounds_completed": round_num - 1,
+                        "best_kpi": best_kpi,
+                        "stop_reason": authority_verdict.stop_reason,
+                        "top_k_recipes": [r.model_dump() for r in top_k],
+                        "message": (
+                            "Campaign completed by campaign decision authority "
+                            f"({authority_verdict.action_type.value})"
+                        ),
+                    })
+                    return OrchestratorOutput(
+                        campaign_id=campaign_id,
+                        status="completed",
+                        plan_summary=plan_summary,
+                        rounds_completed=round_num - 1,
+                        best_kpi=best_kpi,
+                        stop_reason=authority_verdict.stop_reason,
+                        agent_trace=agent_trace,
+                        top_k_recipes=top_k,
+                    )
+
+                if not authority_verdict.proceed_to_candidates:
+                    _authority_failures = list(
+                        failure_event_dicts[_round_failure_start:]
+                    )
+                    _maybe_finalize_scientific_decision(
+                        round_decision_trace,
+                        observed_action=authority_verdict.action_type.value,
+                        observed_backend=None,
+                        candidate_count=0,
+                        execution_success=None,
+                        failure_count=len(_authority_failures),
+                        safety_incident_count=sum(
+                            1
+                            for event in _authority_failures
+                            if event.get("failure_type") in {"safety", "chemical_safety"}
+                        ),
+                        metadata={
+                            "authority_reason": authority_verdict.reason,
+                            "round_status": authority_verdict.round_status,
+                            "terminal": False,
+                        },
+                        campaign_metadata=scientific_campaign_metadata,
+                        policy_snapshot=scientific_policy_snapshot,
+                        failures=_authority_failures,
+                    )
+                    try:
+                        start_round(
+                            campaign_id,
+                            round_num,
+                            f"decision_authority:{authority_verdict.action_type.value}",
+                            n_candidates=0,
+                            strategy_decision={
+                                "authority_action": authority_verdict.action_type.value,
+                                "reason": authority_verdict.reason,
+                                "round_status": authority_verdict.round_status,
+                            },
+                        )
+                        complete_round(campaign_id, round_num, [], [])
+                    except Exception:
+                        logger.debug(
+                            "Failed to checkpoint authority-deferred round",
+                            exc_info=True,
+                        )
+                    self._emit(campaign_id, {
+                        "type": "round_deferred",
+                        "round": round_num,
+                        "action": authority_verdict.action_type.value,
+                        "message": (
+                            "Candidate generation deferred by campaign decision "
+                            f"authority: {authority_verdict.reason}"
+                        ),
+                    })
+                    continue
 
             # Reset per-round batch collectors
             round_batch_kpis: list[float] = []
@@ -1359,8 +2319,6 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             arbitration_candidates: list[dict[str, Any]] | None = None
             if stabilize_candidates is None and strategy_decision is not None:
                 try:
-                    from app.core.config import get_settings
-
                     if get_settings().enable_candidate_arbitration:
                         from app.optimization.loop_integration import (
                             arbitrate_round_if_enabled,
@@ -1369,8 +2327,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
 
                         arb_request = build_optimization_request(
                             campaign_id=campaign_id,
-                            dimensions=input_data.dimensions,
-                            protocol_template=input_data.protocol_template,
+                            dimensions=round_dimensions,
+                            protocol_template=round_protocol_template,
                             all_params=list(all_params),
                             all_kpis=list(all_kpis),
                             objective_name=input_data.objective_kpi,
@@ -1425,8 +2383,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
             else:
                 # Normal path: generate candidates via DesignAgent
                 design_input = DesignInput(
-                    dimensions=input_data.dimensions,
-                    protocol_template=input_data.protocol_template,
+                    dimensions=round_dimensions,
+                    protocol_template=round_protocol_template,
                     strategy=round_strategy,
                     batch_size=planned_round.batch_size,
                     seed=round_num,
@@ -1473,6 +2431,28 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     logger.warning(
                         "Round %d: design failed: %s", round_num, design_result.errors
                     )
+                    _design_failure = {
+                        "failure_type": "design",
+                        "round": round_num,
+                        "errors": list(design_result.errors),
+                        "reason": "Candidate design failed before execution.",
+                    }
+                    _note_failure_event(_design_failure)
+                    _round_failures = list(failure_event_dicts[_round_failure_start:])
+                    _maybe_finalize_scientific_decision(
+                        round_decision_trace,
+                        observed_action="propose_candidates",
+                        observed_backend=(
+                            strategy_decision_info.get("backend") or round_strategy
+                        ),
+                        candidate_count=0,
+                        execution_success=False,
+                        failure_count=len(_round_failures),
+                        metadata={"design_failed": True},
+                        campaign_metadata=scientific_campaign_metadata,
+                        policy_snapshot=scientific_policy_snapshot,
+                        failures=_round_failures,
+                    )
                     continue
                 design_candidates = list(design_result.output.candidates)
                 # (c) carry the bomcp TuRBO trust region into the next round.
@@ -1491,8 +2471,8 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 _round_evidence = evidence_for_candidates(
                     campaign_id,
                     design_candidates,
-                    input_data.dimensions,
-                    input_data.protocol_template,
+                    round_dimensions,
+                    round_protocol_template,
                 )
                 _evidence_trace = (strategy_decision_info or {}).get("strategy_trace")
                 if _round_evidence is not None and isinstance(_evidence_trace, dict):
@@ -1534,10 +2514,10 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 # Build protocol with candidate params
                 from app.services.protocol_patterns import get_pattern
 
-                pattern = get_pattern(input_data.protocol_pattern_id)
+                pattern = get_pattern(round_protocol_pattern_id)
                 if pattern is None:
                     # Use the template as-is
-                    protocol = input_data.protocol_template
+                    protocol = round_protocol_template
                 else:
                     protocol = pattern.to_protocol_json(candidate_params)
 
@@ -1588,6 +2568,14 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         "params": candidate_params,
                         "penalize_backend": False,
                     })
+                    _record_experimental_route_observation(
+                        round_number=round_num,
+                        candidate_index=i,
+                        parameters=candidate_params,
+                        qc_passed=False,
+                        is_failure=True,
+                        failure_reason="compilation_failed",
+                    )
                     continue
 
                 # --- Idempotent skip: check graph_hash ---
@@ -1650,6 +2638,14 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         "params": candidate_params,
                         "penalize_backend": True,
                     })
+                    _record_experimental_route_observation(
+                        round_number=round_num,
+                        candidate_index=i,
+                        parameters=candidate_params,
+                        qc_passed=False,
+                        is_failure=True,
+                        failure_reason="safety_veto",
+                    )
                     continue
 
                 self._emit(campaign_id, {
@@ -1728,6 +2724,14 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                             "params": candidate_params,
                             "penalize_backend": False,
                         })
+                        _record_experimental_route_observation(
+                            round_number=round_num,
+                            candidate_index=i,
+                            parameters=candidate_params,
+                            qc_passed=False,
+                            is_failure=True,
+                            failure_reason="simulation_fail",
+                        )
                         continue
                 else:
                     logger.warning(
@@ -1821,17 +2825,116 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 else:
                     # Real execution with recovery: create run → dispatch to worker → collect results
                     # RecoveryAgent provides retry/abort/degrade strategies on failure
-                    run_kpi, run_step_result = await self._execute_candidate_with_recovery(
-                        campaign_id=campaign_id,
-                        protocol=protocol,
-                        inputs={"candidate_index": i, "round": round_num},
-                        policy_snapshot=input_data.policy_snapshot,
-                        objective_kpi=input_data.objective_kpi,
-                        candidate_params=candidate_params,
-                        agent_trace=agent_trace,
-                        round_num=round_num,
-                        candidate_idx=i,
-                    )
+                    try:
+                        run_kpi, run_step_result = (
+                            await self._execute_candidate_with_recovery(
+                                campaign_id=campaign_id,
+                                protocol=protocol,
+                                inputs={"candidate_index": i, "round": round_num},
+                                policy_snapshot=input_data.policy_snapshot,
+                                objective_kpi=input_data.objective_kpi,
+                                candidate_params=candidate_params,
+                                agent_trace=agent_trace,
+                                round_num=round_num,
+                                candidate_idx=i,
+                            )
+                        )
+                    except RecoveryExecutionError as exc:
+                        terminal_failure = {
+                            "failure_type": exc.failure_type,
+                            "reason": str(exc),
+                            "backend_name": (
+                                strategy_decision.backend_name
+                                if strategy_decision is not None
+                                else strategy_decision_info.get("backend")
+                            ),
+                            "round_number": round_num,
+                            "candidate_index": i,
+                            "params": candidate_params,
+                            "recovery_episode_id": exc.episode.get("episode_id"),
+                            "penalize_backend": not exc.chemical_safety,
+                        }
+                        _note_failure_event(terminal_failure)
+                        _record_experimental_route_observation(
+                            round_number=round_num,
+                            candidate_index=i,
+                            parameters=candidate_params,
+                            qc_passed=False,
+                            is_failure=True,
+                            failure_reason=str(exc),
+                        )
+                        terminal_failures = list(
+                            failure_event_dicts[_round_failure_start:]
+                        )
+                        recovery_events = [exc.episode] if exc.episode else []
+                        terminal_scientific_result = (
+                            _maybe_finalize_scientific_decision(
+                                round_decision_trace,
+                                observed_action="recover_failure",
+                                observed_backend=(
+                                    strategy_decision_info.get("backend")
+                                    or round_strategy
+                                ),
+                                candidate_count=len(design_candidates),
+                                execution_success=False,
+                                failure_count=len(terminal_failures),
+                                safety_incident_count=(
+                                    1 if exc.chemical_safety else 0
+                                ),
+                                recovery_attempted=bool(recovery_events),
+                                recovery_success=(
+                                    False if recovery_events else None
+                                ),
+                                metadata={
+                                    "terminal_recovery": True,
+                                    "candidate_index": i,
+                                },
+                                campaign_metadata=scientific_campaign_metadata,
+                                policy_snapshot=scientific_policy_snapshot,
+                                observations=[{"execution_error": str(exc)}],
+                                failures=terminal_failures,
+                                recovery_events=recovery_events,
+                            )
+                        )
+                        if terminal_scientific_result is not None:
+                            terminal_ledger = terminal_scientific_result.ledger_result
+                            self._emit(campaign_id, {
+                                "type": "scientific_decision_recorded",
+                                "round": round_num,
+                                "trace_id": round_decision_trace.trace_id,
+                                "trajectory_id": (
+                                    terminal_scientific_result.trajectory_id
+                                ),
+                                "ledger_directory": (
+                                    terminal_ledger.campaign_directory
+                                    if terminal_ledger
+                                    else None
+                                ),
+                                "git_commit": (
+                                    terminal_ledger.git_commit.commit_sha
+                                    if terminal_ledger
+                                    and terminal_ledger.git_commit
+                                    else None
+                                ),
+                                "terminal_recovery": True,
+                                "message": (
+                                    "Scientific Decision Card finalized before "
+                                    "terminal recovery exit."
+                                ),
+                            })
+                        try:
+                            update_campaign_status(
+                                campaign_id,
+                                "failed",
+                                stop_reason=exc.failure_type,
+                                best_kpi=best_kpi,
+                            )
+                        except Exception:
+                            logger.debug(
+                                "Failed to checkpoint terminal recovery",
+                                exc_info=True,
+                            )
+                        raise
 
                 self._emit(campaign_id, {
                     "type": "agent_result",
@@ -1978,6 +3081,15 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         "params": candidate_params,
                         "penalize_backend": False,
                     })
+                    _record_experimental_route_observation(
+                        round_number=round_num,
+                        candidate_index=i,
+                        parameters=candidate_params,
+                        kpi=run_kpi,
+                        qc_passed=False,
+                        is_failure=True,
+                        failure_reason=f"qc_abort:{qc_quality}",
+                    )
                     continue
 
                 # Record KPI (after QC pass)
@@ -2001,6 +3113,17 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     all_kpis.append(run_kpi)
                     all_params.append(candidate_params)
                     all_rounds.append(round_num)
+
+                _record_experimental_route_observation(
+                    round_number=round_num,
+                    candidate_index=i,
+                    parameters=candidate_params,
+                    kpi=run_kpi,
+                    qc_passed=True,
+                    is_failure=run_kpi is None,
+                    failure_reason=("missing_kpi" if run_kpi is None else None),
+                    run_id=_candidate_run_id,
+                )
 
                 # --- Checkpoint: candidate completion + KPI snapshot ---
                 try:
@@ -2062,6 +3185,23 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                     )
                 except Exception:
                     logger.debug("RL post-round hook failed", exc_info=True)
+
+            # --- Verifiable reward (Phases A/B/C): score this round, persist the
+            # trajectory, and stream it to /lab so the inner evaluation loop is
+            # visible. Best-effort — never breaks the campaign. ---
+            _maybe_emit_verifiable_reward(
+                emit=lambda evt: self._emit(campaign_id, evt),
+                campaign_id=campaign_id,
+                round_num=round_num,
+                round_strategy=round_strategy,
+                direction=input_data.direction,
+                objective_kpi=input_data.objective_kpi,
+                best_kpi=best_kpi,
+                prev_best=_best_kpi_at_round_start,
+                round_batch_kpis=round_batch_kpis,
+                dimensions=round_dimensions,
+                max_rounds=input_data.max_rounds,
+            )
 
             # --- Per-backend recent-failure history (feeds rank_backends) ---
             # Attribute this round's execution outcome (any QC failure) to the
@@ -2127,12 +3267,12 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 all_rounds=list(all_rounds),
                 qc_fail_rate=_round_qc_fail_rate,
                 max_rounds=input_data.max_rounds,
-                n_dimensions=len(input_data.dimensions),
+                n_dimensions=len(round_dimensions),
                 has_categorical=any(
-                    d.get("choices") is not None for d in input_data.dimensions
+                    d.get("choices") is not None for d in round_dimensions
                 ),
                 has_log_scale=any(
-                    d.get("log_scale", False) for d in input_data.dimensions
+                    d.get("log_scale", False) for d in round_dimensions
                 ),
                 step_history=list(step_history),
                 emit=lambda event: self._emit(campaign_id, event),
@@ -2209,6 +3349,94 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                 "best_kpi": best_kpi,
                 "message": f"Stop decision: {decision}" + (f" (best KPI: {best_kpi})" if best_kpi is not None else ""),
             })
+
+            # Close the full campaign decision accounting after analysis and
+            # stop evaluation, while every round-local observation is available.
+            _round_failures = list(failure_event_dicts[_round_failure_start:])
+            _round_steps = list(step_history[_round_step_history_start:])
+            _round_recovery_events = _recovery_events_from_steps(_round_steps)
+            _round_execution_success = (
+                any(kpi is not None for kpi in round_batch_kpis)
+                if design_candidates
+                else None
+            )
+            if _best_kpi_at_round_start is None or best_kpi is None:
+                _round_objective_delta = None
+            elif input_data.direction == "maximize":
+                _round_objective_delta = best_kpi - _best_kpi_at_round_start
+            else:
+                _round_objective_delta = _best_kpi_at_round_start - best_kpi
+            _analysis_observations: list[dict[str, Any]] = [
+                {
+                    "round_kpis": list(round_batch_kpis),
+                    "round_parameters": list(round_batch_params),
+                    "best_kpi": best_kpi,
+                    "stop_decision": decision,
+                    "experimental_node_id": active_experimental_node_id,
+                    "experimental_route_decision": dict(
+                        experimental_route_decision_payload
+                    ),
+                }
+            ]
+            if analyzer_result.success:
+                _analysis_observations.append(
+                    {
+                        "analysis": analyzer_result.output.narrative,
+                        "convergence": analyzer_result.output.convergence_status,
+                        "decision_nodes": list(analyzer_result.output.decision_nodes or []),
+                    }
+                )
+            _scientific_result = _maybe_finalize_scientific_decision(
+                round_decision_trace,
+                observed_action="propose_candidates",
+                observed_backend=(strategy_decision_info.get("backend") or round_strategy),
+                candidate_count=len(design_candidates),
+                execution_success=_round_execution_success,
+                failure_count=len(_round_failures),
+                safety_incident_count=sum(
+                    1
+                    for event in _round_failures
+                    if event.get("failure_type") in {"safety", "chemical_safety"}
+                ),
+                objective_delta=_round_objective_delta,
+                validation_success=(
+                    True if decision == "target_reached" else None
+                ),
+                recovery_attempted=bool(_round_recovery_events),
+                recovery_success=(
+                    _round_execution_success if _round_recovery_events else None
+                ),
+                metadata={
+                    "best_kpi_before": _best_kpi_at_round_start,
+                    "best_kpi_after": best_kpi,
+                    "stop_decision": decision,
+                    "experimental_route_decision": dict(
+                        experimental_route_decision_payload
+                    ),
+                },
+                campaign_metadata=scientific_campaign_metadata,
+                policy_snapshot=scientific_policy_snapshot,
+                observations=_analysis_observations,
+                failures=_round_failures,
+                recovery_events=_round_recovery_events,
+            )
+            if _scientific_result is not None:
+                ledger_result = _scientific_result.ledger_result
+                self._emit(campaign_id, {
+                    "type": "scientific_decision_recorded",
+                    "round": round_num,
+                    "trace_id": round_decision_trace.trace_id,
+                    "trajectory_id": _scientific_result.trajectory_id,
+                    "ledger_directory": (
+                        ledger_result.campaign_directory if ledger_result else None
+                    ),
+                    "git_commit": (
+                        ledger_result.git_commit.commit_sha
+                        if ledger_result and ledger_result.git_commit
+                        else None
+                    ),
+                    "message": "Scientific Decision Card finalized.",
+                })
 
             if stop_result.success and stop_result.output.decision != "continue":
                 top_k = self._compute_top_k_ranking(
@@ -2771,7 +3999,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                             "Recovery agent failed: %s",
                             recovery_result.errors,
                         )
-                        raise Exception(error_msg)
+                        raise RecoveryExecutionError(
+                            error_msg,
+                            episode=recovery_episode,
+                            failure_type="recovery_agent_failure",
+                        )
 
                     decision = recovery_result.output.decision
                     rationale = recovery_result.output.rationale
@@ -2816,7 +4048,12 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                             "message": "Chemical safety event detected - SafetyAgent veto active",
                         })
                         # Force abort on chemical safety
-                        raise Exception(f"Chemical safety event: {error_msg}")
+                        raise RecoveryExecutionError(
+                            f"Chemical safety event: {error_msg}",
+                            episode=recovery_episode,
+                            failure_type="chemical_safety",
+                            chemical_safety=True,
+                        )
 
                     # Execute recovery decision
                     if decision == "retry":
@@ -2856,7 +4093,10 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                             "Recovery: abort execution (rationale: %s)",
                             rationale[:100],
                         )
-                        raise Exception(f"Recovery abort: {error_msg}")
+                        raise RecoveryExecutionError(
+                            f"Recovery abort: {error_msg}",
+                            episode=recovery_episode,
+                        )
 
                     elif decision == "skip":
                         logger.info(
@@ -2867,6 +4107,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                             "status": "skipped",
                             "reason": "recovery_skip",
                             "rationale": rationale,
+                            "recovery_episode": recovery_episode,
                         }
 
                     elif decision == "degrade":
@@ -2877,6 +4118,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         # Mark as degraded but return results
                         step_result["degraded"] = True
                         step_result["recovery_rationale"] = rationale
+                        step_result["recovery_episode"] = recovery_episode
                         return kpi_value, step_result
 
                 # Success path
@@ -2894,9 +4136,20 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         "episode_id": recovery_episode.get("episode_id") if recovery_episode else None,
                         "message": f"Execution succeeded after {retry_count} retries",
                     })
+                    if recovery_episode is not None:
+                        recovery_episode["phase"] = "exit"
+                        attempts = recovery_episode.get("attempts") or []
+                        if attempts and isinstance(attempts[-1], dict):
+                            attempts[-1]["result"] = "success"
+                        step_result = {
+                            **step_result,
+                            "recovery_episode": recovery_episode,
+                        }
 
                 return kpi_value, step_result
 
+            except RecoveryExecutionError:
+                raise
             except Exception as exc:
                 # Exception during execution
                 error_type = map_exception_to_error_type(exc)
@@ -2939,7 +4192,11 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         "Recovery agent failed: %s",
                         recovery_result.errors,
                     )
-                    raise exc
+                    raise RecoveryExecutionError(
+                        str(exc),
+                        episode=recovery_episode,
+                        failure_type="recovery_agent_failure",
+                    ) from exc
 
                 decision = recovery_result.output.decision
                 rationale = recovery_result.output.rationale
@@ -2983,7 +4240,12 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         "error_type": error_type,
                         "message": "Chemical safety event detected - SafetyAgent veto active",
                     })
-                    raise exc
+                    raise RecoveryExecutionError(
+                        str(exc),
+                        episode=recovery_episode,
+                        failure_type="chemical_safety",
+                        chemical_safety=True,
+                    ) from exc
 
                 # Execute recovery decision
                 if decision == "retry":
@@ -3024,7 +4286,10 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         "Recovery: abort execution (rationale: %s)",
                         rationale[:100],
                     )
-                    raise exc
+                    raise RecoveryExecutionError(
+                        str(exc),
+                        episode=recovery_episode,
+                    ) from exc
 
                 elif decision == "skip":
                     logger.info(
@@ -3035,6 +4300,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         "status": "skipped",
                         "reason": "recovery_skip",
                         "rationale": rationale,
+                        "recovery_episode": recovery_episode,
                     }
 
                 elif decision == "degrade":
@@ -3048,6 +4314,7 @@ class OrchestratorAgent(BaseAgent[OrchestratorInput, OrchestratorOutput]):
                         "reason": "recovery_degrade",
                         "rationale": rationale,
                         "error": str(exc),
+                        "recovery_episode": recovery_episode,
                     }
 
         # Max retries exceeded

@@ -23,6 +23,7 @@ from app.services.verifiable_reward import (
     verify_failure,
     verify_objective,
     verify_proxy_gap,
+    verify_recovery,
     verify_safety,
     verify_validation,
 )
@@ -73,6 +74,8 @@ class CampaignDecisionOutcome(BaseModel):
     objective_delta: float | None = None
     proxy_gap_delta: float | None = None
     validation_success: bool | None = None
+    recovery_attempted: bool = False
+    recovery_success: bool | None = None
     context_request_fulfilled: bool | None = None
     human_override: bool | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -97,6 +100,7 @@ class CampaignDecisionReward(BaseModel):
     objective_reward: float = 0.0
     proxy_gap_reward: float = 0.0
     validation_reward: float = 0.0
+    recovery_reward: float = 0.0
     context_reward: float = 0.0
     # Phase A (RLVR wedge): version the rubric, split process vs outcome credit,
     # and carry the per-signal verifiable records. Defaults keep older callers
@@ -142,6 +146,8 @@ class CampaignDecisionOutcomeBuilder:
         objective_delta: float | None = None,
         proxy_gap_delta: float | None = None,
         validation_success: bool | None = None,
+        recovery_attempted: bool = False,
+        recovery_success: bool | None = None,
         context_request_fulfilled: bool | None = None,
         human_override: bool | None = None,
         metadata: dict[str, Any] | None = None,
@@ -159,6 +165,8 @@ class CampaignDecisionOutcomeBuilder:
             objective_delta=objective_delta,
             proxy_gap_delta=proxy_gap_delta,
             validation_success=validation_success,
+            recovery_attempted=recovery_attempted,
+            recovery_success=recovery_success,
             context_request_fulfilled=context_request_fulfilled,
             human_override=human_override,
             metadata=deepcopy(dict(metadata or {})),
@@ -179,6 +187,10 @@ class CampaignDecisionRewardCalculator:
             verify_objective(outcome.objective_delta),
             verify_proxy_gap(outcome.proxy_gap_delta),
             verify_validation(outcome.validation_success),
+            verify_recovery(
+                attempted=outcome.recovery_attempted,
+                success=outcome.recovery_success,
+            ),
             verify_context(outcome.context_request_fulfilled),
         ]
         scores = {v.name: v.score for v in verifications}
@@ -188,6 +200,7 @@ class CampaignDecisionRewardCalculator:
         objective_reward = scores["objective"]
         proxy_gap_reward = scores["proxy_gap"]
         validation_reward = scores["validation"]
+        recovery_reward = scores["recovery"]
         context_reward = scores["context"]
         raw_reward = sum(v.score for v in verifications)
         reward = _clamp(raw_reward)
@@ -202,6 +215,7 @@ class CampaignDecisionRewardCalculator:
             objective_reward=objective_reward,
             proxy_gap_reward=proxy_gap_reward,
             validation_reward=validation_reward,
+            recovery_reward=recovery_reward,
             context_reward=context_reward,
             rubric_version=RUBRIC_VERSION_DEFAULT,
             process_reward=process_reward,
@@ -214,6 +228,7 @@ class CampaignDecisionRewardCalculator:
                 objective_reward=objective_reward,
                 proxy_gap_reward=proxy_gap_reward,
                 validation_reward=validation_reward,
+                recovery_reward=recovery_reward,
                 context_reward=context_reward,
                 raw_reward=raw_reward,
                 reward=reward,
@@ -289,6 +304,7 @@ def _reward_rationale(
     objective_reward: float,
     proxy_gap_reward: float,
     validation_reward: float,
+    recovery_reward: float,
     context_reward: float,
     raw_reward: float,
     reward: float,
@@ -300,6 +316,7 @@ def _reward_rationale(
         "objective": objective_reward,
         "proxy_gap": proxy_gap_reward,
         "validation": validation_reward,
+        "recovery": recovery_reward,
         "context": context_reward,
     }
     nonzero = [
