@@ -58,6 +58,7 @@ The live path is conservative by design: rule-based, auditable, and bounded by e
 - **Candidate and backend arbitration** — combines local baselines, Nexus/BO MCP signals, candidate pools, safety gates, and provenance into a traceable portfolio.
 - **Failure-aware recovery** — separates scientific negative evidence from measurement, backend, constraint, and downstream tool failures.
 - **Trace, reward, and replay** — records `StrategyTrace`, `StrategyEvidence`, `StrategyOutcome`, `StrategyReward`, typed `FailureEvent`, and replay summaries.
+- **Scientific evidence loop** — tracks falsifiable claims, updates posterior odds only from independent auditable likelihood ratios, ranks hypothesis-discrimination experiments by robust information gain, and blocks live promotion behind prospective evidence and explicit approval.
 - **Scientific Decision Ledger** — projects every live campaign decision into deterministic, redacted Markdown Decision Cards with evidence, alternatives, outcome, reward, failures, recovery, policy/Nexus versions, exact-text memory search, and typed RLVR export.
 - **LLM boundary discipline** — LLMs can help translate intent, gather context, or generate review notes; they do not steer the live optimization loop.
 
@@ -81,6 +82,10 @@ policy.md                    # current decision policy snapshot
 policy_versions/<version>.md # immutable first snapshot per policy version
 nexus.md                     # Nexus contract/version and diagnostics
 training_dataset.md          # human-reviewable RLVR projection
+evidence/
+  index.md                   # scientific claims and discrimination plans
+  claims/<claim-id>.md       # posterior, falsifiers, evidence, promotion gate
+  plans/<plan-id>.md         # robust information-gain ranking for review
 rounds/001/
   objective.md
   observations.md
@@ -102,6 +107,8 @@ The read-only API exposes:
 
 RLVR JSONL is generated from the typed `decision_trajectories` store, not by scraping Markdown. Optional Git history is one repository per campaign, stages exact Markdown paths only, and never pushes or modifies the HELIOS source repository. See [Scientific Decision Ledger](docs/scientific_decision_ledger.md) for lifecycle, schemas, safety properties, and operations.
 
+The scientific evidence loop is deliberately separate from the operational reward loop. A successful execution does not increase a scientific claim posterior. Only evidence carrying an auditable likelihood ratio can do that; descriptive evidence remains visible without being numerically counted. See [Scientific Evidence Loop](docs/scientific_evidence_loop.md).
+
 ---
 
 ## Architecture
@@ -110,7 +117,7 @@ RLVR JSONL is generated from the typed `decision_trajectories` store, not by scr
 |---------|----------------|------------------------|
 | **Contract and context** | Typed campaign goal, objectives, constraints, budget, safety, and round context | `app/contracts/`, `app/services/round_context.py`, `app/services/objective_state.py` |
 | **Campaign policy** | Decide next campaign-level action and strategy mode | `app/services/strategy_selector.py`, `app/services/strategy_actions.py`, `app/services/decision_layer.py` |
-| **Evidence and memory** | Attach diagnostics, prior-campaign evidence, failure history, and backend memory | `app/services/decision_trace.py`, `app/services/backend_memory.py`, `app/optimization/candidate_memory.py`, `app/optimization/failure_zone_memory.py` |
+| **Evidence and memory** | Track scientific claims/posteriors, discrimination plans, diagnostics, prior-campaign evidence, failure history, and backend memory | `app/services/scientific_evidence.py`, `app/services/hypothesis_experiment_planner.py`, `app/services/scientific_ledger.py`, `app/services/backend_memory.py` |
 | **Candidate/backend arbitration** | Build, gate, score, and explain candidate/backend choices | `app/optimization/service.py`, `app/optimization/pool_service.py`, `app/optimization/decision_policy.py`, `app/optimization/provenance.py` |
 | **Adaptive substrate** | Shadow-only scientific activity mode, dynamic action space, and value-of-information assessment | `app/services/adaptive_campaign_substrate.py`, `app/services/campaign_mode.py`, `app/services/dynamic_action_space.py`, `app/services/value_of_information.py` |
 | **Outcome and replay** | Evaluate decision quality, reward components, and replay summaries | `app/services/decision_outcome.py`, `app/services/verifiable_reward.py`, `app/services/decision_replay.py`, `app/services/policy_evaluation.py` |

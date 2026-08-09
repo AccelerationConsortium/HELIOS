@@ -446,6 +446,25 @@ The main missing pieces are:
 - Consumption of `objective_transitions_json` by the next-round context builder.
 - An approval path that can apply an objective transition after validation.
 
+### Evidence-backed confidence path
+
+The additive confidence update above remains the backward-compatible
+`heuristic_outcome_delta` routing path. HELIOS now also supports a distinct
+`scientific_evidence_posterior` path in `scientific_evidence.py` and
+`objective_state.py`:
+
+```text
+logit confidence_{t+1}
+  = logit prior_confidence + sum_i log Bayes factor_i.
+```
+
+Only independent evidence blocks with an auditable analysis method enter this
+sum. Descriptive evidence is recorded without changing confidence, duplicate
+independence keys are rejected, and operational execution success cannot alter
+an objective once it is bound to the evidence-posterior path. Promotion remains
+shadow-only and requires predeclared evidence/design gates plus explicit human
+approval; it never applies an objective transition automatically.
+
 ## 13. Recommended implementation path
 
 The next implementation should keep the current safety boundary:

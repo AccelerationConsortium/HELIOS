@@ -16,20 +16,31 @@ The state separates the scientific goal (``primary_objective`` /
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
 from app.services.decision_outcome import CampaignDecisionOutcome
 from app.services.objective_models import ProxyGapAssessment
+from app.services.scientific_evidence import ClaimAssessment, PromotionDecision
 
 __all__ = [
     "ObjectiveRevision",
     "ObjectiveState",
     "ObjectiveStateUpdater",
+    "ObjectiveConfidenceMethod",
     "StoppingCriteria",
+    "apply_evidence_to_objective_state",
     "apply_outcome_to_objective_state",
 ]
+
+
+class ObjectiveConfidenceMethod(StrEnum):
+    """How ``objective_confidence`` was most recently updated."""
+
+    HEURISTIC_OUTCOME_DELTA = "heuristic_outcome_delta"
+    SCIENTIFIC_EVIDENCE_POSTERIOR = "scientific_evidence_posterior"
 
 
 class StoppingCriteria(BaseModel):
@@ -68,6 +79,12 @@ class ObjectiveState(BaseModel):
     scientific_question: str | None = None
     proxy_objective_names: list[str] = Field(default_factory=list)
     objective_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
+    objective_confidence_method: ObjectiveConfidenceMethod = (
+        ObjectiveConfidenceMethod.HEURISTIC_OUTCOME_DELTA
+    )
+    evidence_claim_id: str | None = None
+    evidence_assessment: ClaimAssessment | None = None
+    promotion_decision: PromotionDecision | None = None
     proxy_gap: ProxyGapAssessment | None = None
     failure_constraints: list[str] = Field(default_factory=list)
     validation_requirements: list[str] = Field(default_factory=list)
@@ -107,7 +124,13 @@ class ObjectiveStateUpdater:
     ) -> ObjectiveState:
         timestamp = now or datetime.now(UTC)
 
-        delta, evidence = _confidence_delta(outcome)
+        if state.objective_confidence_method == ObjectiveConfidenceMethod.SCIENTIFIC_EVIDENCE_POSTERIOR:
+            delta = 0.0
+            evidence = [
+                "heuristic confidence update skipped because the objective is bound to a scientific evidence posterior"
+            ]
+        else:
+            delta, evidence = _confidence_delta(outcome)
         old_confidence = state.objective_confidence
         new_confidence = _clamp_unit(_round(old_confidence + delta))
 
@@ -169,6 +192,124 @@ class ObjectiveStateUpdater:
             }
         )
 
+    def apply_evidence_assessment(
+        self,
+        state: ObjectiveState,
+        assessment: ClaimAssessment,
+        *,
+        promotion_decision: PromotionDecision | None = None,
+        trace_id: str | None = None,
+        now: datetime | None = None,
+    ) -> ObjectiveState:
+        """Bind an auditable claim posterior to objective state.
+
+        This replaces the objective confidence with the assessed posterior but
+        does not apply a promoted objective, constraint, or search-space
+        change.  A promotion decision is stored solely as shadow evidence.
+        """
+
+        if state.evidence_claim_id is not None and state.evidence_claim_id != assessment.claim_id:
+            raise ValueError(
+                "objective state is already bound to another scientific claim: "
+                f"{state.evidence_claim_id!r}"
+            )
+        if state.evidence_assessment is not None and (
+            state.evidence_assessment.prior_probability != assessment.prior_probability
+            or state.evidence_assessment.prior_version != assessment.prior_version
+        ):
+            raise ValueError(
+                "scientific claim prior changed after binding; create a new versioned claim "
+                "instead of silently rewriting prior odds"
+            )
+        if promotion_decision is not None and promotion_decision.claim_id != assessment.claim_id:
+            raise ValueError("promotion decision and assessment must target the same claim")
+        timestamp = now or datetime.now(UTC)
+        old_confidence = state.objective_confidence
+        old_method = state.objective_confidence_method
+        new_confidence = assessment.posterior_probability
+        stop_recommended, stop_reason = _evaluate_stopping(
+            criteria=state.stopping_criteria,
+            confidence=new_confidence,
+            consecutive_failures=state.consecutive_failure_count,
+            rounds_observed=state.rounds_observed,
+        )
+        changes: dict[str, Any] = {
+            "objective_confidence": {"from": old_confidence, "to": new_confidence},
+            "objective_confidence_method": {
+                "from": old_method.value,
+                "to": ObjectiveConfidenceMethod.SCIENTIFIC_EVIDENCE_POSTERIOR.value,
+            },
+            "evidence_claim_id": {
+                "from": state.evidence_claim_id,
+                "to": assessment.claim_id,
+            },
+            "evidence_status": {
+                "from": state.evidence_assessment.status.value if state.evidence_assessment else None,
+                "to": assessment.status.value,
+            },
+        }
+        if promotion_decision is not None:
+            changes["promotion_allowed"] = {
+                "from": (
+                    state.promotion_decision.promotion_allowed
+                    if state.promotion_decision is not None
+                    else None
+                ),
+                "to": promotion_decision.promotion_allowed,
+            }
+        if (stop_recommended, stop_reason) != (state.stop_recommended, state.stop_reason):
+            changes["stop_recommended"] = {
+                "from": state.stop_recommended,
+                "to": stop_recommended,
+            }
+            changes["stop_reason"] = {"from": state.stop_reason, "to": stop_reason}
+
+        revision = ObjectiveRevision(
+            revision=state.revision + 1,
+            reason=(
+                "Objective confidence replaced by an auditable scientific evidence posterior; "
+                "no live objective change was auto-applied."
+            ),
+            source="scientific_evidence_posterior",
+            trace_id=trace_id,
+            changes=changes,
+            evidence=[
+                f"claim_id={assessment.claim_id}",
+                f"status={assessment.status.value}",
+                f"posterior_probability={assessment.posterior_probability:.6g}",
+                f"scored_evidence_count={assessment.scored_evidence_count}",
+                f"prospective_evidence_count={assessment.prospective_evidence_count}",
+                f"independent_block_count={assessment.independent_block_count}",
+                (
+                    f"promotion_allowed={promotion_decision.promotion_allowed}"
+                    if promotion_decision is not None
+                    else "promotion_not_evaluated"
+                ),
+            ],
+            created_at=timestamp,
+            metadata={"shadow_only": True, "auto_applied": False},
+        )
+        return state.model_copy(
+            update={
+                "objective_confidence": new_confidence,
+                "objective_confidence_method": (
+                    ObjectiveConfidenceMethod.SCIENTIFIC_EVIDENCE_POSTERIOR
+                ),
+                "evidence_claim_id": assessment.claim_id,
+                "evidence_assessment": assessment.model_copy(deep=True),
+                "promotion_decision": (
+                    promotion_decision.model_copy(deep=True)
+                    if promotion_decision is not None
+                    else None
+                ),
+                "stop_recommended": stop_recommended,
+                "stop_reason": stop_reason,
+                "revision": state.revision + 1,
+                "revision_history": [*state.revision_history, revision],
+                "updated_at": timestamp,
+            }
+        )
+
 
 def apply_outcome_to_objective_state(
     state: ObjectiveState,
@@ -180,6 +321,25 @@ def apply_outcome_to_objective_state(
     """Apply an outcome with the default ObjectiveStateUpdater."""
     return ObjectiveStateUpdater().apply_outcome(
         state, outcome, proxy_gap=proxy_gap, now=now
+    )
+
+
+def apply_evidence_to_objective_state(
+    state: ObjectiveState,
+    assessment: ClaimAssessment,
+    *,
+    promotion_decision: PromotionDecision | None = None,
+    trace_id: str | None = None,
+    now: datetime | None = None,
+) -> ObjectiveState:
+    """Bind a scientific evidence posterior with the default updater."""
+
+    return ObjectiveStateUpdater().apply_evidence_assessment(
+        state,
+        assessment,
+        promotion_decision=promotion_decision,
+        trace_id=trace_id,
+        now=now,
     )
 
 
