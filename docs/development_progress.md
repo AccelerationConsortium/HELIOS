@@ -49,6 +49,11 @@ Legend: **not started** · **partial** (some infra exists, not wired/proven).
   Nexus version snapshots; exact-text scientific-memory retrieval; typed RLVR
   JSONL export; and optional per-campaign local Git history that never pushes.
   See [scientific_decision_ledger.md](scientific_decision_ledger.md).
+- **Scientific evidence loop (shadow)** — typed falsifiable claims, independent
+  evidence blocks, posterior-odds updates from auditable likelihood ratios,
+  preregistration/design-quality requirements, explicit promotion gates, robust
+  information-gain experiment ranking, ObjectiveState binding, and reviewable
+  ledger artifacts. See [scientific_evidence_loop.md](scientific_evidence_loop.md).
 - **Loop / goal harness primitives (pure service layer)** —
   `loop_engineering` records observe-decide-act-evaluate iterations, reward, and
   replay summaries; `goal_harness` adds persistent goal state, normalized
@@ -68,7 +73,7 @@ objective/space changes.
 
 | # | Item | Origin | Status | Notes |
 |---|------|--------|--------|-------|
-| B1 | **HypothesisState** — active/supported/contradicted hypotheses, discriminating experiments | v3 §3 | not started | VoI `expected_hypothesis_resolution` stays 0 until this exists |
+| B1 | **HypothesisState** — active/supported/contradicted hypotheses, discriminating experiments | v3 §3 | partial | Typed claims/evidence and robust discrimination planning shipped; next-round campaign context and VoI threading remain |
 | B2 | **Instrument / runtime belief state + PUDA telemetry** — calibration confidence, drift, telemetry anomalies | v3 §6 | not started | Would let a bad reading be attributed to the instrument, not the sample |
 | B3 | **OperationalAbstractionLearner** (Phase 6) — promote repeated successful action sequences to reusable ops (proposal-only) | v3 §8 | not started | Explicitly deferred until several real shadow logs are reviewed |
 | B4 | **Campaign-level memory beyond candidate/failure** — objective patterns, strategy-success-by-phase, hypothesis-resolution patterns, useful context queries, per-instrument reliability | v3 §9 | not started | Higher tier than failure-zone memory |
