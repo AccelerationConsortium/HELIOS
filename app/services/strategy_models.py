@@ -913,6 +913,10 @@ class DiagnosticSignals:
     calibration_factor: float | None = None  # LOO calibration factor for model_uncertainty
     drift_score: float | None = None  # distribution shift between recent and historical windows
 
+    # --- Failure-margin (E4) ---
+    failure_margin_mean: float | None = None  # mean failed objective (margin proxy); None if no failures
+    failure_margin_min: float | None = None  # worst failed objective (furthest from feasibility)
+
 
 # ---------------------------------------------------------------------------
 # Action candidates

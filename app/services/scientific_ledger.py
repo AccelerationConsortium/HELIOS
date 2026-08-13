@@ -35,6 +35,13 @@ from app.services.decision_markdown import (
 )
 from app.services.decision_outcome import CampaignDecisionAccounting
 from app.services.decision_trace import CampaignDecisionTrace
+from app.services.hypothesis_experiment_planner import ExperimentPlan
+from app.services.scientific_evidence import (
+    ClaimAssessment,
+    EvidenceSet,
+    PromotionDecision,
+    ScientificClaim,
+)
 from app.services.scientific_ledger_git import LedgerGitCommit, ScientificLedgerGit
 
 try:  # Unix process lock; HELIOS production targets Linux/macOS.
@@ -142,6 +149,84 @@ class ScientificLedger:
             campaign_metadata=campaign_metadata or {},
             policy_snapshot=policy_snapshot or accounting.trace.decision_plan.strategy_trace,
             git_message=f"outcome: finalize round {accounting.trace.round_index:03d}",
+        )
+
+    def record_claim_evidence(
+        self,
+        *,
+        campaign_id: str,
+        claim: ScientificClaim,
+        evidence: EvidenceSet,
+        assessment: ClaimAssessment,
+        promotion_decision: PromotionDecision | None = None,
+    ) -> LedgerWriteResult:
+        """Persist a typed claim posterior as a reviewable Markdown artifact."""
+
+        ids = {claim.claim_id, evidence.claim_id, assessment.claim_id}
+        if promotion_decision is not None:
+            ids.add(promotion_decision.claim_id)
+        if len(ids) != 1:
+            raise ValueError("claim, evidence, assessment, and promotion decision must align")
+        campaign_dir = self.campaign_directory(campaign_id)
+        relative = f"evidence/claims/{safe_path_component(claim.claim_id)}.md"
+        content = _render_claim_evidence(claim, evidence, assessment, promotion_decision)
+        with self._campaign_lock(campaign_id):
+            path = _validated_markdown_path(campaign_dir, relative)
+            changed: list[Path] = []
+            unchanged: list[Path] = []
+            (changed if _atomic_write_markdown(path, content, campaign_dir) else unchanged).append(path)
+            index_path = campaign_dir / "evidence" / "index.md"
+            index_content = _render_scientific_evidence_index(campaign_id, campaign_dir)
+            (changed if _atomic_write_markdown(
+                index_path, index_content, campaign_dir
+            ) else unchanged).append(index_path)
+            git_commit = self._commit(
+                campaign_dir,
+                changed,
+                f"evidence: assess claim {claim.claim_id}",
+            )
+        return LedgerWriteResult(
+            campaign_id=campaign_id,
+            campaign_directory=str(campaign_dir),
+            status="claim_evidence",
+            changed_paths=tuple(item.relative_to(campaign_dir).as_posix() for item in changed),
+            unchanged_paths=tuple(item.relative_to(campaign_dir).as_posix() for item in unchanged),
+            git_commit=git_commit,
+        )
+
+    def record_experiment_plan(
+        self,
+        *,
+        campaign_id: str,
+        plan: ExperimentPlan,
+    ) -> LedgerWriteResult:
+        """Persist a shadow hypothesis-discrimination plan for operator review."""
+
+        campaign_dir = self.campaign_directory(campaign_id)
+        relative = f"evidence/plans/{safe_path_component(plan.plan_id)}.md"
+        content = _render_experiment_plan(plan)
+        with self._campaign_lock(campaign_id):
+            path = _validated_markdown_path(campaign_dir, relative)
+            changed: list[Path] = []
+            unchanged: list[Path] = []
+            (changed if _atomic_write_markdown(path, content, campaign_dir) else unchanged).append(path)
+            index_path = campaign_dir / "evidence" / "index.md"
+            index_content = _render_scientific_evidence_index(campaign_id, campaign_dir)
+            (changed if _atomic_write_markdown(
+                index_path, index_content, campaign_dir
+            ) else unchanged).append(index_path)
+            git_commit = self._commit(
+                campaign_dir,
+                changed,
+                f"evidence: record experiment plan {plan.plan_id}",
+            )
+        return LedgerWriteResult(
+            campaign_id=campaign_id,
+            campaign_directory=str(campaign_dir),
+            status="experiment_plan",
+            changed_paths=tuple(item.relative_to(campaign_dir).as_posix() for item in changed),
+            unchanged_paths=tuple(item.relative_to(campaign_dir).as_posix() for item in unchanged),
+            git_commit=git_commit,
         )
 
     def search(
@@ -690,6 +775,193 @@ def _table(value: Any) -> str:
     if value is None:
         return "—"
     return str(value).replace("\n", " ").replace("\r", " ").replace("|", "\\|")
+
+
+def _render_claim_evidence(
+    claim: ScientificClaim,
+    evidence: EvidenceSet,
+    assessment: ClaimAssessment,
+    promotion: PromotionDecision | None,
+) -> str:
+    promotion_status = "not_evaluated" if promotion is None else str(promotion.promotion_allowed).lower()
+    lines = [
+        "---",
+        "artifact_type: scientific_claim_evidence",
+        f"claim_id: {json.dumps(claim.claim_id, ensure_ascii=False)}",
+        f"claim_status: {assessment.status.value}",
+        f"posterior_probability: {assessment.posterior_probability:.12g}",
+        f"promotion_allowed: {promotion_status}",
+        "shadow_only: true",
+        "---",
+        f"# Scientific Claim — {_table(redact_sensitive(claim.claim_id))}",
+        "",
+        "## Claim",
+        "",
+        _table(redact_sensitive(claim.statement)),
+        "",
+        f"- Scope: {_table(redact_sensitive(claim.scope))}",
+        f"- Prior probability: {claim.prior_probability:.6g}",
+        f"- Prior version: {_table(redact_sensitive(claim.prior_version))}",
+        f"- Prior rationale: {_table(redact_sensitive(claim.prior_rationale or 'not recorded'))}",
+        f"- Posterior probability: {assessment.posterior_probability:.6g}",
+        f"- Status: {assessment.status.value}",
+        f"- Cumulative log Bayes factor: {assessment.cumulative_log_bayes_factor:.6g}",
+        f"- Method: {_table(assessment.method)}",
+        "",
+        "## Falsifiability",
+        "",
+    ]
+    lines.extend(
+        f"- {_table(redact_sensitive(item))}" for item in claim.falsifying_observations
+    )
+    if not claim.falsifying_observations:
+        lines.append("- No falsifying observation has been declared; promotion should remain blocked.")
+    lines.extend(
+        [
+            "",
+            "## Evidence",
+            "",
+            "| Evidence | Design | Log BF | Preregistered | Replicates | Blocks | Falsifier | Source |",
+            "|---|---|---:|---|---:|---|---|---|",
+        ]
+    )
+    for item in evidence.items:
+        lines.append(
+            "| {evidence_id} | {design} | {log_bf} | {registered} | {replicates} | "
+            "{blocks} | {falsifier} | {source} |".format(
+                evidence_id=_table(redact_sensitive(item.evidence_id)),
+                design=item.design.value,
+                log_bf="—" if item.log_bayes_factor is None else f"{item.log_bayes_factor:.6g}",
+                registered="yes" if item.registered_before_observation else "no",
+                replicates=item.replicate_count,
+                blocks=_table(", ".join(item.block_ids) or "—"),
+                falsifier="yes" if item.falsifier_triggered else "no",
+                source=_table(redact_sensitive(item.source)),
+            )
+        )
+    if not evidence.items:
+        lines.append("| — | — | — | — | — | — | — | No evidence recorded |")
+    lines.extend(
+        [
+            "",
+            "## Evidence Quality",
+            "",
+            f"- Scored evidence: {assessment.scored_evidence_count}",
+            f"- Descriptive/unscored evidence: {assessment.unscored_evidence_count}",
+            f"- Prospective evidence: {assessment.prospective_evidence_count}",
+            f"- Interventional evidence: {assessment.interventional_evidence_count}",
+            f"- Preregistered evidence: {assessment.preregistered_evidence_count}",
+            f"- Independent blocks: {assessment.independent_block_count}",
+            f"- Safety incidents: {assessment.safety_incident_count}",
+            f"- Falsifier triggered: {'yes' if assessment.falsifier_triggered else 'no'}",
+            "",
+            "## Unmet Requirements",
+            "",
+        ]
+    )
+    lines.extend(f"- {_table(item)}" for item in assessment.unmet_requirements)
+    if not assessment.unmet_requirements:
+        lines.append("- None")
+    lines.extend(["", "## Warnings", ""])
+    lines.extend(f"- {_table(item)}" for item in assessment.warnings)
+    if not assessment.warnings:
+        lines.append("- None")
+    lines.extend(["", "## Promotion Gate", ""])
+    if promotion is None:
+        lines.append("- Not evaluated")
+    else:
+        lines.extend(
+            [
+                f"- Evidence criteria satisfied: {'yes' if promotion.evidence_criteria_satisfied else 'no'}",
+                f"- Human approval required: {'yes' if promotion.human_approval_required else 'no'}",
+                f"- Human approved: {'yes' if promotion.human_approved else 'no'}",
+                f"- Promotion allowed: {'yes' if promotion.promotion_allowed else 'no'}",
+                "- Auto-applied: no",
+            ]
+        )
+        lines.extend(f"- Reason: {_table(item)}" for item in promotion.reasons)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_experiment_plan(plan: ExperimentPlan) -> str:
+    lines = [
+        "---",
+        "artifact_type: hypothesis_discrimination_plan",
+        f"plan_id: {json.dumps(plan.plan_id, ensure_ascii=False)}",
+        f"eligible_experiment_count: {len(plan.ranked_experiments)}",
+        f"excluded_experiment_count: {len(plan.excluded_experiments)}",
+        "operator_approval_required: true",
+        "shadow_only: true",
+        "---",
+        f"# Hypothesis-Discrimination Plan — {_table(redact_sensitive(plan.plan_id))}",
+        "",
+        f"- Objective: {_table(plan.objective)}",
+        f"- Prior scenarios: {_table(', '.join(plan.prior_scenario_ids))}",
+        "- This artifact is advisory and cannot execute experiments.",
+        "",
+        "## Ranked Experiments",
+        "",
+        "| Rank | Experiment | Robust EIG | Mean EIG | Robust EIG / Cost |",
+        "|---:|---|---:|---:|---:|",
+    ]
+    for score in plan.ranked_experiments:
+        lines.append(
+            f"| {score.rank} | {_table(redact_sensitive(score.experiment_id))} | "
+            f"{score.robust_expected_information_gain:.6g} | "
+            f"{score.mean_expected_information_gain:.6g} | "
+            f"{score.information_gain_per_cost:.6g} |"
+        )
+    if not plan.ranked_experiments:
+        lines.append("| — | — | — | — | — |")
+    lines.extend(
+        [
+            "",
+            "## Excluded Experiments",
+            "",
+            "| Experiment | Reason |",
+            "|---|---|",
+        ]
+    )
+    for score in plan.excluded_experiments:
+        lines.append(
+            f"| {_table(redact_sensitive(score.experiment_id))} | "
+            f"{_table('; '.join(score.reasons))} |"
+        )
+    if not plan.excluded_experiments:
+        lines.append("| — | None |")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _render_scientific_evidence_index(campaign_id: str, campaign_dir: Path) -> str:
+    lines = [
+        "---",
+        "artifact_type: scientific_evidence_index",
+        f"campaign_id: {json.dumps(campaign_id, ensure_ascii=False)}",
+        "---",
+        "# Scientific Evidence",
+        "",
+        "## Claims",
+        "",
+    ]
+    claim_paths = sorted((campaign_dir / "evidence" / "claims").glob("*.md"))
+    for path in claim_paths:
+        metadata = _front_matter(path)
+        relative = path.relative_to(campaign_dir / "evidence").as_posix()
+        label = metadata.get("claim_id") or path.stem
+        status = metadata.get("claim_status") or "unknown"
+        lines.append(f"- [{_table(label)}]({relative}) — {status}")
+    if not claim_paths:
+        lines.append("- No scientific claims recorded.")
+    lines.extend(["", "## Experiment Plans", ""])
+    plan_paths = sorted((campaign_dir / "evidence" / "plans").glob("*.md"))
+    for path in plan_paths:
+        metadata = _front_matter(path)
+        relative = path.relative_to(campaign_dir / "evidence").as_posix()
+        label = metadata.get("plan_id") or path.stem
+        lines.append(f"- [{_table(label)}]({relative})")
+    if not plan_paths:
+        lines.append("- No hypothesis-discrimination plans recorded.")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 __all__ = [

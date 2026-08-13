@@ -7,10 +7,17 @@ import pytest
 from app.services.decision_outcome import CampaignDecisionOutcome
 from app.services.objective_models import ProxyGapAssessment, ProxyGapLevel
 from app.services.objective_state import (
+    ObjectiveConfidenceMethod,
     ObjectiveState,
     ObjectiveStateUpdater,
     StoppingCriteria,
+    apply_evidence_to_objective_state,
     apply_outcome_to_objective_state,
+)
+from app.services.scientific_evidence import (
+    ClaimAssessment,
+    ClaimStatus,
+    PromotionDecision,
 )
 
 
@@ -196,3 +203,97 @@ def test_max_consecutive_failures_triggers_shadow_stop_recommendation():
 
 def test_import_smoke():
     import app.services.objective_state  # noqa: F401
+
+
+def _claim_assessment(probability: float = 0.96) -> ClaimAssessment:
+    return ClaimAssessment(
+        claim_id="objective-validity",
+        status=ClaimStatus.SUPPORTED,
+        prior_probability=0.5,
+        prior_version="v1",
+        prior_rationale_recorded=True,
+        posterior_probability=probability,
+        cumulative_log_bayes_factor=3.178054,
+        scored_evidence_count=2,
+        unscored_evidence_count=0,
+        prospective_evidence_count=2,
+        interventional_evidence_count=1,
+        preregistered_evidence_count=2,
+        independent_block_count=2,
+        safety_incident_count=0,
+        evidence_ids=["plate-a", "plate-b"],
+    )
+
+
+def test_evidence_posterior_replaces_heuristic_confidence_without_live_mutation():
+    state = ObjectiveState(campaign_id="camp-1", primary_objective="robust_feasibility")
+    promotion = PromotionDecision(
+        claim_id="objective-validity",
+        evidence_criteria_satisfied=True,
+        human_approval_required=True,
+        human_approved=False,
+        promotion_allowed=False,
+        reasons=["explicit human approval is required"],
+    )
+
+    revised = apply_evidence_to_objective_state(
+        state,
+        _claim_assessment(),
+        promotion_decision=promotion,
+        trace_id="trace-evidence",
+        now=_NOW,
+    )
+
+    assert revised.objective_confidence == pytest.approx(0.96)
+    assert revised.objective_confidence_method == (
+        ObjectiveConfidenceMethod.SCIENTIFIC_EVIDENCE_POSTERIOR
+    )
+    assert revised.evidence_claim_id == "objective-validity"
+    assert revised.evidence_assessment.status == ClaimStatus.SUPPORTED
+    assert revised.promotion_decision.promotion_allowed is False
+    assert revised.revision_history[-1].source == "scientific_evidence_posterior"
+    assert revised.revision_history[-1].metadata["auto_applied"] is False
+
+
+def test_operational_outcome_does_not_corrupt_bound_evidence_posterior():
+    state = apply_evidence_to_objective_state(
+        ObjectiveState(campaign_id="camp-1", primary_objective="robust_feasibility"),
+        _claim_assessment(),
+        now=_NOW,
+    )
+
+    revised = ObjectiveStateUpdater().apply_outcome(
+        state,
+        _outcome(execution_success=False, failure_count=2, objective_delta=-1.0),
+        now=_NOW,
+    )
+
+    assert revised.objective_confidence == state.objective_confidence
+    assert "heuristic confidence update skipped" in revised.revision_history[-1].evidence[0]
+    assert revised.consecutive_failure_count == 1
+
+
+def test_objective_state_rejects_switching_to_an_unrelated_claim():
+    state = apply_evidence_to_objective_state(
+        ObjectiveState(campaign_id="camp-1", primary_objective="robust_feasibility"),
+        _claim_assessment(),
+        now=_NOW,
+    )
+    unrelated = _claim_assessment().model_copy(update={"claim_id": "different-claim"})
+
+    with pytest.raises(ValueError, match="already bound to another"):
+        apply_evidence_to_objective_state(state, unrelated, now=_NOW)
+
+
+def test_objective_state_rejects_silent_prior_drift():
+    state = apply_evidence_to_objective_state(
+        ObjectiveState(campaign_id="camp-1", primary_objective="robust_feasibility"),
+        _claim_assessment(),
+        now=_NOW,
+    )
+    changed_prior = _claim_assessment().model_copy(
+        update={"prior_probability": 0.8, "prior_version": "v2"}
+    )
+
+    with pytest.raises(ValueError, match="prior changed after binding"):
+        apply_evidence_to_objective_state(state, changed_prior, now=_NOW)

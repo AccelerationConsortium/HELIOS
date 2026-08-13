@@ -205,21 +205,40 @@ class CandidatePoolService:
 
     @staticmethod
     def _apply_failure_penalty(pool: CandidatePool, request: OptimizationRequest) -> CandidatePool:
-        """Drop candidates inside the learned failure region; never strand empty."""
+        """Drop candidates inside the learned failure region; never strand empty.
+
+        E3 (soft re-rank): previously, when *every* candidate scored as
+        failure-prone the method kept the whole pool unchanged, so in a
+        failure-dominated campaign (e.g. a bottleneck drug making most of the
+        space infeasible) the failure-zone learning was silently a no-op.
+        Now the survivors are always re-ranked by failure proximity (least
+        failure-prone first) and the pool is capped to the requested size, so
+        even a fully failure-prone pool yields the *least-bad* candidates
+        instead of an arbitrary subset.
+        """
         failed = request.context.get("failed_params") or ()
         if not failed or not pool.candidates:
             return pool
         from app.services.failure_region import FailureRegionModel
 
         model = FailureRegionModel.fit(failed=list(failed), space=request.space)
-        kept = tuple(c for c in pool.candidates if model.predicted_feasible(c.params))
-        if not kept or len(kept) == len(pool.candidates):
-            return pool  # all-failure-prone (keep the round alive) or nothing dropped
+        scored = sorted(
+            ((model.failure_score(c.params), c) for c in pool.candidates),
+            key=lambda pair: pair[0],
+        )
+        n = int(getattr(request, "n", 0) or len(pool.candidates))
+        kept = tuple(c for _, c in scored[:n])
+        if not kept:
+            return pool
         dropped = len(pool.candidates) - len(kept)
+        notes = ["failure-zone re-rank: candidates ordered by failure proximity"]
+        if dropped:
+            notes.append(
+                f"failure-zone penalty: dropped {dropped} failure-prone candidate(s)"
+            )
         return CandidatePool(
             candidates=kept,
             sources_used=pool.sources_used,
             sources_dropped=pool.sources_dropped,
-            construction_trace=pool.construction_trace
-            + (f"failure-zone penalty: dropped {dropped} failure-prone candidate(s)",),
+            construction_trace=pool.construction_trace + tuple(notes),
         )

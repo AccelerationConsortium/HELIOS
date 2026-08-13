@@ -15,6 +15,90 @@ _FEASIBILITY = "feasibility"
 _DEFAULT_BANDWIDTH = 0.15
 _DEFAULT_THRESHOLD = 0.5
 
+# ---------------------------------------------------------------------------
+# Continuous failure-objective helpers (shared across experiments)
+# ---------------------------------------------------------------------------
+#
+# Integrations historically encoded a failure as a flat penalty (e.g. -2.0),
+# which collapses every failed trial to an identical scalar.  A surrogate
+# trained on those objectives cannot learn *how far* a trial was from the
+# feasibility boundary, so optimization keeps re-sampling near known-success
+# regions instead of steering away from failure zones (observed in the
+# drug-solubilization campaign: 61% of trials had zero gradient; the GLV
+# bottleneck dominated failures but got no dedicated signal).
+#
+# The helpers below turn a per-target *margin* (signed distance to threshold)
+# into a continuous penalty, and produce a higher-is-better success objective
+# for minimize-style problems.  Integrations attach per-target values to
+# ``Observation.objectives`` and call :func:`continuous_failure_penalty`.
+
+
+def _isfinite(value: float) -> bool:
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def worst_margin(
+    values: dict[str, Any],
+    thresholds: dict[str, float],
+    *,
+    keys: tuple[str, ...] | None = None,
+    higher_is_better: bool = True,
+) -> float | None:
+    """Return the worst (most negative) margin over the requested keys.
+
+    ``margin`` is ``threshold - value`` when ``higher_is_better`` (the common
+    case: a value must stay below a threshold, e.g. absorbance).  ``>= 0``
+    means feasible; ``< 0`` means failed, more negative = further from
+    feasibility.  Returns ``None`` when no requested key is present.
+    """
+    margins: list[float] = []
+    for key in keys or tuple(thresholds):
+        if key not in values:
+            continue
+        val = float(values[key])
+        if not _isfinite(val):
+            continue
+        th = float(thresholds.get(key, 0.0))
+        margins.append((th - val) if higher_is_better else (val - th))
+    return min(margins) if margins else None
+
+
+def continuous_failure_penalty(
+    margin: float | None,
+    *,
+    floor: float = -2.0,
+    ceiling: float = -1.0,
+    width: float = 1.0,
+) -> float:
+    """Map a worst margin to a continuous failure penalty (higher = better).
+
+    - ``margin >= 0``  -> ``0.0`` (feasible; success objective is the
+      caller's job).
+    - ``margin`` in ``[-width, 0)`` -> linear from ``ceiling`` (just below
+      threshold) up to ``floor`` (at the window edge): the learning gradient.
+    - ``margin < -width`` -> ``floor``.
+
+    Defaults keep the drug campaign's old ``-2.0`` floor while adding a
+    ``-2.0 -> -1.0`` ramp over the first unit of failure distance.
+    """
+    if margin is None or not _isfinite(margin):
+        return floor
+    if margin >= 0.0:
+        return 0.0
+    if margin <= -width:
+        return floor
+    t = (margin + width) / width  # 0 at -width .. 1 at 0
+    return floor + (ceiling - floor) * t
+
+
+def success_objective(total: float, max_total: float) -> float:
+    """Minimize-style success objective expressed as higher-is-better."""
+    return -total / max_total if max_total > 0 else -1.0
+
+
 
 def _dim_distance(dim: SearchDimension, a: Any, b: Any) -> float:
     """Normalized per-dimension distance in [0, 1+]."""

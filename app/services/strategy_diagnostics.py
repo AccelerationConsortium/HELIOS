@@ -114,6 +114,26 @@ def compute_diagnostics(
     # 11. Batch param spread
     batch_param_spread = _compute_batch_spread(snapshot)
 
+    # === Failure-margin signals (E4) ===
+    # Summarize the recent failure margin distribution so the selector can
+    # tell whether failures are *close* to feasibility (margin near 0) or
+    # far away.  Close-miss failures mean the current search direction is
+    # nearly right and exploration should be intensified nearby; far failures
+    # mean the region is hard and exploration should widen.  The objective
+    # values already encode margin distance (see continuous_failure_penalty:
+    # a failure at margin -0.01 scores ~-1.01, at margin -1.0 scores -2.0),
+    # so the *failed* objective values are used directly as the proxy.
+    failure_margin_mean = None
+    failure_margin_min = None
+    if snapshot.all_kpis:
+        failed_kpis = [
+            float(kpi) for kpi in snapshot.all_kpis
+            if kpi is not None and float(kpi) < 0.0
+        ]
+        if failed_kpis:
+            failure_margin_mean = float(sum(failed_kpis) / len(failed_kpis))
+            failure_margin_min = float(min(failed_kpis))
+
     # === Drift detection (v4) ===
     drift_score = _compute_drift_score(snapshot, config)
 
@@ -132,6 +152,8 @@ def compute_diagnostics(
         batch_param_spread=batch_param_spread,
         calibration_factor=calibration_factor,
         drift_score=drift_score,
+        failure_margin_mean=failure_margin_mean,
+        failure_margin_min=failure_margin_min,
     )
 
 

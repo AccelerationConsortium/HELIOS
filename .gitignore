@@ -38,6 +38,7 @@ docs/*
 !docs/development_progress.md
 !docs/agent_architecture.md
 !docs/scientific_decision_ledger.md
+!docs/scientific_evidence_loop.md
 !docs/plans/
 docs/plans/*
 !docs/plans/2026-07-06-helios-experiment-planner-and-hybrid-switching-plan.md
@@ -103,3 +104,4 @@ ot2-nlp-agent/lab_automation/plugins/potentiostat/adapters/squidstat.py
 
 # git worktrees (isolated workspaces)
 .worktrees/
+.gstack/
