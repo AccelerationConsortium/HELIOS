@@ -259,7 +259,9 @@ def test_latest_runtime_calibration_overrides_stale_initial_belief():
 
 
 def test_runtime_signal_contract_is_allowlisted_and_bounded():
-    from app.agents.orchestrator import _extract_closed_loop_runtime_signals
+    from app.services.closed_loop_runtime import (
+        extract_closed_loop_runtime_signals as _extract_closed_loop_runtime_signals,
+    )
 
     payload = _extract_closed_loop_runtime_signals(
         {
@@ -284,7 +286,9 @@ def test_runtime_signal_contract_is_allowlisted_and_bounded():
 
 
 def test_only_explicit_human_rejections_are_recorded_as_overrides():
-    from app.agents.orchestrator import _human_override_from_steps
+    from app.services.closed_loop_runtime import (
+        human_override_from_steps as _human_override_from_steps,
+    )
 
     assert _human_override_from_steps([{"status": "rejected", "reason": "safety envelope violation"}]) == (None, None)
     assert _human_override_from_steps(
@@ -299,7 +303,9 @@ def test_only_explicit_human_rejections_are_recorded_as_overrides():
 
 
 def test_current_proxy_gap_delta_uses_new_runtime_observations():
-    from app.agents.orchestrator import _current_proxy_gap_delta
+    from app.services.closed_loop_runtime import (
+        current_proxy_gap_delta as _current_proxy_gap_delta,
+    )
 
     delta = _current_proxy_gap_delta(
         {

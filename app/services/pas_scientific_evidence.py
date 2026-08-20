@@ -366,6 +366,22 @@ class PasScientificEvidenceAdapter:
                 },
             )
 
+        if bundle is None:
+            assessment = unavailable_evidence_assessment(
+                policy_mode=policy_mode,
+                reason="PAS response did not contain a scientific evidence bundle.",
+                status=ScientificEvidenceStatus.INVALID,
+                error_type=PasScientificEvidenceErrorType.INVALID_RESPONSE,
+            )
+            return PasScientificEvidenceAdvice(
+                bundle=None,
+                assessment=assessment,
+                audit_metadata={
+                    "error_type": PasScientificEvidenceErrorType.INVALID_RESPONSE,
+                    "error_message": "PAS response bundle is missing.",
+                },
+            )
+
         assessment = assess_scientific_evidence(
             bundle,
             policy_mode=policy_mode,

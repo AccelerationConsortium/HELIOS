@@ -14,7 +14,9 @@ from __future__ import annotations
 
 # Importing the bridges registers their backends in the shared
 # optimization-backend registry (no-op effects beyond registration).
-from app.optimization import bomcp_backend  # noqa: F401
-from app.optimization import nexus_backend  # noqa: F401
+from app.optimization import (
+    bomcp_backend,  # noqa: F401
+    nexus_backend,  # noqa: F401
+)
 
 __all__ = ["bomcp_backend", "nexus_backend"]

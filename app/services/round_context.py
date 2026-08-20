@@ -10,6 +10,10 @@ from copy import deepcopy
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
+from app.contracts.scientific_evidence import (
+    ScientificEvidenceAssessment,
+    ScientificEvidenceBundle,
+)
 from app.services.decision_models import CampaignRoundContext
 
 __all__ = ["CampaignRoundContextBuilder", "build_campaign_round_context"]
@@ -36,6 +40,10 @@ class CampaignRoundContextBuilder:
         validation_summary: dict[str, Any] | None = None,
         human_observations: list[str] | None = None,
         literature_summary: dict[str, Any] | None = None,
+        scientific_evidence: ScientificEvidenceBundle | None = None,
+        scientific_evidence_assessment: ScientificEvidenceAssessment | None = None,
+        drift_summary: dict[str, Any] | None = None,
+        decision_memory: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> CampaignRoundContext:
         return CampaignRoundContext(
@@ -53,6 +61,10 @@ class CampaignRoundContextBuilder:
             validation_summary=_dict_or_empty(validation_summary),
             human_observations=_list_or_empty(human_observations),
             literature_summary=_dict_or_empty(literature_summary),
+            scientific_evidence=scientific_evidence,
+            scientific_evidence_assessment=scientific_evidence_assessment,
+            drift_summary=_dict_or_empty(drift_summary),
+            decision_memory=_dict_or_empty(decision_memory),
             strategy_selection_result=_dict_or_empty(strategy_selection_result),
             metadata=_dict_or_empty(metadata),
         )

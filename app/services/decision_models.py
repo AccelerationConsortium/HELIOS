@@ -12,6 +12,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.contracts.scientific_evidence import (
+    ScientificEvidenceAssessment,
+    ScientificEvidenceBundle,
+)
+
 
 class CampaignDecisionAction(StrEnum):
     """Top-level campaign action proposed by the decision layer."""
@@ -107,5 +112,9 @@ class CampaignRoundContext(BaseModel):
     validation_summary: dict[str, Any] = Field(default_factory=dict)
     human_observations: list[str] = Field(default_factory=list)
     literature_summary: dict[str, Any] = Field(default_factory=dict)
+    scientific_evidence: ScientificEvidenceBundle | None = None
+    scientific_evidence_assessment: ScientificEvidenceAssessment | None = None
+    drift_summary: dict[str, Any] = Field(default_factory=dict)
+    decision_memory: dict[str, Any] = Field(default_factory=dict)
     strategy_selection_result: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)

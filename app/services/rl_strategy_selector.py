@@ -33,7 +33,7 @@ from typing import Any
 import numpy as np
 
 from app.services.decision_models import CampaignDecisionAction
-from app.services.strategy_models import FailureType, ObjectiveLevel
+from app.services.strategy_models import FailureType
 from app.services.strategy_selector import (
     CampaignSnapshot,
     DiagnosticSignals,

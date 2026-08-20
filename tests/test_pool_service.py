@@ -58,18 +58,27 @@ def test_service_composes_multiple_sources_into_pool():
 
 
 def test_service_applies_failure_zone_penalty():
-    # Failed experiments cluster near (0.8, 0.8); a candidate there is dropped.
+    # Soft re-ranking keeps the two least failure-prone candidates.
     req = OptimizationRequest(
         campaign_id="c", space=_space(), n=2,
         context={"failed_params": [{"x0": 0.8, "x1": 0.8}, {"x0": 0.81, "x1": 0.79}]},
     )
     service = CandidatePoolService(sources=[
-        _FakeSource("nexus", [{"x0": 0.1, "x1": 0.1}, {"x0": 0.8, "x1": 0.8}]),
+        _FakeSource(
+            "nexus",
+            [
+                {"x0": 0.1, "x1": 0.1},
+                {"x0": 0.4, "x1": 0.4},
+                {"x0": 0.8, "x1": 0.8},
+            ],
+        ),
     ])
     pool = service.build_pool(req, _decision())
     kept = [c.params for c in pool.candidates]
     assert {"x0": 0.1, "x1": 0.1} in kept
-    assert {"x0": 0.8, "x1": 0.8} not in kept  # in the learned failure zone
+    assert {"x0": 0.4, "x1": 0.4} in kept
+    assert {"x0": 0.8, "x1": 0.8} not in kept
+    assert any("failure-zone re-rank" in note for note in pool.construction_trace)
 
 
 def test_service_never_returns_empty_even_if_all_failure_prone():

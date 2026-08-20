@@ -347,17 +347,26 @@ def start_candidate(
     idx: int,
     params: dict[str, Any],
     graph_hash: str | None = None,
+    applicability_context: dict[str, Any] | None = None,
 ) -> None:
-    """INSERT a new campaign_candidates row."""
+    """INSERT a candidate with the context required for safe later reuse."""
     now = utcnow_iso()
 
     def _start(conn):
         conn.execute(
             """INSERT OR REPLACE INTO campaign_candidates
                (campaign_id, round_number, candidate_index, status,
-                params_json, graph_hash, started_at)
-               VALUES (?, ?, ?, 'compiling', ?, ?, ?)""",
-            (campaign_id, round_num, idx, json_dumps(params), graph_hash, now),
+                params_json, applicability_context_json, graph_hash, started_at)
+               VALUES (?, ?, ?, 'compiling', ?, ?, ?, ?)""",
+            (
+                campaign_id,
+                round_num,
+                idx,
+                json_dumps(params),
+                json_dumps(applicability_context or {}),
+                graph_hash,
+                now,
+            ),
         )
 
     run_txn(_start)
@@ -438,7 +447,8 @@ def load_all_candidates(campaign_id: str) -> list[dict[str, Any]]:
     with connection() as conn:
         rows = conn.execute(
             """SELECT round_number, candidate_index, status, params_json,
-                      run_id, kpi_value, qc_quality, error
+                      run_id, kpi_value, qc_quality, error,
+                      applicability_context_json
                FROM campaign_candidates
                WHERE campaign_id = ?
                ORDER BY round_number, candidate_index""",
@@ -450,6 +460,9 @@ def load_all_candidates(campaign_id: str) -> list[dict[str, Any]]:
         if d is None:
             continue
         d["params"] = parse_json(d.pop("params_json"), {})
+        d["applicability_context"] = parse_json(
+            d.pop("applicability_context_json", None), {}
+        )
         out.append(d)
     return out
 
@@ -467,7 +480,8 @@ def load_failed_candidates(
     """
     query = (
         """SELECT campaign_id, round_number, candidate_index, status,
-                  params_json, run_id, kpi_value, qc_quality, error
+                  params_json, run_id, kpi_value, qc_quality, error,
+                  applicability_context_json
            FROM campaign_candidates
            WHERE status = 'failed'"""
     )
@@ -485,6 +499,9 @@ def load_failed_candidates(
         if d is None:
             continue
         d["params"] = parse_json(d.pop("params_json"), {})
+        d["applicability_context"] = parse_json(
+            d.pop("applicability_context_json", None), {}
+        )
         out.append(d)
     return out
 

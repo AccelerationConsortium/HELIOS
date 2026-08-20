@@ -406,3 +406,43 @@ def test_pas_shadow_gate_alone_records_contextual_trace(monkeypatch, request):
     assert trace.decision_plan.metadata["scientific_evidence_policy_mode"] == (
         "shadow"
     )
+
+
+def test_pas_bounded_influence_requests_validation_without_live_mutation(
+    monkeypatch,
+    request,
+):
+    from app.agents.orchestrator import (
+        _maybe_collect_pas_scientific_evidence,
+        _maybe_record_contextual_shadow_decision,
+    )
+    from app.core.config import get_settings
+
+    request.addfinalizer(get_settings.cache_clear)
+    monkeypatch.setenv("PAS_EVIDENCE_FETCH_ENABLED", "false")
+    monkeypatch.setenv("PAS_EVIDENCE_SHADOW_ENABLED", "false")
+    monkeypatch.setenv("PAS_EVIDENCE_INFLUENCE_ENABLED", "true")
+    monkeypatch.setenv("CONTEXTUAL_DECISION_SHADOW_ENABLED", "false")
+    monkeypatch.setenv("SCIENTIFIC_LEDGER_ENABLED", "false")
+    monkeypatch.setenv("CAMPAIGN_DECISION_AUTHORITY_ENABLED", "false")
+    monkeypatch.setenv("CLOSED_LOOP_DRIFT_MONITOR_ENABLED", "false")
+    get_settings.cache_clear()
+
+    bundle, assessment, _audit = _maybe_collect_pas_scientific_evidence(
+        supplied_bundle=_conflicting_bundle(),
+        query_payload={"objective": "yield"},
+    )
+    trace = _maybe_record_contextual_shadow_decision(
+        campaign_id="campaign-pas-bounded",
+        round_index=1,
+        strategy_selection_result={"backend": "bo_mcp"},
+        scientific_evidence=bundle,
+        scientific_evidence_assessment=assessment,
+    )
+
+    assert trace is not None
+    assert trace.decision_plan.action_type.value == "run_validation"
+    assert trace.decision_plan.shadow_only is True
+    assert trace.decision_plan.metadata["scientific_evidence_policy_mode"] == (
+        "bounded"
+    )

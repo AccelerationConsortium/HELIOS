@@ -210,6 +210,8 @@ class CampaignContext:
     budget_context: BudgetContext | None = None
     human_preferences: dict[str, Any] = field(default_factory=dict)
     human_observations: tuple[str, ...] = ()
+    closed_loop_observations: tuple[dict[str, Any], ...] = ()
+    proxy_gap_assessment: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
         """Compact JSON-safe summary for traces and event payloads."""

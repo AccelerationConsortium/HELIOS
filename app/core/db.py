@@ -845,6 +845,12 @@ def init_db() -> None:
             "objective_transitions_json",
             "TEXT NOT NULL DEFAULT '[]'",
         )
+        _ensure_column(
+            conn,
+            "campaign_candidates",
+            "applicability_context_json",
+            "TEXT NOT NULL DEFAULT '{}'",
+        )
         conn.commit()
 
 

@@ -48,6 +48,10 @@ class DecisionEvidence:
                     "error": s.error,
                     "round_number": s.round_number,
                     "candidate_index": s.candidate_index,
+                    "applicability_context": s.applicability_context,
+                    "applicability_status": s.applicability_status,
+                    "applicability_mismatches": list(s.applicability_mismatches),
+                    "safe_to_reuse": s.safe_to_reuse,
                 }
                 for s in self.similar_candidates
             ],
@@ -73,10 +77,17 @@ def build_decision_evidence(
     k_similar: int = 3,
     k_failures: int = 3,
     include_current_failures: bool = False,
+    current_context: dict[str, Any] | None = None,
 ) -> DecisionEvidence:
     """Recall similar candidates + nearby failure zones for one point (fail-open)."""
     try:
-        similar = recall_similar_candidates(campaign_id, params, space, k=k_similar)
+        similar = recall_similar_candidates(
+            campaign_id,
+            params,
+            space,
+            k=k_similar,
+            current_context=current_context,
+        )
     except Exception:
         similar = []
     try:
@@ -114,6 +125,7 @@ def evidence_for_decision(
             request.space,
             k_similar=k_similar,
             k_failures=k_failures,
+            current_context=dict(getattr(request, "context", {}) or {}),
         )
         if not ev.is_empty():
             items.append(ev.to_dict())
@@ -128,6 +140,7 @@ def evidence_for_candidates(
     *,
     k_similar: int = 3,
     k_failures: int = 3,
+    current_context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Build structured evidence for a round's candidates (production wiring).
 
@@ -149,6 +162,7 @@ def evidence_for_candidates(
             space,
             k_similar=k_similar,
             k_failures=k_failures,
+            current_context=current_context,
         )
         if not ev.is_empty():
             items.append(ev.to_dict())
