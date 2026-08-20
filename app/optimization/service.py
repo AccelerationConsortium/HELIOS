@@ -136,7 +136,7 @@ def arbitrate_next(
     policy: OptimizationDecisionPolicy | None = None,
     provenance: ProvenanceLogger | None = None,
     pool_builder: CandidatePoolBuilder | None = None,
-    pool_service: "CandidatePoolService | None" = None,
+    pool_service: CandidatePoolService | None = None,
     config: ArbitrationConfig | None = None,
 ) -> OptimizationOutcome:
     """Build a multi-source candidate pool and arbitrate it under HELIOS authority."""

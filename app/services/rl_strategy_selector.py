@@ -32,6 +32,8 @@ from typing import Any
 
 import numpy as np
 
+from app.services.decision_models import CampaignDecisionAction
+from app.services.strategy_models import FailureType
 from app.services.strategy_selector import (
     CampaignSnapshot,
     DiagnosticSignals,
@@ -91,6 +93,33 @@ class RLState:
     local_smoothness: float  # 0-1; 0 if None
     batch_param_spread: float  # 0-1; 0 if None
 
+    # --- Scientific campaign context (v6 science features) ---
+    # Objective level (one-hot over ObjectiveLevel order)
+    objective_feasibility: float = 0.0
+    objective_data_quality: float = 0.0
+    objective_baseline: float = 0.0
+    objective_performance: float = 0.0
+    objective_mechanism: float = 0.0
+    objective_generalization: float = 0.0
+    # Failure-type counts (normalized, cap 1.0 at 3 events)
+    failure_hardware: float = 0.0
+    failure_protocol: float = 0.0
+    failure_constraint: float = 0.0
+    failure_measurement: float = 0.0
+    failure_model: float = 0.0
+    failure_backend: float = 0.0
+    failure_scientific_negative: float = 0.0
+    # Governance / context signals
+    qc_fail_rate: float = 0.0
+    requires_revision: float = 0.0
+    requires_route_switch: float = 0.0
+    requires_calibration: float = 0.0
+    n_hypotheses: float = 0.0
+    n_literature_priors: float = 0.0
+    warm_start_available: float = 0.0
+    budget_pressure_high: float = 0.0
+    drift_score: float = 0.0
+
     # Total: 16 features
 
     @classmethod
@@ -114,6 +143,28 @@ class RLState:
                 return default
             return max(0.0, min(1.0, x))
 
+        context = snapshot.campaign_context
+        level = "performance"
+        if context is not None:
+            level = str(
+                getattr(context.current_objective_level, "value", context.current_objective_level)
+                or "performance"
+            )
+        levels = ("feasibility", "data_quality", "baseline", "performance", "mechanism", "generalization")
+        objective_onehot = {lvl: 1.0 if level == lvl else 0.0 for lvl in levels}
+
+        failure_counts = {ft.value: 0.0 for ft in FailureType}
+        for event in snapshot.failure_events:
+            ftype = str(getattr(event.failure_type, "value", event.failure_type))
+            if ftype in failure_counts:
+                failure_counts[ftype] = min(1.0, failure_counts[ftype] + 1.0 / 3.0)
+
+        space_health = context.parameter_space_health if context is not None else None
+        route_ctx = context.route_context if context is not None else None
+        dq_ctx = context.data_quality_context if context is not None else None
+        budget_ctx = context.budget_context if context is not None else None
+        prior_ctx = context.prior_campaign_context if context is not None else None
+
         return cls(
             progress=progress,
             n_obs_ratio=n_obs_ratio,
@@ -130,6 +181,29 @@ class RLState:
             convergence_plateau=convergence_plateau,
             local_smoothness=norm(diagnostics.local_smoothness, 0.0),
             batch_param_spread=norm(diagnostics.batch_param_spread, 0.0),
+            # Scientific campaign context
+            objective_feasibility=objective_onehot["feasibility"],
+            objective_data_quality=objective_onehot["data_quality"],
+            objective_baseline=objective_onehot["baseline"],
+            objective_performance=objective_onehot["performance"],
+            objective_mechanism=objective_onehot["mechanism"],
+            objective_generalization=objective_onehot["generalization"],
+            failure_hardware=failure_counts["hardware"],
+            failure_protocol=failure_counts["protocol"],
+            failure_constraint=failure_counts["constraint"],
+            failure_measurement=failure_counts["measurement"],
+            failure_model=failure_counts["model"],
+            failure_backend=failure_counts["backend"],
+            failure_scientific_negative=failure_counts["scientific_negative"],
+            qc_fail_rate=min(1.0, snapshot.qc_fail_rate),
+            requires_revision=float(bool(space_health and space_health.requires_revision)),
+            requires_route_switch=float(bool(route_ctx and route_ctx.requires_route_switch)),
+            requires_calibration=float(bool(dq_ctx and dq_ctx.requires_calibration)),
+            n_hypotheses=min(1.0, len(context.domain_hypotheses) / 3.0) if context is not None else 0.0,
+            n_literature_priors=min(1.0, len(context.literature_priors) / 3.0) if context is not None else 0.0,
+            warm_start_available=float(bool(prior_ctx and prior_ctx.warm_start_available)),
+            budget_pressure_high=float(bool(budget_ctx and budget_ctx.pressure == "high")),
+            drift_score=norm(diagnostics.drift_score, 0.0),
         )
 
     def to_array(self) -> np.ndarray:
@@ -150,7 +224,34 @@ class RLState:
             self.convergence_plateau,
             self.local_smoothness,
             self.batch_param_spread,
+            self.objective_feasibility,
+            self.objective_data_quality,
+            self.objective_baseline,
+            self.objective_performance,
+            self.objective_mechanism,
+            self.objective_generalization,
+            self.failure_hardware,
+            self.failure_protocol,
+            self.failure_constraint,
+            self.failure_measurement,
+            self.failure_model,
+            self.failure_backend,
+            self.failure_scientific_negative,
+            self.qc_fail_rate,
+            self.requires_revision,
+            self.requires_route_switch,
+            self.requires_calibration,
+            self.n_hypotheses,
+            self.n_literature_priors,
+            self.warm_start_available,
+            self.budget_pressure_high,
+            self.drift_score,
         ], dtype=np.float32)
+
+    @classmethod
+    def n_features(cls) -> int:
+        """Number of RL state features (network input dim)."""
+        return len(cls().to_array())
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +272,80 @@ ACTION_TO_BACKEND = {
     "refine": "optuna_cmaes",
     "stabilize": "built_in",  # will trigger StabilizeSpec
 }
+
+
+# ---------------------------------------------------------------------------
+# Science Action Space (v6) — campaign-level actions above backend selection
+# ---------------------------------------------------------------------------
+
+# Ordered list of campaign decision actions (mirrors CampaignDecisionAction).
+SCIENCE_ACTIONS = [
+    CampaignDecisionAction.PROPOSE_CANDIDATES.value,
+    CampaignDecisionAction.REVISE_OBJECTIVE.value,
+    CampaignDecisionAction.RUN_VALIDATION.value,
+    CampaignDecisionAction.RECOVER_FAILURE.value,
+    CampaignDecisionAction.REQUEST_HUMAN_OBSERVATION.value,
+    CampaignDecisionAction.TIGHTEN_CONSTRAINTS.value,
+    CampaignDecisionAction.QUERY_LITERATURE.value,
+    CampaignDecisionAction.STOP_CAMPAIGN.value,
+]
+
+
+def suggest_science_action(
+    snapshot: CampaignSnapshot,
+    diagnostics: DiagnosticSignals,
+) -> str:
+    """Ground-truth science action for a campaign state (reward shaping).
+
+    Mirrors the rule-based decision layer priorities: blocking failures first,
+    then safety/validation, then objective/proxy and plateau-context moves,
+    defaulting to candidate proposal.
+    """
+    context = snapshot.campaign_context
+    fail_types = {
+        str(getattr(event.failure_type, "value", event.failure_type))
+        for event in snapshot.failure_events
+    }
+    if fail_types & {"hardware", "backend"}:
+        return CampaignDecisionAction.RECOVER_FAILURE.value
+    if "constraint" in fail_types:
+        return CampaignDecisionAction.TIGHTEN_CONSTRAINTS.value
+    if fail_types & {"measurement", "scientific_negative"}:
+        return CampaignDecisionAction.RUN_VALIDATION.value
+
+    level = "performance"
+    if context is not None:
+        level = str(
+            getattr(context.current_objective_level, "value", context.current_objective_level)
+            or "performance"
+        )
+    dq_ctx = context.data_quality_context if context is not None else None
+    if dq_ctx is not None and dq_ctx.requires_calibration:
+        return CampaignDecisionAction.RUN_VALIDATION.value
+    space_health = context.parameter_space_health if context is not None else None
+    if space_health is not None and space_health.requires_revision:
+        return CampaignDecisionAction.REVISE_OBJECTIVE.value
+    if level in {"feasibility", "data_quality"}:
+        return CampaignDecisionAction.REVISE_OBJECTIVE.value
+    route_ctx = context.route_context if context is not None else None
+    if route_ctx is not None and route_ctx.requires_route_switch:
+        return CampaignDecisionAction.QUERY_LITERATURE.value
+    if level == "mechanism" and context is not None and context.domain_hypotheses:
+        return CampaignDecisionAction.RUN_VALIDATION.value
+    if (
+        diagnostics.convergence_status == "plateau"
+        and context is not None
+        and not context.literature_priors
+    ):
+        return CampaignDecisionAction.QUERY_LITERATURE.value
+    progress = snapshot.round_number / max(snapshot.max_rounds, 1)
+    if (
+        diagnostics.convergence_status == "plateau"
+        and diagnostics.convergence_confidence > 0.75
+        and progress > 0.8
+    ):
+        return CampaignDecisionAction.STOP_CAMPAIGN.value
+    return CampaignDecisionAction.PROPOSE_CANDIDATES.value
 
 
 # ---------------------------------------------------------------------------

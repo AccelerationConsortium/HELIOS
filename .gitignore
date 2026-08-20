@@ -104,3 +104,4 @@ ot2-nlp-agent/lab_automation/plugins/potentiostat/adapters/squidstat.py
 
 # git worktrees (isolated workspaces)
 .worktrees/
+.gstack/

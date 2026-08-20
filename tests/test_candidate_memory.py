@@ -110,3 +110,68 @@ def test_recall_surfaces_failure_reason_for_avoidance(db_env):
     assert hits[0].params == {"x": 9.0}
     assert hits[0].status == "failed"
     assert hits[0].error == "gel_formation"
+
+
+def test_recall_blocks_success_reuse_without_matching_applicability(db_env):
+    from app.optimization.candidate_memory import recall_similar_candidates
+    from app.services.campaign_state import (
+        complete_candidate,
+        create_campaign,
+        start_candidate,
+        start_round,
+    )
+
+    create_campaign("camp-context", {"objective": "test"}, direction="maximize")
+    start_round("camp-context", 1, "explore", 1)
+    start_candidate(
+        "camp-context",
+        1,
+        0,
+        {"x": 1.0},
+        applicability_context={
+            "objective_kpi": "yield",
+            "direction": "maximize",
+            "calibration_id": "cal-1",
+        },
+    )
+    complete_candidate("camp-context", 1, 0, kpi=5.0, status="completed")
+
+    compatible = recall_similar_candidates(
+        "camp-context",
+        {"x": 1.1},
+        _space(),
+        current_context={
+            "objective_kpi": "yield",
+            "direction": "maximize",
+            "calibration_id": "cal-1",
+        },
+    )[0]
+    mismatch = recall_similar_candidates(
+        "camp-context",
+        {"x": 1.1},
+        _space(),
+        current_context={
+            "objective_kpi": "yield",
+            "direction": "maximize",
+            "calibration_id": "cal-2",
+        },
+    )[0]
+
+    assert compatible.applicability_status == "compatible"
+    assert compatible.safe_to_reuse is True
+    assert mismatch.applicability_status == "mismatch"
+    assert mismatch.applicability_mismatches == ("calibration_id",)
+    assert mismatch.safe_to_reuse is False
+
+    incomplete = recall_similar_candidates(
+        "camp-context",
+        {"x": 1.1},
+        _space(),
+        current_context={
+            "objective_kpi": "yield",
+            "direction": "maximize",
+        },
+    )[0]
+    assert incomplete.applicability_status == "unknown_incomplete_context"
+    assert incomplete.applicability_mismatches == ("calibration_id",)
+    assert incomplete.safe_to_reuse is False

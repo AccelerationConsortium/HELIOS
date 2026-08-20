@@ -31,8 +31,12 @@ from app.optimization.arbitration_config import ArbitrationConfig
 from app.optimization.decision_policy import _bounds_violation, _signature
 from app.optimization.schemas import (
     CandidatePool as ArbitrationCandidatePool,
+)
+from app.optimization.schemas import (
     CandidateSuggestion,
     OptimizationRequest,
+)
+from app.optimization.schemas import (
     PooledCandidate as ArbitrationPooledCandidate,
 )
 from app.services.candidate_gen import sample_lhs

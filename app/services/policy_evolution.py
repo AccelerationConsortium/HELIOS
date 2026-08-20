@@ -7,7 +7,7 @@ backends, promote policies, or change live execution behavior.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, is_dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -3744,8 +3744,8 @@ class PolicyAutoTrainer:
             LearnedMetaPolicy,
             OfflineMetaPolicyTrainer,
             OfflinePolicyEvaluator,
-            PolicyDatasetBuilder,
             PolicyDatasetAuditor,
+            PolicyDatasetBuilder,
             RewardSanityChecker,
         )
 
@@ -3903,11 +3903,11 @@ class PolicyAutoTrainer:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _compact_timestamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    return datetime.now(UTC).strftime("%Y%m%d%H%M%S")
 
 
 def _latest(entries: Any) -> PolicyVersionRegistryEntry | None:
@@ -4036,8 +4036,8 @@ def _is_past_iso(value: str | None) -> bool:
     except ValueError:
         return False
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed < datetime.now(timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed < datetime.now(UTC)
 
 
 def _confidence_calibration_score(summary: dict[str, Any]) -> float:

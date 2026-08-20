@@ -125,6 +125,34 @@ class Settings:
         # Nexus supplies advisory evidence for cross-route characterization.
         # Calling the endpoint and applying a route are intentionally separate
         # gates so operators can run a shadow campaign before promoting it.
+
+        # ---- Optional Paper Attribution System evidence settings ----
+        # Fetch, shadow use, and bounded policy influence are deliberately
+        # separate. All are default-off; PAS remains an advisory evidence source.
+        self.pas_evidence_fetch_enabled: bool = os.getenv(
+            "PAS_EVIDENCE_FETCH_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+        self.pas_evidence_shadow_enabled: bool = os.getenv(
+            "PAS_EVIDENCE_SHADOW_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+        self.pas_evidence_influence_enabled: bool = os.getenv(
+            "PAS_EVIDENCE_INFLUENCE_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+        self.pas_evidence_url: str = os.getenv(
+            "PAS_EVIDENCE_URL", "http://localhost:8001/api/v1"
+        ).rstrip("/")
+        self.pas_evidence_api_key: str = os.getenv("PAS_EVIDENCE_API_KEY", "")
+        self.pas_evidence_timeout_seconds: float = float(
+            os.getenv("PAS_EVIDENCE_TIMEOUT_SECONDS", "10")
+        )
+        self.pas_evidence_max_bundle_bytes: int = int(
+            os.getenv("PAS_EVIDENCE_MAX_BUNDLE_BYTES", "262144")
+        )
+        if self.pas_evidence_timeout_seconds <= 0:
+            raise ValueError("PAS_EVIDENCE_TIMEOUT_SECONDS must be positive")
+        if self.pas_evidence_max_bundle_bytes < 1024:
+            raise ValueError("PAS_EVIDENCE_MAX_BUNDLE_BYTES must be at least 1024")
+
         self.nexus_experimental_routes_enabled: bool = os.getenv(
             "NEXUS_EXPERIMENTAL_ROUTES_ENABLED", "false"
         ).lower() in ("true", "1", "yes")
@@ -146,6 +174,14 @@ class Settings:
         # generation and records the action as auditable state.
         self.campaign_decision_authority_enabled: bool = os.getenv(
             "CAMPAIGN_DECISION_AUTHORITY_ENABLED", "false"
+        ).lower() in ("true", "1", "yes")
+
+
+        # Reporting and next-round context enrichment are enabled by default.
+        # The monitor cannot mutate live routes on its own; any defer/stop still
+        # requires the separate campaign-decision authority gate above.
+        self.closed_loop_drift_monitor_enabled: bool = os.getenv(
+            "CLOSED_LOOP_DRIFT_MONITOR_ENABLED", "true"
         ).lower() in ("true", "1", "yes")
 
         # ---- Adaptive campaign substrate (Phase 1-5) shadow logging ----

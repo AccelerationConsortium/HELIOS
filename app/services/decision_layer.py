@@ -10,6 +10,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from app.contracts.scientific_evidence import (
+    ScientificEvidencePolicyMode,
+    ScientificEvidenceRecommendedAction,
+)
 from app.services.decision_models import (
     CampaignContextRequest,
     CampaignDecisionAction,
@@ -59,6 +63,96 @@ class CampaignDecisionLayer:
                 shadow_only=True,
                 evidence=[_summary_evidence("safety_summary", "constraint_risk", context.safety_summary)],
             )
+
+        if _drift_requires_context_review(context.drift_summary):
+            return CampaignDecisionPlan(
+                action_type=CampaignDecisionAction.REQUEST_HUMAN_OBSERVATION,
+                route_target="decision_context_review",
+                context_requests=[
+                    CampaignContextRequest(
+                        request_type="decision_context_completion",
+                        reason=(
+                            "Closed-loop drift monitoring found missing decision, "
+                            "override, or failure context from prior rounds."
+                        ),
+                        priority="high",
+                        target="decision_memory",
+                        payload={
+                            "drift_report_id": context.drift_summary.get(
+                                "report_id"
+                            ),
+                            "omissions": list(
+                                context.decision_memory.get("omissions", [])
+                            )[:8],
+                        },
+                    )
+                ],
+                rationale=(
+                    "Missing prior-round context can amplify closed-loop error; "
+                    "complete the context before generating more candidates."
+                ),
+                confidence=_drift_confidence(context.drift_summary),
+                shadow_only=True,
+                evidence=[
+                    _summary_evidence(
+                        "closed_loop_drift",
+                        "context_drift",
+                        context.drift_summary,
+                    )
+                ],
+            )
+
+        if _drift_requires_objective_review(context.drift_summary):
+            return CampaignDecisionPlan(
+                action_type=CampaignDecisionAction.REVISE_OBJECTIVE,
+                route_target="objective_revision",
+                objective_patch=ObjectivePatch(
+                    reason=(
+                        "Closed-loop monitoring found an expanding gap between "
+                        "the proxy and the scientific objective."
+                    ),
+                    proposed_changes={
+                        "drift_report": _json_safe(context.drift_summary),
+                        "auto_applied": False,
+                    },
+                    shadow_only=True,
+                ),
+                rationale=(
+                    "Target drift requires objective review before further proxy optimization."
+                ),
+                confidence=_drift_confidence(context.drift_summary),
+                shadow_only=True,
+                evidence=[
+                    _summary_evidence(
+                        "closed_loop_drift",
+                        "target_drift",
+                        context.drift_summary,
+                    )
+                ],
+            )
+
+        if _drift_requires_validation(context.drift_summary):
+            return CampaignDecisionPlan(
+                action_type=CampaignDecisionAction.RUN_VALIDATION,
+                route_target="closed_loop_drift_validation",
+                rationale=(
+                    "Closed-loop drift signals require validation before more candidate generation."
+                ),
+                confidence=_drift_confidence(context.drift_summary),
+                shadow_only=True,
+                evidence=[
+                    _summary_evidence(
+                        "closed_loop_drift",
+                        "validation_required",
+                        context.drift_summary,
+                    )
+                ],
+                metadata={"drift_report_id": context.drift_summary.get("report_id")},
+            )
+
+        scientific_evidence_plan = _scientific_evidence_plan(context)
+        if scientific_evidence_plan is not None:
+            return scientific_evidence_plan
 
         if _is_validation_due(context.validation_summary):
             return CampaignDecisionPlan(
@@ -220,7 +314,7 @@ class CampaignDecisionLayer:
         plan = self._wrap_strategy_result(context.strategy_selection_result)
         if _needs_backend_memory_context(context):
             _add_backend_memory_context_request(plan, context)
-        return plan
+        return _attach_scientific_evidence(plan, context)
 
     def _wrap_strategy_result(self, result: dict[str, Any]) -> CampaignDecisionPlan:
         evidence = _strategy_evidence(result.get("evidence"))
@@ -312,6 +406,140 @@ def _is_validation_due(summary: dict[str, Any]) -> bool:
         or summary.get("due") is True
         or summary.get("status") == "due"
     )
+
+
+def _drift_requires_validation(summary: dict[str, Any]) -> bool:
+    return summary.get("requires_validation") is True
+
+
+def _drift_requires_objective_review(summary: dict[str, Any]) -> bool:
+    return summary.get("requires_objective_review") is True
+
+
+def _drift_requires_context_review(summary: dict[str, Any]) -> bool:
+    return summary.get("requires_context_review") is True
+
+
+def _drift_confidence(summary: dict[str, Any]) -> float:
+    scores = [
+        _as_float(signal.get("score"))
+        for signal in summary.get("signals", [])
+        if isinstance(signal, dict) and signal.get("score") is not None
+    ]
+    finite_scores = [score for score in scores if score is not None]
+    if finite_scores:
+        return min(0.95, max(0.5, sum(finite_scores) / len(finite_scores)))
+    status = summary.get("overall_status")
+    if status == "drift":
+        return 0.85
+    if status == "watch":
+        return 0.6
+    return 0.5
+
+
+def _scientific_evidence_plan(
+    context: CampaignRoundContext,
+) -> CampaignDecisionPlan | None:
+    assessment = context.scientific_evidence_assessment
+    if (
+        assessment is None
+        or assessment.policy_mode != ScientificEvidencePolicyMode.BOUNDED
+    ):
+        return None
+
+    action = assessment.recommended_action
+    if action == ScientificEvidenceRecommendedAction.NONE:
+        return None
+    payload = assessment.model_dump(mode="json")
+    evidence = CampaignDecisionEvidence(
+        source="pas_scientific_evidence",
+        kind="scientific_evidence_assessment",
+        summary=(
+            f"PAS evidence assessment recommended {action.value}; "
+            "HELIOS retained execution authority."
+        ),
+        payload=payload,
+    )
+    metadata = {
+        "scientific_evidence_policy_mode": assessment.policy_mode.value,
+        "scientific_evidence_bundle_id": assessment.bundle_id,
+    }
+    if action == ScientificEvidenceRecommendedAction.RUN_VALIDATION:
+        return CampaignDecisionPlan(
+            action_type=CampaignDecisionAction.RUN_VALIDATION,
+            route_target="scientific_evidence_validation",
+            rationale="Bounded scientific evidence requires validation review.",
+            confidence=max(assessment.support_strength, assessment.contradiction_strength),
+            shadow_only=True,
+            evidence=[evidence],
+            metadata=metadata,
+        )
+    if action == ScientificEvidenceRecommendedAction.QUERY_LITERATURE:
+        return CampaignDecisionPlan(
+            action_type=CampaignDecisionAction.QUERY_LITERATURE,
+            route_target="literature",
+            context_requests=[
+                CampaignContextRequest(
+                    request_type="scientific_evidence_refresh",
+                    reason="PAS evidence is stale or insufficient.",
+                    priority="high",
+                    target="scientific_evidence",
+                    payload={"bundle_id": assessment.bundle_id},
+                )
+            ],
+            rationale="Bounded scientific evidence requires a literature refresh.",
+            confidence=max(0.5, assessment.support_strength),
+            shadow_only=True,
+            evidence=[evidence],
+            metadata=metadata,
+        )
+    if action == ScientificEvidenceRecommendedAction.REQUEST_HUMAN_OBSERVATION:
+        return CampaignDecisionPlan(
+            action_type=CampaignDecisionAction.REQUEST_HUMAN_OBSERVATION,
+            route_target="scientific_evidence_review",
+            context_requests=[
+                CampaignContextRequest(
+                    request_type="scientific_evidence_applicability",
+                    reason="PAS evidence applicability requires operator review.",
+                    priority="high",
+                    target="scientific_evidence",
+                    payload={"bundle_id": assessment.bundle_id},
+                )
+            ],
+            rationale="Bounded scientific evidence requires human applicability review.",
+            confidence=max(0.5, assessment.applicability_score),
+            shadow_only=True,
+            evidence=[evidence],
+            metadata=metadata,
+        )
+    return None
+
+
+def _attach_scientific_evidence(
+    plan: CampaignDecisionPlan,
+    context: CampaignRoundContext,
+) -> CampaignDecisionPlan:
+    assessment = context.scientific_evidence_assessment
+    if assessment is None or assessment.policy_mode == ScientificEvidencePolicyMode.OFF:
+        return plan
+    plan.metadata.update(
+        {
+            "scientific_evidence_policy_mode": assessment.policy_mode.value,
+            "scientific_evidence_bundle_id": assessment.bundle_id,
+        }
+    )
+    plan.evidence.append(
+        CampaignDecisionEvidence(
+            source="pas_scientific_evidence",
+            kind="scientific_evidence_assessment",
+            summary=(
+                f"PAS evidence was recorded in {assessment.policy_mode.value} mode "
+                "without changing live execution authority."
+            ),
+            payload=assessment.model_dump(mode="json"),
+        )
+    )
+    return plan
 
 
 def _is_high_objective_proxy_gap(
